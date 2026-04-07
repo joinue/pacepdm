@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 
 export async function GET() {
   const checks: Record<string, string> = {};
 
-  // Check env vars
-  checks.DATABASE_URL = process.env.DATABASE_URL ? "set" : "MISSING";
   checks.SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "MISSING";
+  checks.SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "set" : "MISSING";
+  checks.SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING";
 
-  // Test database connection
   try {
-    await prisma.$queryRaw`SELECT 1 as ok`;
-    checks.database = "connected";
+    const db = getServiceClient();
+    const { data, error } = await db.from("tenants").select("id").limit(1);
+    if (error) throw error;
+    checks.database = `connected (${data.length} tenants found)`;
   } catch (error) {
     checks.database = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  const healthy = checks.database === "connected";
+  const healthy = checks.database.startsWith("connected");
 
   return NextResponse.json(
     { status: healthy ? "ok" : "error", checks },

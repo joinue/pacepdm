@@ -1,28 +1,28 @@
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser } from "@/lib/auth";
 import { VaultBrowser } from "@/components/vault/vault-browser";
 
 export default async function VaultPage() {
   const tenantUser = await getCurrentTenantUser();
+  const db = getServiceClient();
 
-  // Get root folder
-  const rootFolder = await prisma.folder.findFirst({
-    where: {
-      tenantId: tenantUser.tenantId,
-      parentId: null,
-    },
-  });
+  const { data: rootFolder } = await db
+    .from("folders")
+    .select("id")
+    .eq("tenantId", tenantUser.tenantId)
+    .is("parentId", null)
+    .single();
 
-  // Get metadata fields for this tenant
-  const metadataFields = await prisma.metadataField.findMany({
-    where: { tenantId: tenantUser.tenantId },
-    orderBy: { sortOrder: "asc" },
-  });
+  const { data: metadataFields } = await db
+    .from("metadata_fields")
+    .select("id, name, fieldType, options, isRequired")
+    .eq("tenantId", tenantUser.tenantId)
+    .order("sortOrder");
 
   return (
     <VaultBrowser
       rootFolderId={rootFolder?.id ?? ""}
-      metadataFields={metadataFields.map((f) => ({
+      metadataFields={(metadataFields || []).map((f) => ({
         id: f.id,
         name: f.name,
         fieldType: f.fieldType,

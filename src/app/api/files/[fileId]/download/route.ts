@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser } from "@/lib/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { logAudit } from "@/lib/audit";
@@ -13,38 +13,31 @@ export async function GET(
     const { fileId } = await params;
     const { searchParams } = new URL(request.url);
     const versionNum = searchParams.get("version");
+    const db = getServiceClient();
 
-    const file = await prisma.file.findUnique({ where: { id: fileId } });
-
+    const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    const version = await prisma.fileVersion.findFirst({
-      where: {
-        fileId,
-        version: versionNum ? parseInt(versionNum) : file.currentVersion,
-      },
-    });
+    const { data: version } = await db
+      .from("file_versions")
+      .select("*")
+      .eq("fileId", fileId)
+      .eq("version", versionNum ? parseInt(versionNum) : file.currentVersion)
+      .single();
 
     if (!version) {
-      return NextResponse.json(
-        { error: "Version not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Version not found" }, { status: 404 });
     }
 
     const supabase = await createServerSupabaseClient();
-
     const { data, error } = await supabase.storage
       .from("vault")
-      .createSignedUrl(version.storageKey, 60); // 60 second URL
+      .createSignedUrl(version.storageKey, 60);
 
     if (error || !data) {
-      return NextResponse.json(
-        { error: "Failed to generate download URL" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to generate download URL" }, { status: 500 });
     }
 
     await logAudit({
@@ -58,9 +51,6 @@ export async function GET(
 
     return NextResponse.json({ url: data.signedUrl });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to download file" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to download file" }, { status: 500 });
   }
 }

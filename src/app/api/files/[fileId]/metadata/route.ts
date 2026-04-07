@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { v4 as uuid } from "uuid";
 
 export async function PUT(
   request: NextRequest,
@@ -16,32 +17,40 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const file = await prisma.file.findUnique({ where: { id: fileId } });
+    const db = getServiceClient();
+
+    const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
     const { metadata, partNumber, description } = await request.json();
 
-    // Update file-level fields
-    await prisma.file.update({
-      where: { id: fileId },
-      data: {
-        partNumber: partNumber ?? file.partNumber,
-        description: description ?? file.description,
-      },
-    });
+    await db.from("files").update({
+      partNumber: partNumber ?? file.partNumber,
+      description: description ?? file.description,
+      updatedAt: new Date().toISOString(),
+    }).eq("id", fileId);
 
-    // Update metadata values
     if (metadata && Array.isArray(metadata)) {
       for (const { fieldId, value } of metadata) {
-        await prisma.metadataValue.upsert({
-          where: {
-            fileId_fieldId: { fileId, fieldId },
-          },
-          create: { fileId, fieldId, value: String(value) },
-          update: { value: String(value) },
-        });
+        const { data: existing } = await db
+          .from("metadata_values")
+          .select("id")
+          .eq("fileId", fileId)
+          .eq("fieldId", fieldId)
+          .single();
+
+        if (existing) {
+          await db.from("metadata_values").update({ value: String(value) }).eq("id", existing.id);
+        } else {
+          await db.from("metadata_values").insert({
+            id: uuid(),
+            fileId,
+            fieldId,
+            value: String(value),
+          });
+        }
       }
     }
 
@@ -56,9 +65,6 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to update metadata" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update metadata" }, { status: 500 });
   }
 }

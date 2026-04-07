@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
@@ -14,41 +14,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([]);
     }
 
-    const files = await prisma.file.findMany({
-      where: {
-        tenantId: tenantUser.tenantId,
-        AND: [
-          query
-            ? {
-                OR: [
-                  { name: { contains: query, mode: "insensitive" } },
-                  { partNumber: { contains: query, mode: "insensitive" } },
-                  { description: { contains: query, mode: "insensitive" } },
-                ],
-              }
-            : {},
-          category ? { category: category as never } : {},
-          state ? { lifecycleState: state } : {},
-        ],
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 100,
-      include: {
-        folder: { select: { path: true } },
-        checkedOutBy: { select: { fullName: true } },
-        versions: {
-          orderBy: { version: "desc" },
-          take: 1,
-          select: { fileSize: true },
-        },
-      },
-    });
+    const db = getServiceClient();
 
-    return NextResponse.json(files);
+    let dbQuery = db
+      .from("files")
+      .select(`
+        *,
+        folder:folders!files_folderId_fkey(path),
+        checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
+      `)
+      .eq("tenantId", tenantUser.tenantId)
+      .order("updatedAt", { ascending: false })
+      .limit(100);
+
+    if (query) {
+      dbQuery = dbQuery.or(`name.ilike.%${query}%,partNumber.ilike.%${query}%,description.ilike.%${query}%`);
+    }
+    if (category) {
+      dbQuery = dbQuery.eq("category", category);
+    }
+    if (state) {
+      dbQuery = dbQuery.eq("lifecycleState", state);
+    }
+
+    const { data: files } = await dbQuery;
+
+    return NextResponse.json(files || []);
   } catch {
-    return NextResponse.json(
-      { error: "Search failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Search failed" }, { status: 500 });
   }
 }

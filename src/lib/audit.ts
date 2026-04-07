@@ -1,4 +1,5 @@
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
+import { v4 as uuid } from "uuid";
 
 export async function logAudit({
   tenantId,
@@ -17,15 +18,16 @@ export async function logAudit({
   details?: Record<string, string | number | boolean | null>;
   ipAddress?: string;
 }) {
-  await prisma.auditLog.create({
-    data: {
-      tenantId,
-      userId,
-      action,
-      entityType,
-      entityId,
-      details: details ?? undefined,
-      ipAddress,
-    },
+  const db = getServiceClient();
+  await db.from("audit_logs").insert({
+    id: uuid(),
+    tenantId,
+    userId: userId ?? null,
+    action,
+    entityType,
+    entityId,
+    details: details ?? null,
+    ipAddress: ipAddress ?? null,
+    createdAt: new Date().toISOString(),
   });
 }

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { FileCategory } from "@prisma/client";
+import { v4 as uuid } from "uuid";
 
-const CATEGORY_MAP: Record<string, FileCategory> = {
+const CATEGORY_MAP: Record<string, string> = {
   sldprt: "PART",
   sldasm: "ASSEMBLY",
   slddrw: "DRAWING",
@@ -23,39 +23,37 @@ export async function GET(request: NextRequest) {
     const folderId = searchParams.get("folderId");
 
     if (!folderId) {
-      return NextResponse.json(
-        { error: "folderId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "folderId is required" }, { status: 400 });
     }
 
-    const files = await prisma.file.findMany({
-      where: {
-        tenantId: tenantUser.tenantId,
-        folderId,
-      },
-      orderBy: { name: "asc" },
-      include: {
-        checkedOutBy: { select: { fullName: true } },
-        versions: {
-          orderBy: { version: "desc" },
-          take: 1,
-          select: {
-            version: true,
-            fileSize: true,
-            createdAt: true,
-            uploadedBy: { select: { fullName: true } },
-          },
-        },
-      },
-    });
+    const db = getServiceClient();
 
-    return NextResponse.json(files);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to fetch files" },
-      { status: 500 }
+    const { data: files } = await db
+      .from("files")
+      .select(`
+        *,
+        checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
+      `)
+      .eq("tenantId", tenantUser.tenantId)
+      .eq("folderId", folderId)
+      .order("name");
+
+    // Get latest version for each file
+    const filesWithVersions = await Promise.all(
+      (files || []).map(async (file) => {
+        const { data: versions } = await db
+          .from("file_versions")
+          .select("version, fileSize, createdAt, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)")
+          .eq("fileId", file.id)
+          .order("version", { ascending: false })
+          .limit(1);
+        return { ...file, versions: versions || [] };
+      })
     );
+
+    return NextResponse.json(filesWithVersions);
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch files" }, { status: 500 });
   }
 }
 
@@ -75,81 +73,83 @@ export async function POST(request: NextRequest) {
     const partNumber = formData.get("partNumber") as string | null;
 
     if (!file || !folderId) {
-      return NextResponse.json(
-        { error: "File and folderId are required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "File and folderId are required" }, { status: 400 });
     }
 
-    // Verify folder belongs to tenant
-    const folder = await prisma.folder.findUnique({
-      where: { id: folderId },
-    });
+    const db = getServiceClient();
+
+    const { data: folder } = await db
+      .from("folders")
+      .select("id, tenantId")
+      .eq("id", folderId)
+      .single();
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json(
-        { error: "Folder not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
-    // Get file extension and category
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
     const category = CATEGORY_MAP[ext] || "OTHER";
 
-    // Get default lifecycle
-    const lifecycle = await prisma.lifecycle.findFirst({
-      where: { tenantId: tenantUser.tenantId, isDefault: true },
-    });
+    const { data: lifecycle } = await db
+      .from("lifecycles")
+      .select("id")
+      .eq("tenantId", tenantUser.tenantId)
+      .eq("isDefault", true)
+      .single();
 
     // Upload to Supabase Storage
     const storageKey = `${tenantUser.tenantId}/${folderId}/${Date.now()}-${file.name}`;
     const supabase = await createServerSupabaseClient();
-
     const arrayBuffer = await file.arrayBuffer();
     const { error: uploadError } = await supabase.storage
       .from("vault")
-      .upload(storageKey, arrayBuffer, {
-        contentType: file.type,
-        upsert: false,
-      });
+      .upload(storageKey, arrayBuffer, { contentType: file.type, upsert: false });
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
-      return NextResponse.json(
-        { error: "Failed to upload file" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
     }
 
-    // Create file + first version in a transaction
-    const result = await prisma.$transaction(async (tx) => {
-      const dbFile = await tx.file.create({
-        data: {
-          tenantId: tenantUser.tenantId,
-          folderId,
-          name: file.name,
-          partNumber,
-          description,
-          fileType: ext,
-          category,
-          currentVersion: 1,
-          lifecycleId: lifecycle?.id,
-          lifecycleState: "WIP",
-        },
-      });
+    const now = new Date().toISOString();
+    const fileId = uuid();
 
-      const version = await tx.fileVersion.create({
-        data: {
-          fileId: dbFile.id,
-          version: 1,
-          storageKey,
-          fileSize: file.size,
-          uploadedById: tenantUser.id,
-          comment: "Initial upload",
-        },
-      });
+    const { data: dbFile, error: fileError } = await db
+      .from("files")
+      .insert({
+        id: fileId,
+        tenantId: tenantUser.tenantId,
+        folderId,
+        name: file.name,
+        partNumber,
+        description,
+        fileType: ext,
+        category,
+        currentVersion: 1,
+        lifecycleId: lifecycle?.id ?? null,
+        lifecycleState: "WIP",
+        isCheckedOut: false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single();
 
-      return { file: dbFile, version };
+    if (fileError) {
+      if (fileError.code === "23505") {
+        return NextResponse.json({ error: "A file with this name already exists in this folder" }, { status: 409 });
+      }
+      throw fileError;
+    }
+
+    await db.from("file_versions").insert({
+      id: uuid(),
+      fileId,
+      version: 1,
+      storageKey,
+      fileSize: file.size,
+      uploadedById: tenantUser.id,
+      comment: "Initial upload",
+      createdAt: now,
     });
 
     await logAudit({
@@ -157,25 +157,13 @@ export async function POST(request: NextRequest) {
       userId: tenantUser.id,
       action: "file.upload",
       entityType: "file",
-      entityId: result.file.id,
+      entityId: fileId,
       details: { name: file.name, version: 1, size: file.size },
     });
 
-    return NextResponse.json(result.file);
-  } catch (error: unknown) {
+    return NextResponse.json(dbFile);
+  } catch (error) {
     console.error("File creation error:", error);
-    if (
-      error instanceof Error &&
-      error.message.includes("Unique constraint")
-    ) {
-      return NextResponse.json(
-        { error: "A file with this name already exists in this folder" },
-        { status: 409 }
-      );
-    }
-    return NextResponse.json(
-      { error: "Failed to create file" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to create file" }, { status: 500 });
   }
 }

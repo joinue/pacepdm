@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { getServiceClient } from "@/lib/db";
 import { redirect } from "next/navigation";
 
 export async function getSession() {
@@ -18,16 +18,20 @@ export async function requireAuth() {
 
 export async function getCurrentTenantUser() {
   const user = await requireAuth();
+  const db = getServiceClient();
 
-  const tenantUser = await prisma.tenantUser.findFirst({
-    where: { authUserId: user.id, isActive: true },
-    include: {
-      tenant: true,
-      role: true,
-    },
-  });
+  const { data: tenantUser, error } = await db
+    .from("tenant_users")
+    .select(`
+      *,
+      tenant:tenants(*),
+      role:roles(*)
+    `)
+    .eq("authUserId", user.id)
+    .eq("isActive", true)
+    .single();
 
-  if (!tenantUser) redirect("/onboarding");
+  if (error || !tenantUser) redirect("/onboarding");
   return tenantUser;
 }
 
@@ -40,7 +44,6 @@ export function hasPermission(
 }
 
 export const PERMISSIONS = {
-  // Files
   FILE_VIEW: "file.view",
   FILE_UPLOAD: "file.upload",
   FILE_EDIT: "file.edit",
@@ -48,18 +51,12 @@ export const PERMISSIONS = {
   FILE_CHECKOUT: "file.checkout",
   FILE_CHECKIN: "file.checkin",
   FILE_TRANSITION: "file.transition",
-
-  // Folders
   FOLDER_CREATE: "folder.create",
   FOLDER_EDIT: "folder.edit",
   FOLDER_DELETE: "folder.delete",
-
-  // ECOs
   ECO_CREATE: "eco.create",
   ECO_EDIT: "eco.edit",
   ECO_APPROVE: "eco.approve",
-
-  // Admin
   ADMIN_USERS: "admin.users",
   ADMIN_ROLES: "admin.roles",
   ADMIN_SETTINGS: "admin.settings",
@@ -94,22 +91,22 @@ export const DEFAULT_ROLES = {
 };
 
 export const DEFAULT_METADATA_FIELDS = [
-  { name: "Material", fieldType: "TEXT" as const, sortOrder: 1 },
-  { name: "Weight", fieldType: "NUMBER" as const, sortOrder: 2 },
-  { name: "Surface Finish", fieldType: "TEXT" as const, sortOrder: 3 },
-  { name: "Tolerance Class", fieldType: "TEXT" as const, sortOrder: 4 },
-  { name: "Drawing Number", fieldType: "TEXT" as const, sortOrder: 5 },
+  { name: "Material", fieldType: "TEXT", sortOrder: 1 },
+  { name: "Weight", fieldType: "NUMBER", sortOrder: 2 },
+  { name: "Surface Finish", fieldType: "TEXT", sortOrder: 3 },
+  { name: "Tolerance Class", fieldType: "TEXT", sortOrder: 4 },
+  { name: "Drawing Number", fieldType: "TEXT", sortOrder: 5 },
   {
     name: "Make/Buy",
-    fieldType: "SELECT" as const,
+    fieldType: "SELECT",
     options: ["Manufactured", "Purchased", "Modified Off-Shelf"],
     sortOrder: 6,
   },
-  { name: "Vendor", fieldType: "TEXT" as const, sortOrder: 7 },
-  { name: "Vendor Part Number", fieldType: "TEXT" as const, sortOrder: 8 },
-  { name: "Unit Cost", fieldType: "NUMBER" as const, sortOrder: 9 },
-  { name: "Lead Time (days)", fieldType: "NUMBER" as const, sortOrder: 10 },
-  { name: "Project", fieldType: "TEXT" as const, sortOrder: 11 },
-  { name: "Department", fieldType: "SELECT" as const, options: ["Engineering", "Manufacturing", "Quality"], sortOrder: 12 },
-  { name: "Notes", fieldType: "TEXT" as const, sortOrder: 13 },
+  { name: "Vendor", fieldType: "TEXT", sortOrder: 7 },
+  { name: "Vendor Part Number", fieldType: "TEXT", sortOrder: 8 },
+  { name: "Unit Cost", fieldType: "NUMBER", sortOrder: 9 },
+  { name: "Lead Time (days)", fieldType: "NUMBER", sortOrder: 10 },
+  { name: "Project", fieldType: "TEXT", sortOrder: 11 },
+  { name: "Department", fieldType: "SELECT", options: ["Engineering", "Manufacturing", "Quality"], sortOrder: 12 },
+  { name: "Notes", fieldType: "TEXT", sortOrder: 13 },
 ];
