@@ -1,0 +1,2 @@
+- [User Profile](user_profile.md) — PACE Technologies, metallographic equipment manufacturer, SOLIDWORKS user
+- [Project Goal](project_pdm_goal.md) — Building browser-based PDM to compete with VistaPoint PDM

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack)",
+      "Bash(cp -r /c/Users/MarcS/Documents/pace-pdm-temp/* /c/Users/MarcS/Documents/pace-pdm/)",
+      "Bash(cp -r /c/Users/MarcS/Documents/pace-pdm-temp/.* /c/Users/MarcS/Documents/pace-pdm/)",
+      "Bash(rm -rf /c/Users/MarcS/Documents/pace-pdm-temp)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init -d)"
+    ]
+  }
+}
