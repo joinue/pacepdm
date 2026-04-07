@@ -1,0 +1,374 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// MULTI-TENANCY
+// ============================================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          TenantUser[]
+  folders        Folder[]
+  files          File[]
+  lifecycles     Lifecycle[]
+  metadataFields MetadataField[]
+  ecos           ECO[]
+  auditLogs      AuditLog[]
+  roles          Role[]
+
+  @@map("tenants")
+}
+
+// ============================================================
+// USERS & RBAC
+// ============================================================
+
+model TenantUser {
+  id         String   @id @default(uuid())
+  tenantId   String
+  authUserId String
+  email      String
+  fullName   String
+  roleId     String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role         Role          @relation(fields: [roleId], references: [id])
+  fileVersions FileVersion[]
+  checkOuts    File[]        @relation("CheckedOutBy")
+  approvals    Approval[]
+  auditLogs    AuditLog[]
+
+  @@unique([tenantId, authUserId])
+  @@unique([tenantId, email])
+  @@map("tenant_users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  permissions Json
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  TenantUser[]
+
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+// ============================================================
+// FOLDERS
+// ============================================================
+
+model Folder {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  parentId  String?
+  path      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children Folder[] @relation("FolderTree")
+  files    File[]
+
+  @@unique([tenantId, path])
+  @@map("folders")
+}
+
+// ============================================================
+// FILES & VERSIONING
+// ============================================================
+
+model File {
+  id              String       @id @default(uuid())
+  tenantId        String
+  folderId        String
+  name            String
+  partNumber      String?
+  description     String?
+  fileType        String
+  category        FileCategory @default(DOCUMENT)
+  currentVersion  Int          @default(1)
+  lifecycleState  String       @default("WIP")
+  lifecycleId     String?
+
+  isCheckedOut   Boolean   @default(false)
+  checkedOutById String?
+  checkedOutAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  folder       Folder          @relation(fields: [folderId], references: [id])
+  lifecycle    Lifecycle?      @relation(fields: [lifecycleId], references: [id])
+  checkedOutBy TenantUser?     @relation("CheckedOutBy", fields: [checkedOutById], references: [id])
+  versions     FileVersion[]
+  metadata     MetadataValue[]
+  references   FileReference[] @relation("SourceFile")
+  referencedBy FileReference[] @relation("TargetFile")
+  ecoItems     ECOItem[]
+
+  @@unique([tenantId, folderId, name])
+  @@map("files")
+}
+
+enum FileCategory {
+  PART
+  ASSEMBLY
+  DRAWING
+  DOCUMENT
+  PURCHASED
+  OTHER
+}
+
+model FileVersion {
+  id           String   @id @default(uuid())
+  fileId       String
+  version      Int
+  storageKey   String
+  fileSize     Int
+  checksum     String?
+  uploadedById String
+  comment      String?
+  createdAt    DateTime @default(now())
+
+  file       File       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  uploadedBy TenantUser @relation(fields: [uploadedById], references: [id])
+
+  @@unique([fileId, version])
+  @@map("file_versions")
+}
+
+model FileReference {
+  id            String @id @default(uuid())
+  sourceFileId  String
+  targetFileId  String
+  referenceType String @default("contains")
+
+  sourceFile File @relation("SourceFile", fields: [sourceFileId], references: [id], onDelete: Cascade)
+  targetFile File @relation("TargetFile", fields: [targetFileId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceFileId, targetFileId, referenceType])
+  @@map("file_references")
+}
+
+// ============================================================
+// METADATA (Custom Properties)
+// ============================================================
+
+model MetadataField {
+  id         String         @id @default(uuid())
+  tenantId   String
+  name       String
+  fieldType  MetadataType   @default(TEXT)
+  options    Json?
+  isRequired Boolean        @default(false)
+  isSystem   Boolean        @default(false)
+  sortOrder  Int            @default(0)
+  appliesTo  FileCategory[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  values MetadataValue[]
+
+  @@unique([tenantId, name])
+  @@map("metadata_fields")
+}
+
+enum MetadataType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  URL
+}
+
+model MetadataValue {
+  id      String @id @default(uuid())
+  fileId  String
+  fieldId String
+  value   String
+
+  file  File          @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  field MetadataField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, fieldId])
+  @@map("metadata_values")
+}
+
+// ============================================================
+// LIFECYCLE & WORKFLOW
+// ============================================================
+
+model Lifecycle {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  states      LifecycleState[]
+  transitions LifecycleTransition[]
+  files       File[]
+
+  @@unique([tenantId, name])
+  @@map("lifecycles")
+}
+
+model LifecycleState {
+  id          String  @id @default(uuid())
+  lifecycleId String
+  name        String
+  color       String  @default("#6B7280")
+  isInitial   Boolean @default(false)
+  isFinal     Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  lifecycle       Lifecycle             @relation(fields: [lifecycleId], references: [id], onDelete: Cascade)
+  transitionsFrom LifecycleTransition[] @relation("FromState")
+  transitionsTo   LifecycleTransition[] @relation("ToState")
+
+  @@unique([lifecycleId, name])
+  @@map("lifecycle_states")
+}
+
+model LifecycleTransition {
+  id               String  @id @default(uuid())
+  lifecycleId      String
+  fromStateId      String
+  toStateId        String
+  name             String
+  requiresApproval Boolean @default(false)
+  approvalRoles    Json?
+
+  lifecycle Lifecycle      @relation(fields: [lifecycleId], references: [id], onDelete: Cascade)
+  fromState LifecycleState @relation("FromState", fields: [fromStateId], references: [id])
+  toState   LifecycleState @relation("ToState", fields: [toStateId], references: [id])
+
+  @@map("lifecycle_transitions")
+}
+
+// ============================================================
+// ENGINEERING CHANGE ORDERS
+// ============================================================
+
+model ECO {
+  id          String      @id @default(uuid())
+  tenantId    String
+  ecoNumber   String
+  title       String
+  description String?
+  status      ECOStatus   @default(DRAFT)
+  priority    ECOPriority @default(MEDIUM)
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items     ECOItem[]
+  approvals Approval[]
+
+  @@unique([tenantId, ecoNumber])
+  @@map("ecos")
+}
+
+enum ECOStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  IMPLEMENTED
+  CLOSED
+}
+
+enum ECOPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model ECOItem {
+  id         String @id @default(uuid())
+  ecoId      String
+  fileId     String
+  changeType String
+  reason     String?
+
+  eco  ECO  @relation(fields: [ecoId], references: [id], onDelete: Cascade)
+  file File @relation(fields: [fileId], references: [id])
+
+  @@map("eco_items")
+}
+
+model Approval {
+  id          String         @id @default(uuid())
+  ecoId       String
+  approverId  String
+  status      ApprovalStatus @default(PENDING)
+  comment     String?
+  respondedAt DateTime?
+  createdAt   DateTime       @default(now())
+
+  eco      ECO        @relation(fields: [ecoId], references: [id], onDelete: Cascade)
+  approver TenantUser @relation(fields: [approverId], references: [id])
+
+  @@map("approvals")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   TenantUser? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}

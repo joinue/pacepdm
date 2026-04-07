@@ -1,0 +1,66 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getCurrentTenantUser } from "@/lib/auth";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { logAudit } from "@/lib/audit";
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ fileId: string }> }
+) {
+  try {
+    const tenantUser = await getCurrentTenantUser();
+    const { fileId } = await params;
+    const { searchParams } = new URL(request.url);
+    const versionNum = searchParams.get("version");
+
+    const file = await prisma.file.findUnique({ where: { id: fileId } });
+
+    if (!file || file.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    const version = await prisma.fileVersion.findFirst({
+      where: {
+        fileId,
+        version: versionNum ? parseInt(versionNum) : file.currentVersion,
+      },
+    });
+
+    if (!version) {
+      return NextResponse.json(
+        { error: "Version not found" },
+        { status: 404 }
+      );
+    }
+
+    const supabase = await createServerSupabaseClient();
+
+    const { data, error } = await supabase.storage
+      .from("vault")
+      .createSignedUrl(version.storageKey, 60); // 60 second URL
+
+    if (error || !data) {
+      return NextResponse.json(
+        { error: "Failed to generate download URL" },
+        { status: 500 }
+      );
+    }
+
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "file.download",
+      entityType: "file",
+      entityId: fileId,
+      details: { name: file.name, version: version.version },
+    });
+
+    return NextResponse.json({ url: data.signedUrl });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to download file" },
+      { status: 500 }
+    );
+  }
+}
