@@ -72,53 +72,53 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
-      <div className="flex flex-col items-center pt-12 pb-6 sm:pt-8 sm:pb-6 sm:flex-1 sm:justify-end">
-        <Logo size={52} className="mb-4" />
+    <div className="min-h-dvh flex flex-col sm:items-center sm:justify-center bg-background">
+      <div className="flex flex-col items-center pt-12 pb-6 sm:flex-none sm:pt-0 sm:pb-8">
+        <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
         <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">PACE PDM</h1>
         <p className="text-sm sm:text-xs text-muted-foreground mt-1">Create your workspace</p>
       </div>
 
-      <div className="flex-1 flex flex-col sm:flex-none sm:flex sm:items-center sm:justify-start sm:pb-16">
+      <div className="shrink-0 sm:w-full sm:max-w-sm">
         <form
           onSubmit={handleRegister}
-          className="w-full px-6 sm:px-0 sm:w-full sm:max-w-sm sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5"
+          className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5"
         >
-          <div className="space-y-5">
+          <div className="space-y-5 sm:space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20">
+              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
                 {error}
               </div>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-2 sm:space-y-1.5">
               <Label htmlFor="companyName" className="text-sm sm:text-xs">Company Name</Label>
               <Input
                 id="companyName"
                 placeholder="PACE Technologies"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="h-12 sm:h-10 text-base sm:text-sm rounded-lg"
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                 required
                 autoFocus
                 autoComplete="organization"
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 sm:space-y-1.5">
               <Label htmlFor="fullName" className="text-sm sm:text-xs">Full Name</Label>
               <Input
                 id="fullName"
                 placeholder="John Smith"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                className="h-12 sm:h-10 text-base sm:text-sm rounded-lg"
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                 required
                 autoComplete="name"
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 sm:space-y-1.5">
               <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
               <Input
                 id="email"
@@ -126,13 +126,13 @@ export default function RegisterPage() {
                 placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-12 sm:h-10 text-base sm:text-sm rounded-lg"
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                 required
                 autoComplete="email"
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 sm:space-y-1.5">
               <Label htmlFor="password" className="text-sm sm:text-xs">Password</Label>
               <div className="relative">
                 <Input
@@ -141,7 +141,7 @@ export default function RegisterPage() {
                   placeholder="Min. 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 sm:h-10 text-base sm:text-sm pr-11 sm:pr-10 rounded-lg"
+                  className="h-12 sm:h-9 text-base sm:text-sm pr-11 sm:pr-9 rounded-lg"
                   minLength={6}
                   required
                   autoComplete="new-password"
@@ -149,7 +149,7 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                  className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> : <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />}
@@ -157,21 +157,21 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-10 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
               {loading ? "Creating..." : "Create Workspace"}
             </Button>
           </div>
 
-          <p className="text-sm sm:text-xs text-muted-foreground text-center mt-6">
+          <p className="text-sm sm:text-xs text-muted-foreground text-center mt-6 sm:mt-4">
             Already have an account?{" "}
             <Link href="/login" className="text-primary hover:underline font-medium">
               Sign in
             </Link>
           </p>
         </form>
-
-        <div className="h-8 sm:h-0 shrink-0" />
       </div>
+
+      <div className="h-10 sm:h-8 shrink-0" />
     </div>
   );
 }
