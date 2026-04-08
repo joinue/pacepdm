@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FolderOpen, FileText, ClipboardList, History } from "lucide-react";
+import { FolderOpen, FileText, ClipboardList, History, CheckCircle } from "lucide-react";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -20,12 +20,14 @@ export default async function DashboardPage() {
     { count: folderCount },
     { count: ecoCount },
     { count: checkedOutByMe },
+    { count: pendingApprovals },
     { data: recentActivity },
   ] = await Promise.all([
     db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
     db.from("folders").select("*", { count: "exact", head: true }).eq("tenantId", tenantId).not("parentId", "is", null),
     db.from("ecos").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
     db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId).eq("isCheckedOut", true).eq("checkedOutById", tenantUser.id),
+    db.from("approval_requests").select("*", { count: "exact", head: true }).eq("tenantId", tenantId).eq("status", "PENDING"),
     db.from("audit_logs")
       .select("*, user:tenant_users!audit_logs_userId_fkey(fullName)")
       .eq("tenantId", tenantId)
@@ -42,7 +44,7 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <Link href="/vault">
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -81,13 +83,25 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">My Checked-Out Files</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">My Checked-Out</CardTitle>
             <History className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{checkedOutByMe ?? 0}</div>
           </CardContent>
         </Card>
+
+        <Link href="/approvals">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Pending Approvals</CardTitle>
+              <CheckCircle className="w-4 h-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{pendingApprovals ?? 0}</div>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       <Card>

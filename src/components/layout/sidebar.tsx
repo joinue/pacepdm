@@ -7,19 +7,21 @@ import { useTenantUser } from "@/components/providers/tenant-provider";
 import { Logo } from "./logo";
 import {
   FolderOpen, Search, FileText, ClipboardList, Settings,
-  Users, History, LayoutDashboard, Tag,
+  Users, History, LayoutDashboard, Tag, CheckCircle, Shield,
 } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Vault", href: "/vault", icon: FolderOpen },
   { name: "Search", href: "/search", icon: Search },
+  { name: "Approvals", href: "/approvals", icon: CheckCircle },
   { name: "ECOs", href: "/ecos", icon: ClipboardList },
   { name: "Audit Log", href: "/audit-log", icon: History },
 ];
 
 const adminNavigation = [
   { name: "Users", href: "/admin/users", icon: Users },
+  { name: "Approval Groups", href: "/admin/approval-groups", icon: Shield },
   { name: "Lifecycle", href: "/admin/lifecycle", icon: Tag },
   { name: "Metadata", href: "/admin/metadata", icon: FileText },
   { name: "Settings", href: "/admin/settings", icon: Settings },
