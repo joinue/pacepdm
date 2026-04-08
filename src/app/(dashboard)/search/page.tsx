@@ -1,25 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Search, Lock } from "lucide-react";
+import { Search, Lock, Download } from "lucide-react";
 
 interface SearchResult {
   id: string;
@@ -32,15 +24,15 @@ interface SearchResult {
   isCheckedOut: boolean;
   checkedOutBy: { fullName: string } | null;
   updatedAt: string;
+  folderId: string;
   folder: { path: string };
-  versions: { fileSize: number }[];
 }
 
 const lifecycleColors: Record<string, string> = {
-  WIP: "bg-yellow-100 text-yellow-800",
-  "In Review": "bg-blue-100 text-blue-800",
-  Released: "bg-green-100 text-green-800",
-  Obsolete: "bg-red-100 text-red-800",
+  WIP: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+  "In Review": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  Released: "bg-green-500/10 text-green-600 dark:text-green-400",
+  Obsolete: "bg-red-500/10 text-red-600 dark:text-red-400",
 };
 
 export default function SearchPage() {
@@ -50,6 +42,7 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const router = useRouter();
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -69,6 +62,16 @@ export default function SearchPage() {
       setResults([]);
     }
     setLoading(false);
+  }
+
+  async function handleDownload(fileId: string) {
+    const res = await fetch(`/api/files/${fileId}/download`);
+    const d = await res.json();
+    if (d.url) window.open(d.url, "_blank");
+  }
+
+  function navigateToFile(file: SearchResult) {
+    router.push(`/vault?folderId=${file.folderId}&fileId=${file.id}`);
   }
 
   return (
@@ -120,51 +123,45 @@ export default function SearchPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Part Number</TableHead>
+                <TableHead>Part #</TableHead>
                 <TableHead>Category</TableHead>
-                <TableHead>Version</TableHead>
+                <TableHead>Ver</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Modified</TableHead>
+                <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {results.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    No files found matching your search.
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    No files found.
                   </TableCell>
                 </TableRow>
               ) : (
                 results.map((file) => (
-                  <TableRow key={file.id}>
+                  <TableRow key={file.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigateToFile(file)}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-1">
                         {file.name}
-                        {file.isCheckedOut && (
-                          <Lock className="w-3 h-3 text-red-500" />
-                        )}
+                        {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500" />}
                       </div>
                     </TableCell>
-                    <TableCell>{file.partNumber || "—"}</TableCell>
-                    <TableCell>{file.category}</TableCell>
-                    <TableCell>v{file.currentVersion}</TableCell>
+                    <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
+                    <TableCell className="text-sm">{file.category}</TableCell>
+                    <TableCell className="font-mono text-xs">v{file.currentVersion}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className={lifecycleColors[file.lifecycleState] || ""}
-                      >
+                      <Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>
                         {file.lifecycleState}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {file.folder.path}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {new Date(file.updatedAt).toLocaleDateString()}
+                    <TableCell className="text-muted-foreground text-xs">{file.folder?.path}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{new Date(file.updatedAt).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}>
+                        <Download className="w-3.5 h-3.5" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
