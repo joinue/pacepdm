@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Box } from "lucide-react";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -31,7 +32,6 @@ export default function RegisterPage() {
     setLoading(true);
     setError("");
 
-    // 1. Create auth user
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -55,7 +55,7 @@ export default function RegisterPage() {
       return;
     }
 
-    // 2. Create tenant and user via API
+    // Try to create tenant immediately (works if email confirmation is off)
     const res = await fetch("/api/tenants", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -67,82 +67,90 @@ export default function RegisterPage() {
       }),
     });
 
-    if (!res.ok) {
-      const data = await res.json();
-      setError(data.error || "Failed to set up workspace.");
-      setLoading(false);
-      return;
+    if (res.ok) {
+      router.push("/");
+      router.refresh();
+    } else {
+      // Email confirmation required — user will create workspace after confirming
+      router.push("/onboarding");
+      router.refresh();
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">PACE PDM</CardTitle>
-          <CardDescription>
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <Card className="w-full max-w-sm border-border/50">
+        <CardHeader className="text-center pb-2">
+          <div className="flex justify-center mb-4">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+              <Box className="w-5 h-5 text-primary-foreground" />
+            </div>
+          </div>
+          <CardTitle className="text-xl font-semibold tracking-tight">PACE PDM</CardTitle>
+          <CardDescription className="text-xs">
             Create your workspace
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleRegister}>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3 pt-2">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+              <div className="bg-destructive/10 text-destructive text-xs p-2.5 rounded-md">
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company Name</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="companyName" className="text-xs">Company Name</Label>
               <Input
                 id="companyName"
                 placeholder="PACE Technologies"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
+                className="h-9 text-sm"
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Your Full Name</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="fullName" className="text-xs">Full Name</Label>
               <Input
                 id="fullName"
                 placeholder="John Smith"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
+                className="h-9 text-sm"
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs">Email</Label>
               <Input
                 id="email"
                 type="email"
                 placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                className="h-9 text-sm"
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-xs">Password</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="At least 6 characters"
+                placeholder="Min. 6 characters"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                className="h-9 text-sm"
                 minLength={6}
                 required
               />
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Creating workspace..." : "Create Workspace"}
+          <CardFooter className="flex flex-col gap-3 pt-0">
+            <Button type="submit" className="w-full h-9 text-sm" disabled={loading}>
+              {loading ? "Creating..." : "Create Workspace"}
             </Button>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Already have an account?{" "}
               <Link href="/login" className="text-primary hover:underline">
                 Sign in
