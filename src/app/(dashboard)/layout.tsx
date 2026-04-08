@@ -8,25 +8,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  let tenantUser;
-  try {
-    tenantUser = await getCurrentTenantUser();
-  } catch (error) {
-    console.error("Failed to load tenant user:", error);
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/40">
-        <div className="text-center space-y-4 max-w-md">
-          <h1 className="text-2xl font-bold">Connection Error</h1>
-          <p className="text-muted-foreground">
-            Unable to connect to the database. Please try refreshing the page.
-          </p>
-          <p className="text-xs text-muted-foreground font-mono">
-            {error instanceof Error ? error.message : "Unknown error"}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const tenantUser = await getCurrentTenantUser();
 
   return (
     <TenantProvider
