@@ -1,24 +1,26 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuGroup, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Sun, Moon, Monitor } from "lucide-react";
+import { LogOut, User, Sun, Moon } from "lucide-react";
 import { toast } from "sonner";
 
 export function Header() {
   const user = useTenantUser();
   const router = useRouter();
   const supabase = createClient();
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const initials = user.fullName
     .split(" ")
@@ -42,63 +44,58 @@ export function Header() {
   }
 
   return (
-    <header className="h-12 border-b bg-background/80 backdrop-blur-sm flex items-center justify-between px-6">
-      <div />
-      <div className="flex items-center gap-2">
-        <div className="flex items-center border rounded-md">
+    <header className="h-12 flex items-center justify-between px-5">
+      <div className="text-xs text-muted-foreground/50">
+        {user.tenantName}
+      </div>
+      <div className="flex items-center gap-1">
+        {/* Theme toggle — single button */}
+        {mounted && (
           <Button
-            variant="ghost" size="sm"
-            className={`h-7 w-7 p-0 rounded-r-none ${theme === "light" ? "bg-muted" : ""}`}
-            onClick={() => setTheme("light")}
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
           >
-            <Sun className="w-3.5 h-3.5" />
+            {resolvedTheme === "dark" ? (
+              <Sun className="w-3.5 h-3.5" />
+            ) : (
+              <Moon className="w-3.5 h-3.5" />
+            )}
           </Button>
-          <Button
-            variant="ghost" size="sm"
-            className={`h-7 w-7 p-0 rounded-none ${theme === "system" ? "bg-muted" : ""}`}
-            onClick={() => setTheme("system")}
-          >
-            <Monitor className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            variant="ghost" size="sm"
-            className={`h-7 w-7 p-0 rounded-l-none ${theme === "dark" ? "bg-muted" : ""}`}
-            onClick={() => setTheme("dark")}
-          >
-            <Moon className="w-3.5 h-3.5" />
-          </Button>
-        </div>
+        )}
 
+        {/* User menu */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" className="flex items-center gap-2 h-8 px-2">
                 <Avatar className="w-6 h-6">
-                  <AvatarFallback className="text-[10px] bg-primary/10 text-primary font-semibold">
+                  <AvatarFallback className="text-[10px] bg-foreground/8 text-foreground font-medium">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-sm">{user.fullName}</span>
+                <span className="text-[13px]">{user.fullName}</span>
               </Button>
             }
           />
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>
-              <div className="flex flex-col">
-                <span className="text-sm">{user.fullName}</span>
-                <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
-                <span className="text-xs text-muted-foreground font-normal mt-0.5">
-                  {user.role} &middot; {user.tenantName}
-                </span>
-              </div>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">{user.fullName}</span>
+                  <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
+                  <span className="text-[11px] text-muted-foreground/60 font-normal mt-0.5">
+                    {user.role}
+                  </span>
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <Link href="/profile">
-              <DropdownMenuItem>
-                <User className="w-4 h-4 mr-2" />
-                Profile
-              </DropdownMenuItem>
-            </Link>
+            <DropdownMenuItem onClick={() => router.push("/profile")}>
+              <User className="w-4 h-4 mr-2" />
+              Profile
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut}>
               <LogOut className="w-4 h-4 mr-2" />

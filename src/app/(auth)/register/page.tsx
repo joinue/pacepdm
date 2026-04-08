@@ -15,7 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Box } from "lucide-react";
+import { Logo } from "@/components/layout/logo";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -82,9 +82,7 @@ export default function RegisterPage() {
       <Card className="w-full max-w-sm border-border/50">
         <CardHeader className="text-center pb-2">
           <div className="flex justify-center mb-4">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Box className="w-5 h-5 text-primary-foreground" />
-            </div>
+            <Logo size={40} />
           </div>
           <CardTitle className="text-xl font-semibold tracking-tight">PACE PDM</CardTitle>
           <CardDescription className="text-xs">

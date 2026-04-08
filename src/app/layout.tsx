@@ -18,6 +18,15 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "PACE PDM",
   description: "Product Data Management by PACE Technologies",
+  icons: {
+    icon: [
+      { url: "/images/favicon/favicon.ico", sizes: "any" },
+      { url: "/images/favicon/favicon.svg", type: "image/svg+xml" },
+      { url: "/images/favicon/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+    ],
+    apple: "/images/favicon/apple-touch-icon.png",
+  },
+  manifest: "/images/favicon/site.webmanifest",
 };
 
 export default function RootLayout({

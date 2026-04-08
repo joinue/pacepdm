@@ -23,12 +23,14 @@ export default async function DashboardLayout({
         permissions: tenantUser.role.permissions as string[],
       }}
     >
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen bg-background">
         <Sidebar />
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 min-w-0">
           <Header />
-          <main className="flex-1 overflow-y-auto p-6 bg-muted/30">
-            {children}
+          <main className="flex-1 overflow-y-auto">
+            <div className="m-2 ml-0 p-6 rounded-xl bg-card border border-border/50 min-h-full">
+              {children}
+            </div>
           </main>
         </div>
       </div>

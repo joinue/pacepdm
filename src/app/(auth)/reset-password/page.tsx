@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
 } from "@/components/ui/card";
-import { Box } from "lucide-react";
+import { Logo } from "@/components/layout/logo";
 import { toast } from "sonner";
 
 export default function ResetPasswordPage() {
@@ -53,9 +53,7 @@ export default function ResetPasswordPage() {
       <Card className="w-full max-w-sm border-border/50">
         <CardHeader className="text-center pb-2">
           <div className="flex justify-center mb-4">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <Box className="w-5 h-5 text-primary-foreground" />
-            </div>
+            <Logo size={40} />
           </div>
           <CardTitle className="text-xl font-semibold tracking-tight">Set New Password</CardTitle>
           <CardDescription className="text-xs">Enter your new password below</CardDescription>

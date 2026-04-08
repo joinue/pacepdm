@@ -4,17 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { Logo } from "./logo";
 import {
-  FolderOpen,
-  Search,
-  FileText,
-  ClipboardList,
-  Settings,
-  Users,
-  History,
-  LayoutDashboard,
-  Tag,
-  Box,
+  FolderOpen, Search, FileText, ClipboardList, Settings,
+  Users, History, LayoutDashboard, Tag,
 } from "lucide-react";
 
 const navigation = [
@@ -40,22 +33,17 @@ export function Sidebar() {
     user.permissions.some((p) => p.startsWith("admin."));
 
   return (
-    <div className="flex flex-col w-56 border-r bg-sidebar">
+    <div className="flex flex-col w-52 shrink-0">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 h-12 px-4 border-b">
-        <div className="w-7 h-7 bg-primary rounded flex items-center justify-center">
-          <Box className="w-4 h-4 text-primary-foreground" />
-        </div>
+      <div className="flex items-center gap-2.5 h-12 px-5">
+        <Logo size={20} />
         <div className="min-w-0">
-          <h1 className="font-semibold text-sm tracking-tight leading-none">PACE PDM</h1>
-          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-            {user.tenantName}
-          </p>
+          <h1 className="font-semibold text-[13px] tracking-tight leading-none">PACE PDM</h1>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-1 space-y-0.5 overflow-y-auto">
         {navigation.map((item) => {
           const isActive =
             item.href === "/"
@@ -66,13 +54,13 @@ export function Sidebar() {
               key={item.name}
               href={item.href}
               className={cn(
-                "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
+                "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all duration-150",
                 isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  ? "bg-foreground/8 text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-foreground/4"
               )}
             >
-              <item.icon className="w-4 h-4 shrink-0" />
+              <item.icon className="w-3.75 h-3.75 shrink-0" />
               {item.name}
             </Link>
           );
@@ -80,8 +68,8 @@ export function Sidebar() {
 
         {isAdmin && (
           <>
-            <div className="pt-5 pb-1.5">
-              <p className="px-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+            <div className="pt-5 pb-1">
+              <p className="px-2.5 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-[0.15em]">
                 Admin
               </p>
             </div>
@@ -92,13 +80,13 @@ export function Sidebar() {
                   key={item.name}
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
+                    "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all duration-150",
                     isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      ? "bg-foreground/8 text-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/4"
                   )}
                 >
-                  <item.icon className="w-4 h-4 shrink-0" />
+                  <item.icon className="w-3.75 h-3.75 shrink-0" />
                   {item.name}
                 </Link>
               );
@@ -108,9 +96,9 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t">
-        <p className="text-[10px] text-muted-foreground/60 text-center tracking-wide">
-          PACE PDM v0.1
+      <div className="px-5 py-3">
+        <p className="text-[10px] text-muted-foreground/40 tracking-wide">
+          v0.1.0
         </p>
       </div>
     </div>
