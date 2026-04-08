@@ -1,6 +1,5 @@
 import { getCurrentTenantUser } from "@/lib/auth";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
+import { AppShell } from "@/components/layout/app-shell";
 import { TenantProvider } from "@/components/providers/tenant-provider";
 
 export default async function DashboardLayout({
@@ -23,17 +22,7 @@ export default async function DashboardLayout({
         permissions: tenantUser.role.permissions as string[],
       }}
     >
-      <div className="flex h-screen bg-background">
-        <Sidebar />
-        <div className="flex flex-col flex-1 min-w-0">
-          <Header />
-          <main className="flex-1 overflow-y-auto">
-            <div className="m-2 ml-0 p-6 rounded-xl bg-card border border-border/50 min-h-full">
-              {children}
-            </div>
-          </main>
-        </div>
-      </div>
+      <AppShell>{children}</AppShell>
     </TenantProvider>
   );
 }

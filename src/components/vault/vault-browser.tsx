@@ -27,6 +27,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { CreateFolderDialog } from "./create-folder-dialog";
 import { UploadFileDialog } from "./upload-file-dialog";
 import { FileDetailPanel } from "./file-detail-panel";
@@ -260,15 +261,15 @@ export function VaultBrowser({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Vault</h2>
+          <h2 className="text-xl sm:text-2xl font-bold">Vault</h2>
           <Breadcrumb className="mt-1">
             <BreadcrumbList>
               {breadcrumbs.map((entry, i) => (
                 <BreadcrumbItem key={entry.id}>
                   {i > 0 && <BreadcrumbSeparator />}
-                  <BreadcrumbLink onClick={() => navigateToBreadcrumb(i)} className="cursor-pointer">
+                  <BreadcrumbLink onClick={() => navigateToBreadcrumb(i)} className="cursor-pointer text-xs sm:text-sm">
                     {entry.name}
                   </BreadcrumbLink>
                 </BreadcrumbItem>
@@ -276,138 +277,160 @@ export function VaultBrowser({
             </BreadcrumbList>
           </Breadcrumb>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {selectedFiles.size > 0 && (
             <>
               <Button variant="outline" size="sm" onClick={handleBulkDownload}>
-                <Download className="w-4 h-4 mr-1" />
-                Download ({selectedFiles.size})
+                <Download className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">Download ({selectedFiles.size})</span>
               </Button>
               <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-                <Trash2 className="w-4 h-4 mr-1" />
-                Delete ({selectedFiles.size})
+                <Trash2 className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">Delete ({selectedFiles.size})</span>
               </Button>
             </>
           )}
           <Button variant="outline" size="sm" onClick={() => setShowCreateFolder(true)}>
-            <FolderPlus className="w-4 h-4 mr-2" />
-            New Folder
+            <FolderPlus className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">New Folder</span>
           </Button>
           <Button size="sm" onClick={() => setShowUpload(true)}>
-            <Upload className="w-4 h-4 mr-2" />
-            Upload
+            <Upload className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Upload</span>
           </Button>
         </div>
       </div>
 
       <div className="flex gap-4">
-        {/* File table */}
-        <div className="flex-1 border rounded-lg bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[32px]">
-                  {files.length > 0 && (
-                    <Checkbox
-                      checked={selectedFiles.size === files.length && files.length > 0}
-                      onCheckedChange={toggleSelectAll}
-                    />
-                  )}
-                </TableHead>
-                <TableHead className="w-[28px]"></TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Part #</TableHead>
-                <TableHead>Ver</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Modified</TableHead>
-                <TableHead className="w-[40px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading...</TableCell>
-                </TableRow>
-              ) : folders.length === 0 && files.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                    Empty folder. Create a subfolder or upload files.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                <>
-                  {folders.map((folder) => (
-                    <TableRow key={folder.id} className="cursor-pointer hover:bg-muted/50" onDoubleClick={() => navigateToFolder(folder)}>
-                      <TableCell />
-                      <TableCell><FolderOpen className="w-4 h-4 text-blue-500" /></TableCell>
-                      <TableCell className="font-medium cursor-pointer" onClick={() => navigateToFolder(folder)}>{folder.name}</TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{folder._count.children}f, {folder._count.files} files</TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger render={
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => e.stopPropagation()}>
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          } />
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => { setRenameTarget({ id: folder.id, name: folder.name, type: "folder" }); setNewName(folder.name); }}>
-                              <Pencil className="w-4 h-4 mr-2" />Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" })}>
-                              <Trash2 className="w-4 h-4 mr-2" />Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-
-                  {files.map((file) => {
-                    const latestVersion = file.versions[0];
-                    return (
-                      <TableRow
-                        key={file.id}
-                        className={`cursor-pointer hover:bg-muted/50 ${selectedFile === file.id ? "bg-primary/5" : ""}`}
-                        onClick={() => setSelectedFile(file.id)}
-                      >
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={selectedFiles.has(file.id)}
-                            onCheckedChange={() => toggleFileSelect(file.id)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div className="relative">
-                            {file.category === "PART" || file.category === "ASSEMBLY" ? (
-                              <FileIcon className="w-4 h-4 text-orange-500" />
-                            ) : file.category === "DRAWING" ? (
-                              <FileText className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <FileText className="w-4 h-4 text-muted-foreground" />
-                            )}
-                            {file.isCheckedOut && <Lock className="w-2.5 h-2.5 text-red-500 absolute -top-1 -right-1" />}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {file.name}
-                          {file.isCheckedOut && (
-                            <span className="text-[11px] text-red-500 ml-1.5">({file.checkedOutBy?.fullName})</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
-                        <TableCell className="font-mono text-xs">v{file.currentVersion}</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>
+        <div className="flex-1 min-w-0">
+          {/* Mobile card view */}
+          <div className="md:hidden space-y-1">
+            {loading ? (
+              <p className="text-center py-8 text-muted-foreground text-sm">Loading...</p>
+            ) : folders.length === 0 && files.length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground text-sm">Empty folder.</p>
+            ) : (
+              <>
+                {folders.map((folder) => (
+                  <div key={folder.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => navigateToFolder(folder)}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FolderOpen className="w-5 h-5 text-blue-500 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{folder.name}</p>
+                        <p className="text-xs text-muted-foreground">{folder._count.files} files</p>
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreHorizontal className="w-4 h-4" />
+                        </Button>
+                      } />
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget({ id: folder.id, name: folder.name, type: "folder" }); setNewName(folder.name); }}>
+                          <Pencil className="w-4 h-4 mr-2" />Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" }); }}>
+                          <Trash2 className="w-4 h-4 mr-2" />Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                ))}
+                {files.map((file) => (
+                  <div key={file.id} className={`flex items-center justify-between p-3 rounded-lg cursor-pointer ${selectedFile === file.id ? "bg-primary/5" : "hover:bg-muted/50"}`} onClick={() => setSelectedFile(file.id)}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative shrink-0">
+                        {file.category === "PART" || file.category === "ASSEMBLY" ? (
+                          <FileIcon className="w-5 h-5 text-orange-500" />
+                        ) : file.category === "DRAWING" ? (
+                          <FileText className="w-5 h-5 text-green-600" />
+                        ) : (
+                          <FileText className="w-5 h-5 text-muted-foreground" />
+                        )}
+                        {file.isCheckedOut && <Lock className="w-2.5 h-2.5 text-red-500 absolute -top-1 -right-1" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{file.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${lifecycleColors[file.lifecycleState] || ""}`}>
                             {file.lifecycleState}
                           </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">{latestVersion ? formatFileSize(latestVersion.fileSize) : "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{new Date(file.updatedAt).toLocaleDateString()}</TableCell>
+                          <span className="text-[11px] text-muted-foreground font-mono">v{file.currentVersion}</span>
+                          {file.partNumber && <span className="text-[11px] text-muted-foreground">{file.partNumber}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreHorizontal className="w-4 h-4" />
+                        </Button>
+                      } />
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedFile(file.id); }}><Eye className="w-4 h-4 mr-2" />Details</DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}><Download className="w-4 h-4 mr-2" />Download</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {!file.isCheckedOut && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCheckout(file.id); }}><LogOut className="w-4 h-4 mr-2" />Check Out</DropdownMenuItem>}
+                        {file.isCheckedOut && file.checkedOutById === user.id && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setCheckInFileId(file.id); }}><LogIn className="w-4 h-4 mr-2" />Check In</DropdownMenuItem>}
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openTransitionDialog(file.id, file.name, file.lifecycleId ?? null); }}><ArrowRightLeft className="w-4 h-4 mr-2" />Change State</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget({ id: file.id, name: file.name, type: "file" }); setNewName(file.name); }}><Pencil className="w-4 h-4 mr-2" />Rename</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: file.id, name: file.name, type: "file" }); }}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+
+          {/* Desktop table view */}
+          <div className="hidden md:block border rounded-lg bg-background">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[32px]">
+                    {files.length > 0 && (
+                      <Checkbox
+                        checked={selectedFiles.size === files.length && files.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    )}
+                  </TableHead>
+                  <TableHead className="w-[28px]"></TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Part #</TableHead>
+                  <TableHead>Ver</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Modified</TableHead>
+                  <TableHead className="w-[40px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading...</TableCell>
+                  </TableRow>
+                ) : folders.length === 0 && files.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      Empty folder. Create a subfolder or upload files.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {folders.map((folder) => (
+                      <TableRow key={folder.id} className="cursor-pointer hover:bg-muted/50" onDoubleClick={() => navigateToFolder(folder)}>
+                        <TableCell />
+                        <TableCell><FolderOpen className="w-4 h-4 text-blue-500" /></TableCell>
+                        <TableCell className="font-medium cursor-pointer" onClick={() => navigateToFolder(folder)}>{folder.name}</TableCell>
+                        <TableCell className="text-muted-foreground">—</TableCell>
+                        <TableCell className="text-muted-foreground">—</TableCell>
+                        <TableCell className="text-muted-foreground">—</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">{folder._count.children}f, {folder._count.files} files</TableCell>
+                        <TableCell className="text-muted-foreground">—</TableCell>
                         <TableCell>
                           <DropdownMenu>
                             <DropdownMenuTrigger render={
@@ -416,52 +439,77 @@ export function VaultBrowser({
                               </Button>
                             } />
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedFile(file.id); }}>
-                                <Eye className="w-4 h-4 mr-2" />Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}>
-                                <Download className="w-4 h-4 mr-2" />Download
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              {!file.isCheckedOut && (
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCheckout(file.id); }}>
-                                  <LogOut className="w-4 h-4 mr-2" />Check Out
-                                </DropdownMenuItem>
-                              )}
-                              {file.isCheckedOut && file.checkedOutById === user.id && (
-                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setCheckInFileId(file.id); }}>
-                                  <LogIn className="w-4 h-4 mr-2" />Check In
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openTransitionDialog(file.id, file.name, file.lifecycleId ?? null); }}>
-                                <ArrowRightLeft className="w-4 h-4 mr-2" />Change State
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget({ id: file.id, name: file.name, type: "file" }); setNewName(file.name); }}>
+                              <DropdownMenuItem onClick={() => { setRenameTarget({ id: folder.id, name: folder.name, type: "folder" }); setNewName(folder.name); }}>
                                 <Pencil className="w-4 h-4 mr-2" />Rename
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: file.id, name: file.name, type: "file" }); }}>
+                              <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" })}>
                                 <Trash2 className="w-4 h-4 mr-2" />Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </>
-              )}
-            </TableBody>
-          </Table>
+                    ))}
+                    {files.map((file) => {
+                      const latestVersion = file.versions[0];
+                      return (
+                        <TableRow key={file.id} className={`cursor-pointer hover:bg-muted/50 ${selectedFile === file.id ? "bg-primary/5" : ""}`} onClick={() => setSelectedFile(file.id)}>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox checked={selectedFiles.has(file.id)} onCheckedChange={() => toggleFileSelect(file.id)} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="relative">
+                              {file.category === "PART" || file.category === "ASSEMBLY" ? <FileIcon className="w-4 h-4 text-orange-500" /> : file.category === "DRAWING" ? <FileText className="w-4 h-4 text-green-600" /> : <FileText className="w-4 h-4 text-muted-foreground" />}
+                              {file.isCheckedOut && <Lock className="w-2.5 h-2.5 text-red-500 absolute -top-1 -right-1" />}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {file.name}
+                            {file.isCheckedOut && <span className="text-[11px] text-red-500 ml-1.5">({file.checkedOutBy?.fullName})</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">v{file.currentVersion}</TableCell>
+                          <TableCell><Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>{file.lifecycleState}</Badge></TableCell>
+                          <TableCell className="text-sm">{latestVersion ? formatFileSize(latestVersion.fileSize) : "—"}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{new Date(file.updatedAt).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger render={<Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => e.stopPropagation()}><MoreHorizontal className="w-4 h-4" /></Button>} />
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedFile(file.id); }}><Eye className="w-4 h-4 mr-2" />Details</DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}><Download className="w-4 h-4 mr-2" />Download</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {!file.isCheckedOut && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCheckout(file.id); }}><LogOut className="w-4 h-4 mr-2" />Check Out</DropdownMenuItem>}
+                                {file.isCheckedOut && file.checkedOutById === user.id && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setCheckInFileId(file.id); }}><LogIn className="w-4 h-4 mr-2" />Check In</DropdownMenuItem>}
+                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openTransitionDialog(file.id, file.name, file.lifecycleId ?? null); }}><ArrowRightLeft className="w-4 h-4 mr-2" />Change State</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenameTarget({ id: file.id, name: file.name, type: "file" }); setNewName(file.name); }}><Pencil className="w-4 h-4 mr-2" />Rename</DropdownMenuItem>
+                                <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: file.id, name: file.name, type: "file" }); }}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </div>
 
+        {/* Detail panel — side panel on desktop, sheet on mobile */}
         {selectedFile && (
-          <FileDetailPanel
-            fileId={selectedFile}
-            metadataFields={metadataFields}
-            onClose={() => setSelectedFile(null)}
-            onRefresh={() => loadContents(currentFolderId)}
-          />
+          <>
+            <div className="hidden md:block">
+              <FileDetailPanel fileId={selectedFile} metadataFields={metadataFields} onClose={() => setSelectedFile(null)} onRefresh={() => loadContents(currentFolderId)} />
+            </div>
+            <Sheet open={!!selectedFile} onOpenChange={(open) => { if (!open) setSelectedFile(null); }}>
+              <SheetContent side="right" className="w-full sm:w-96 p-0 md:hidden">
+                <FileDetailPanel fileId={selectedFile} metadataFields={metadataFields} onClose={() => setSelectedFile(null)} onRefresh={() => loadContents(currentFolderId)} />
+              </SheetContent>
+            </Sheet>
+          </>
         )}
       </div>
 

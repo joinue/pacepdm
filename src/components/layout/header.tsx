@@ -11,10 +11,10 @@ import {
   DropdownMenuGroup, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Sun, Moon } from "lucide-react";
+import { LogOut, User, Sun, Moon, Menu } from "lucide-react";
 import { toast } from "sonner";
 
-export function Header() {
+export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const user = useTenantUser();
   const router = useRouter();
   const supabase = createClient();
@@ -44,12 +44,22 @@ export function Header() {
   }
 
   return (
-    <header className="h-12 flex items-center justify-between px-5">
-      <div className="text-xs text-muted-foreground/50">
-        {user.tenantName}
+    <header className="h-12 flex items-center justify-between px-4 md:px-5">
+      <div className="flex items-center gap-3">
+        {/* Mobile menu button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 md:hidden"
+          onClick={onMenuClick}
+        >
+          <Menu className="w-4 h-4" />
+        </Button>
+        <span className="text-xs text-muted-foreground/50 hidden sm:block">
+          {user.tenantName}
+        </span>
       </div>
       <div className="flex items-center gap-1">
-        {/* Theme toggle — single button */}
         {mounted && (
           <Button
             variant="ghost"
@@ -65,7 +75,6 @@ export function Header() {
           </Button>
         )}
 
-        {/* User menu */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -75,7 +84,7 @@ export function Header() {
                     {initials}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-[13px]">{user.fullName}</span>
+                <span className="text-[13px] hidden sm:inline">{user.fullName}</span>
               </Button>
             }
           />

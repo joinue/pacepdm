@@ -25,7 +25,7 @@ const adminNavigation = [
   { name: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   const pathname = usePathname();
   const user = useTenantUser();
   const isAdmin =
@@ -33,13 +33,11 @@ export function Sidebar() {
     user.permissions.some((p) => p.startsWith("admin."));
 
   return (
-    <div className="flex flex-col w-52 shrink-0">
+    <div className="flex flex-col w-52 h-full">
       {/* Logo */}
       <div className="flex items-center gap-2.5 h-12 px-5">
         <Logo size={20} />
-        <div className="min-w-0">
-          <h1 className="font-semibold text-[13px] tracking-tight leading-none">PACE PDM</h1>
-        </div>
+        <h1 className="font-semibold text-[13px] tracking-tight leading-none">PACE PDM</h1>
       </div>
 
       {/* Navigation */}
@@ -53,6 +51,7 @@ export function Sidebar() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={onNavigate}
               className={cn(
                 "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all duration-150",
                 isActive
@@ -79,6 +78,7 @@ export function Sidebar() {
                 <Link
                   key={item.name}
                   href={item.href}
+                  onClick={onNavigate}
                   className={cn(
                     "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all duration-150",
                     isActive
@@ -95,11 +95,8 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Footer */}
       <div className="px-5 py-3">
-        <p className="text-[10px] text-muted-foreground/40 tracking-wide">
-          v0.1.0
-        </p>
+        <p className="text-[10px] text-muted-foreground/40 tracking-wide">v0.1.0</p>
       </div>
     </div>
   );

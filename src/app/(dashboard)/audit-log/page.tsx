@@ -18,7 +18,7 @@ export default async function AuditLogPage() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Audit Log</h2>
-      <div className="border rounded-lg bg-background">
+      <div className="border rounded-lg bg-background overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>

@@ -78,7 +78,7 @@ export default function SearchPage() {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Search</h2>
 
-      <form onSubmit={handleSearch} className="flex gap-3 items-end">
+      <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 sm:items-end">
         <div className="flex-1">
           <Input
             placeholder="Search by filename, part number, or description..."
@@ -86,8 +86,9 @@ export default function SearchPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <div className="flex gap-2">
         <Select value={category} onValueChange={(v) => setCategory(v ?? "all")}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-full sm:w-40">
             <SelectValue placeholder="Category" />
           </SelectTrigger>
           <SelectContent>
@@ -100,7 +101,7 @@ export default function SearchPage() {
           </SelectContent>
         </Select>
         <Select value={state} onValueChange={(v) => setState(v ?? "all")}>
-          <SelectTrigger className="w-36">
+          <SelectTrigger className="w-full sm:w-36">
             <SelectValue placeholder="State" />
           </SelectTrigger>
           <SelectContent>
@@ -111,64 +112,84 @@ export default function SearchPage() {
             <SelectItem value="Obsolete">Obsolete</SelectItem>
           </SelectContent>
         </Select>
-        <Button type="submit" disabled={loading}>
-          <Search className="w-4 h-4 mr-2" />
-          {loading ? "Searching..." : "Search"}
+        <Button type="submit" disabled={loading} className="shrink-0">
+          <Search className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">{loading ? "Searching..." : "Search"}</span>
         </Button>
+        </div>
       </form>
 
       {searched && (
-        <div className="border rounded-lg bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Part #</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Ver</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead>Modified</TableHead>
-                <TableHead className="w-10"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {results.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    No files found.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                results.map((file) => (
-                  <TableRow key={file.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigateToFile(file)}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-1">
-                        {file.name}
-                        {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500" />}
+        <>
+          {results.length === 0 ? (
+            <p className="text-center py-8 text-muted-foreground text-sm">No files found.</p>
+          ) : (
+            <>
+              {/* Mobile list */}
+              <div className="md:hidden space-y-1">
+                {results.map((file) => (
+                  <div key={file.id} className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => navigateToFile(file)}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium truncate">{file.name}</p>
+                        {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500 shrink-0" />}
                       </div>
-                    </TableCell>
-                    <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
-                    <TableCell className="text-sm">{file.category}</TableCell>
-                    <TableCell className="font-mono text-xs">v{file.currentVersion}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>
-                        {file.lifecycleState}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">{file.folder?.path}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(file.updatedAt).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}>
-                        <Download className="w-3.5 h-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${lifecycleColors[file.lifecycleState] || ""}`}>{file.lifecycleState}</Badge>
+                        <span className="text-[11px] text-muted-foreground">{file.folder?.path}</span>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}>
+                      <Download className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop table */}
+              <div className="hidden md:block border rounded-lg bg-background">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Part #</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Ver</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Modified</TableHead>
+                      <TableHead className="w-10"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {results.map((file) => (
+                      <TableRow key={file.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigateToFile(file)}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-1">
+                            {file.name}
+                            {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500" />}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
+                        <TableCell className="text-sm">{file.category}</TableCell>
+                        <TableCell className="font-mono text-xs">v{file.currentVersion}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>{file.lifecycleState}</Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">{file.folder?.path}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{new Date(file.updatedAt).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); handleDownload(file.id); }}>
+                            <Download className="w-3.5 h-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );
