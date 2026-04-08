@@ -23,7 +23,7 @@ export default async function DashboardPage() {
     { data: recentActivity },
   ] = await Promise.all([
     db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
-    db.from("folders").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
+    db.from("folders").select("*", { count: "exact", head: true }).eq("tenantId", tenantId).not("parentId", "is", null),
     db.from("ecos").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
     db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId).eq("isCheckedOut", true).eq("checkedOutById", tenantUser.id),
     db.from("audit_logs")
