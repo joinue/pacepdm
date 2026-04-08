@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
+import { FormattedDate } from "@/components/ui/formatted-date";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -86,6 +87,27 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
     setCopied(false);
   }
 
+  async function toggleActive(userId: string, currentlyActive: boolean) {
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !currentlyActive }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to update user");
+        return;
+      }
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, isActive: !currentlyActive } : u))
+      );
+      toast.success(`User ${currentlyActive ? "deactivated" : "activated"}`);
+    } catch {
+      toast.error("Failed to update user");
+    }
+  }
+
   async function copyPassword() {
     if (tempPassword) {
       await navigator.clipboard.writeText(tempPassword);
@@ -122,12 +144,19 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
                 <TableCell>{user.email}</TableCell>
                 <TableCell><Badge variant="secondary">{user.role?.name}</Badge></TableCell>
                 <TableCell>
-                  <Badge variant={user.isActive ? "default" : "destructive"}>
-                    {user.isActive ? "Active" : "Inactive"}
-                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-2 py-0.5"
+                    onClick={() => toggleActive(user.id, user.isActive)}
+                  >
+                    <Badge variant={user.isActive ? "default" : "destructive"}>
+                      {user.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </Button>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">
-                  {new Date(user.createdAt).toLocaleDateString()}
+                  <FormattedDate date={user.createdAt} variant="date" />
                 </TableCell>
               </TableRow>
             ))}

@@ -6,9 +6,6 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
-} from "@/components/ui/card";
 import { ArrowLeft, Mail } from "lucide-react";
 import { Logo } from "@/components/layout/logo";
 
@@ -39,64 +36,68 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <Card className="w-full max-w-sm border-border/50">
-        <CardHeader className="text-center pb-2">
-          <div className="flex justify-center mb-4">
-            <Logo size={40} />
-          </div>
-          <CardTitle className="text-xl font-semibold tracking-tight">Reset Password</CardTitle>
-          <CardDescription className="text-xs">
-            {sent ? "Check your email" : "Enter your email to receive a reset link"}
-          </CardDescription>
-        </CardHeader>
+    <div className="min-h-dvh flex flex-col bg-background">
+      <div className="flex-1 flex flex-col items-center justify-end pb-8 pt-16 sm:pt-8 sm:justify-center sm:pb-6">
+        <Logo size={52} className="mb-4" />
+        <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">Reset Password</h1>
+        <p className="text-sm sm:text-xs text-muted-foreground mt-1">
+          {sent ? "Check your email" : "Enter your email to receive a reset link"}
+        </p>
+      </div>
 
-        {sent ? (
-          <CardContent className="text-center space-y-4 pt-2">
-            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-              <Mail className="w-6 h-6 text-primary" />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              We sent a password reset link to <span className="font-medium text-foreground">{email}</span>.
-              Check your inbox and follow the link to reset your password.
-            </p>
-          </CardContent>
-        ) : (
-          <form onSubmit={handleReset}>
-            <CardContent className="space-y-3 pt-2">
-              {error && (
-                <div className="bg-destructive/10 text-destructive text-xs p-2.5 rounded-md">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-xs">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-9 text-sm"
-                  required
-                />
+      <div className="flex-1 flex flex-col sm:flex-none sm:flex sm:items-center sm:justify-start sm:pb-16">
+        <div className="w-full px-6 sm:px-0 sm:w-full sm:max-w-sm sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5">
+          {sent ? (
+            <div className="text-center space-y-4">
+              <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <Mail className="w-7 h-7 text-primary" />
               </div>
-            </CardContent>
-            <CardFooter className="flex flex-col gap-3 pt-0">
-              <Button type="submit" className="w-full h-9 text-sm" disabled={loading}>
-                {loading ? "Sending..." : "Send Reset Link"}
-              </Button>
-            </CardFooter>
-          </form>
-        )}
+              <p className="text-sm text-muted-foreground">
+                We sent a password reset link to <span className="font-medium text-foreground">{email}</span>.
+                Check your inbox and follow the link to reset your password.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleReset}>
+              <div className="space-y-5">
+                {error && (
+                  <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg border border-destructive/20">
+                    {error}
+                  </div>
+                )}
 
-        <CardFooter className="justify-center pt-0">
-          <Link href="/login" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-            <ArrowLeft className="w-3 h-3" />
-            Back to sign in
-          </Link>
-        </CardFooter>
-      </Card>
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-12 sm:h-10 text-base sm:text-sm rounded-lg"
+                    required
+                    autoFocus
+                    autoComplete="email"
+                  />
+                </div>
+
+                <Button type="submit" className="w-full h-12 sm:h-10 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+                  {loading ? "Sending..." : "Send Reset Link"}
+                </Button>
+              </div>
+            </form>
+          )}
+
+          <div className="flex justify-center mt-6">
+            <Link href="/login" className="text-sm sm:text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+              <ArrowLeft className="w-4 h-4 sm:w-3 sm:h-3" />
+              Back to sign in
+            </Link>
+          </div>
+        </div>
+
+        <div className="h-8 sm:h-0 shrink-0" />
+      </div>
     </div>
   );
 }

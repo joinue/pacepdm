@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 export async function DELETE(
@@ -8,7 +8,8 @@ export async function DELETE(
   { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { fileId } = await params;
 

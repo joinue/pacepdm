@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
+import { logAudit } from "@/lib/audit";
 
 export async function GET() {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const db = getServiceClient();
 
     const { data: groups } = await db
@@ -33,7 +35,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_SETTINGS)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -66,6 +69,8 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
+
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "approval_group.create", entityType: "approval_group", entityId: group.id, details: { name: name.trim() } });
 
     return NextResponse.json({ ...group, members: [] });
   } catch {

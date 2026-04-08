@@ -2,25 +2,114 @@
 
 import { useState, useEffect } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { useNotifications } from "@/components/providers/notification-provider";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuGroup, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Sun, Moon, Menu } from "lucide-react";
+import { LogOut, User, Sun, Moon, Menu, Bell, ChevronRight, CheckCheck } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
+import { GlobalSearch } from "@/components/layout/global-search";
+
+const breadcrumbLabels: Record<string, string> = {
+  vault: "Vault",
+  search: "Search",
+  parts: "Parts",
+  approvals: "Approvals",
+  ecos: "ECOs",
+  boms: "BOMs",
+  "audit-log": "Audit Log",
+  profile: "Profile",
+  notifications: "Notifications",
+  admin: "Admin",
+  users: "Users",
+  workflows: "Workflows",
+  "approval-groups": "Approval Groups",
+  lifecycle: "Lifecycle",
+  metadata: "Metadata",
+  settings: "Settings",
+};
+
+const typeBadgeVariant: Record<string, "info" | "purple" | "orange" | "warning" | "muted"> = {
+  approval: "purple",
+  transition: "info",
+  eco: "orange",
+  checkout: "warning",
+  system: "muted",
+};
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth}mo ago`;
+  const diffYear = Math.floor(diffMonth / 12);
+  return `${diffYear}y ago`;
+}
 
 export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const user = useTenantUser();
   const router = useRouter();
+  const pathname = usePathname();
   const supabase = createClient();
   const { resolvedTheme, setTheme } = useTheme();
+  const { unreadCount, notifications, loading: loadingNotifs, refresh, markRead, markAllRead } = useNotifications();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const segments = pathname.split("/").filter(Boolean);
+  const crumbs = segments.map((seg, i) => ({
+    label: breadcrumbLabels[seg] || seg,
+    href: "/" + segments.slice(0, i + 1).join("/"),
+  }));
+
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  // Refresh notifications when popover opens
+  useEffect(() => {
+    if (notifOpen) {
+      refresh();
+    }
+  }, [notifOpen, refresh]);
+
+  async function handleMarkAllRead() {
+    try {
+      await markAllRead();
+      toast.success("All notifications marked as read");
+    } catch {
+      toast.error("Failed to mark notifications as read");
+    }
+  }
+
+  async function handleClickNotification(notif: { id: string; isRead: boolean; link: string | null }) {
+    if (!notif.isRead) {
+      await markRead(notif.id);
+    }
+    if (notif.link) {
+      setNotifOpen(false);
+      router.push(notif.link);
+    }
+  }
 
   const initials = user.fullName
     .split(" ")
@@ -45,21 +134,134 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
 
   return (
     <header className="h-12 flex items-center justify-between px-4 md:px-5">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5 min-w-0">
         {/* Mobile menu button */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 md:hidden"
+          className="h-8 w-8 p-0 md:hidden shrink-0"
           onClick={onMenuClick}
         >
           <Menu className="w-4 h-4" />
         </Button>
-        <span className="text-xs text-muted-foreground/50 hidden sm:block">
-          {user.tenantName}
-        </span>
+        {/* Breadcrumbs */}
+        <nav className="flex items-center gap-1 text-xs text-muted-foreground/60 min-w-0 overflow-hidden">
+          <Link href="/" className="hover:text-foreground transition-colors shrink-0">
+            {user.tenantName}
+          </Link>
+          {crumbs.map((crumb, i) => (
+            <span key={crumb.href} className="flex items-center gap-1 shrink-0">
+              <ChevronRight className="w-3 h-3" />
+              {i === crumbs.length - 1 ? (
+                <span className="text-foreground font-medium">{crumb.label}</span>
+              ) : (
+                <Link href={crumb.href} className="hover:text-foreground transition-colors">
+                  {crumb.label}
+                </Link>
+              )}
+            </span>
+          ))}
+        </nav>
       </div>
       <div className="flex items-center gap-1">
+        {/* Global Search */}
+        <GlobalSearch />
+        {/* Notifications Popover */}
+        <Popover open={notifOpen} onOpenChange={setNotifOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground relative"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary text-primary-foreground text-[9px] font-bold rounded-full flex items-center justify-center">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Button>
+            }
+          />
+          <PopoverContent align="end" sideOffset={8} className="w-95 p-0 gap-0">
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <span className="text-sm font-semibold">Notifications</span>
+              {unreadCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                  onClick={handleMarkAllRead}
+                >
+                  <CheckCheck className="w-3 h-3" />
+                  Mark all read
+                </Button>
+              )}
+            </div>
+            <Separator />
+            {/* Notification list */}
+            <ScrollArea className="max-h-100 overflow-auto">
+              {loadingNotifs && notifications.length === 0 ? (
+                <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+                  Loading...
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+                  No notifications
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  {notifications.map((notif) => (
+                    <button
+                      key={notif.id}
+                      className="flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors w-full border-b border-border/50 last:border-b-0"
+                      onClick={() => handleClickNotification(notif)}
+                    >
+                      {/* Unread dot */}
+                      <div className="mt-1.5 shrink-0">
+                        {!notif.isRead ? (
+                          <span className="block w-2 h-2 rounded-full bg-primary" />
+                        ) : (
+                          <span className="block w-2 h-2" />
+                        )}
+                      </div>
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-sm font-medium truncate">{notif.title}</span>
+                          <Badge
+                            variant={typeBadgeVariant[notif.type] || "muted"}
+                            className="text-[10px] h-4 px-1.5 shrink-0"
+                          >
+                            {notif.type}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2">{notif.message}</p>
+                        <span className="text-[10px] text-muted-foreground/60 mt-0.5 block">
+                          {formatRelativeTime(notif.createdAt)}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+            <Separator />
+            {/* Footer */}
+            <div className="px-3 py-2">
+              <Link
+                href="/notifications"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setNotifOpen(false)}
+              >
+                View all
+              </Link>
+            </div>
+          </PopoverContent>
+        </Popover>
+
         {mounted && (
           <Button
             variant="ghost"

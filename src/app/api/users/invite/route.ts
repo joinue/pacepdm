@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { createClient } from "@supabase/supabase-js";
 
 export async function POST(request: NextRequest) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
 
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_USERS)) {

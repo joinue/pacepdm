@@ -7,8 +7,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { FolderOpen, FileText, ClipboardList, History, CheckCircle } from "lucide-react";
+import { FolderOpen, FileText, ClipboardList, History, CheckCircle, Inbox } from "lucide-react";
 import Link from "next/link";
+import { FormattedDate } from "@/components/ui/formatted-date";
 
 export default async function DashboardPage() {
   const tenantUser = await getCurrentTenantUser();
@@ -111,9 +112,12 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           {!recentActivity || recentActivity.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No activity yet. Start by uploading files to the vault.
-            </p>
+            <div className="py-8 text-center">
+              <Inbox className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">
+                No activity yet. Start by uploading files to the vault.
+              </p>
+            </div>
           ) : (
             <div className="space-y-3">
               {recentActivity.map((log) => (
@@ -124,7 +128,7 @@ export default async function DashboardPage() {
                     <span className="text-muted-foreground">{log.entityType}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {new Date(log.createdAt).toLocaleString()}
+                    <FormattedDate date={log.createdAt} />
                   </span>
                 </div>
               ))}

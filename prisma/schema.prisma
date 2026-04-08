@@ -15,6 +15,7 @@ model Tenant {
   id        String   @id @default(uuid())
   name      String
   slug      String   @unique
+  settings  Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -112,6 +113,8 @@ model File {
   currentVersion  Int          @default(1)
   lifecycleState  String       @default("WIP")
   lifecycleId     String?
+
+  thumbnailKey   String?
 
   isCheckedOut   Boolean   @default(false)
   checkedOutById String?
@@ -279,16 +282,21 @@ model LifecycleTransition {
 // ============================================================
 
 model ECO {
-  id          String      @id @default(uuid())
-  tenantId    String
-  ecoNumber   String
-  title       String
-  description String?
-  status      ECOStatus   @default(DRAFT)
-  priority    ECOPriority @default(MEDIUM)
-  createdById String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String         @id @default(uuid())
+  tenantId     String
+  ecoNumber    String
+  title        String
+  description  String?
+  status       ECOStatus      @default(DRAFT)
+  priority     ECOPriority    @default(MEDIUM)
+  reason       ECOReason?
+  changeType   ECOChangeType?
+  costImpact   ECOCostImpact?
+  disposition  ECODisposition?
+  effectivity  String?
+  createdById  String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   items     ECOItem[]
@@ -313,6 +321,38 @@ enum ECOPriority {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+enum ECOReason {
+  DESIGN_IMPROVEMENT
+  COST_REDUCTION
+  DEFECT_FIX
+  REGULATORY
+  MANUFACTURING
+  CUSTOMER_REQUEST
+  OTHER
+}
+
+enum ECOChangeType {
+  DOCUMENT_ONLY
+  COMPONENT
+  ASSEMBLY
+  PROCESS
+}
+
+enum ECOCostImpact {
+  NONE
+  MINOR
+  MODERATE
+  SIGNIFICANT
+}
+
+enum ECODisposition {
+  USE_AS_IS
+  REWORK
+  SCRAP
+  RETURN_TO_VENDOR
+  NOT_APPLICABLE
 }
 
 model ECOItem {
@@ -347,6 +387,200 @@ enum ApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+// ============================================================
+// APPROVAL WORKFLOWS ENGINE (migration-002, migration-006)
+// ============================================================
+
+model ApprovalGroup {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members              ApprovalGroupMember[]
+  transitionRules      TransitionApprovalRule[]
+  approvalDecisions    ApprovalDecision[]
+  workflowSteps        ApprovalWorkflowStep[]
+
+  @@unique([tenantId, name])
+  @@map("approval_groups")
+}
+
+model ApprovalGroupMember {
+  id        String   @id @default(uuid())
+  groupId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  group ApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("approval_group_members")
+}
+
+model TransitionApprovalRule {
+  id           String  @id @default(uuid())
+  transitionId String
+  groupId      String
+  isRequired   Boolean @default(true)
+  sortOrder    Int     @default(0)
+
+  group ApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([transitionId, groupId])
+  @@map("transition_approval_rules")
+}
+
+model ApprovalRequest {
+  id               String    @id @default(uuid())
+  tenantId         String
+  type             String // FILE_TRANSITION, ECO
+  entityType       String // file, eco
+  entityId         String
+  transitionId     String?
+  requestedById    String
+  workflowId       String?
+  currentStepOrder Int       @default(1)
+  status           String    @default("PENDING") // PENDING, APPROVED, REJECTED, RECALLED, REWORK
+  title            String
+  description      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  completedAt      DateTime?
+
+  workflow  ApprovalWorkflow?  @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  decisions ApprovalDecision[]
+  history   ApprovalHistory[]
+
+  @@index([tenantId, status])
+  @@map("approval_requests")
+}
+
+model ApprovalDecision {
+  id             String    @id @default(uuid())
+  requestId      String
+  groupId        String
+  stepId         String?
+  deciderId      String?
+  status         String    @default("PENDING") // PENDING, APPROVED, REJECTED, REWORK, WAITING, RECALLED
+  signatureLabel String?
+  approvalMode   String?   @default("ANY") // ANY, ALL, MAJORITY
+  deadlineAt     DateTime?
+  comment        String?
+  decidedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  request ApprovalRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  group   ApprovalGroup         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  step    ApprovalWorkflowStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@map("approval_decisions")
+}
+
+model ApprovalWorkflow {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps       ApprovalWorkflowStep[]
+  assignments ApprovalWorkflowAssignment[]
+  requests    ApprovalRequest[]
+
+  @@unique([tenantId, name])
+  @@map("approval_workflows")
+}
+
+model ApprovalWorkflowStep {
+  id             String   @id @default(uuid())
+  workflowId     String
+  groupId        String
+  stepOrder      Int      @default(1)
+  approvalMode   String   @default("ANY") // ANY, ALL, MAJORITY
+  signatureLabel String   @default("Approved")
+  deadlineHours  Int?
+  createdAt      DateTime @default(now())
+
+  workflow  ApprovalWorkflow   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  group     ApprovalGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  decisions ApprovalDecision[]
+
+  @@index([workflowId])
+  @@map("approval_workflow_steps")
+}
+
+model ApprovalWorkflowAssignment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  workflowId   String
+  transitionId String?
+  ecoTrigger   String? // SUBMITTED, IN_REVIEW
+  createdAt    DateTime @default(now())
+
+  workflow ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([transitionId])
+  @@map("approval_workflow_assignments")
+}
+
+model ApprovalHistory {
+  id        String   @id @default(uuid())
+  requestId String
+  event     String // CREATED, STEP_ACTIVATED, APPROVED, REJECTED, RECALLED, REWORK_REQUESTED, RESUBMITTED, COMPLETED, DEADLINE_WARNING
+  userId    String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  request ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("approval_history")
+}
+
+// ============================================================
+// NOTIFICATIONS (migration-003)
+// ============================================================
+
+model Notification {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  title     String
+  message   String
+  type      String   @default("system") // approval, transition, checkout, eco, system
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId, isRead])
+  @@map("notifications")
+}
+
+// ============================================================
+// COMMENT MENTIONS (migration-mentions)
+// ============================================================
+
+model CommentMention {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String
+  mentionedBy String
+  entityType  String // approval_decision, file_version
+  entityId    String
+  comment     String
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, userId])
+  @@index([entityType, entityId])
+  @@map("comment_mentions")
 }
 
 // ============================================================

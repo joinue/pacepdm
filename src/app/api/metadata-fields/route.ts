@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
+import { logAudit } from "@/lib/audit";
 
 export async function POST(request: NextRequest) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
 
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_METADATA)) {
@@ -56,6 +58,8 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "metadata_field.create", entityType: "metadata_field", entityId: field.id, details: { name: name.trim(), fieldType: fieldType || "TEXT" } });
+
     return NextResponse.json(field);
   } catch {
     return NextResponse.json({ error: "Failed to create field" }, { status: 500 });
@@ -64,7 +68,8 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
 
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_METADATA)) {
@@ -84,6 +89,8 @@ export async function DELETE(request: NextRequest) {
 
     await db.from("metadata_values").delete().eq("fieldId", fieldId);
     await db.from("metadata_fields").delete().eq("id", fieldId);
+
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "metadata_field.delete", entityType: "metadata_field", entityId: fieldId, details: { name: field.name } });
 
     return NextResponse.json({ success: true });
   } catch {

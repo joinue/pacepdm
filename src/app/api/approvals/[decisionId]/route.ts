@@ -1,39 +1,105 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser } from "@/lib/auth";
+import { getApiTenantUser } from "@/lib/auth";
+import { processDecision, rejectForRework } from "@/lib/approval-engine";
 import { logAudit } from "@/lib/audit";
+import { processMentions } from "@/lib/mentions";
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ decisionId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { decisionId } = await params;
-    const { status, comment } = await request.json();
+    const { status, comment, rework } = await request.json();
+
+    if (rework) {
+      // Reject-and-rework flow
+      if (!comment?.trim()) {
+        return NextResponse.json({ error: "Comment is required for rework requests" }, { status: 400 });
+      }
+
+      const result = await rejectForRework({
+        decisionId,
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        userFullName: tenantUser.fullName,
+        comment: comment.trim(),
+      });
+
+      if ("error" in result) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+
+      await processMentions({
+        tenantId: tenantUser.tenantId,
+        mentionedById: tenantUser.id,
+        mentionedByName: tenantUser.fullName,
+        entityType: "approval_decision",
+        entityId: decisionId,
+        comment: comment.trim(),
+        link: "/approvals",
+      }).catch(() => {});
+
+      return NextResponse.json({ success: true, requestStatus: "REWORK" });
+    }
 
     if (!["APPROVED", "REJECTED"].includes(status)) {
       return NextResponse.json({ error: "Status must be APPROVED or REJECTED" }, { status: 400 });
     }
 
+    // Check if this decision has a stepId (workflow-based) or not (legacy)
     const db = getServiceClient();
+    const { data: decision } = await db.from("approval_decisions").select("stepId").eq("id", decisionId).single();
 
-    // Get the decision and verify the user is in the approval group
-    const { data: decision } = await db
+    if (decision?.stepId) {
+      // Workflow-based approval — use the engine
+      const result = await processDecision({
+        decisionId,
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        userFullName: tenantUser.fullName,
+        status,
+        comment,
+      });
+
+      if ("error" in result) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+
+      if (comment?.trim()) {
+        await processMentions({
+          tenantId: tenantUser.tenantId,
+          mentionedById: tenantUser.id,
+          mentionedByName: tenantUser.fullName,
+          entityType: "approval_decision",
+          entityId: decisionId,
+          comment: comment.trim(),
+          link: "/approvals",
+        }).catch(() => {});
+      }
+
+      return NextResponse.json(result);
+    }
+
+    // Legacy approval flow (no workflow) — original logic
+    const { data: fullDecision } = await db
       .from("approval_decisions")
       .select("*, request:approval_requests!approval_decisions_requestId_fkey(*)")
       .eq("id", decisionId)
       .single();
 
-    if (!decision) {
+    if (!fullDecision) {
       return NextResponse.json({ error: "Decision not found" }, { status: 404 });
     }
 
-    // Verify user is a member of the approval group
+    // Verify user is in the group
     const { data: membership } = await db
       .from("approval_group_members")
       .select("id")
-      .eq("groupId", decision.groupId)
+      .eq("groupId", fullDecision.groupId)
       .eq("userId", tenantUser.id)
       .single();
 
@@ -43,7 +109,6 @@ export async function PUT(
 
     const now = new Date().toISOString();
 
-    // Record the decision
     await db.from("approval_decisions").update({
       status,
       deciderId: tenantUser.id,
@@ -51,9 +116,8 @@ export async function PUT(
       decidedAt: now,
     }).eq("id", decisionId);
 
-    const requestId = decision.requestId;
+    const requestId = fullDecision.requestId;
 
-    // Check if all decisions for this request are resolved
     const { data: allDecisions } = await db
       .from("approval_decisions")
       .select("status")
@@ -71,44 +135,35 @@ export async function PUT(
         completedAt: now,
       }).eq("id", requestId);
 
-      // If approved and it's a file transition, execute the transition
-      if (requestStatus === "APPROVED" && decision.request.entityType === "file" && decision.request.transitionId) {
+      if (requestStatus === "APPROVED" && fullDecision.request.entityType === "file" && fullDecision.request.transitionId) {
         const { data: transition } = await db
           .from("lifecycle_transitions")
           .select("*, toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name)")
-          .eq("id", decision.request.transitionId)
+          .eq("id", fullDecision.request.transitionId)
           .single();
 
         if (transition) {
           await db.from("files").update({
             lifecycleState: transition.toState.name,
             updatedAt: now,
-          }).eq("id", decision.request.entityId);
+          }).eq("id", fullDecision.request.entityId);
 
           await logAudit({
             tenantId: tenantUser.tenantId,
             userId: tenantUser.id,
             action: "file.transition.approved",
             entityType: "file",
-            entityId: decision.request.entityId,
+            entityId: fullDecision.request.entityId,
             details: { newState: transition.toState.name, transition: transition.name },
           });
         }
       }
 
-      // If approved and it's an ECO, update ECO status
-      if (requestStatus === "APPROVED" && decision.request.entityType === "eco") {
+      if (fullDecision.request.entityType === "eco") {
         await db.from("ecos").update({
-          status: "APPROVED",
+          status: requestStatus === "APPROVED" ? "APPROVED" : "REJECTED",
           updatedAt: now,
-        }).eq("id", decision.request.entityId);
-      }
-
-      if (requestStatus === "REJECTED" && decision.request.entityType === "eco") {
-        await db.from("ecos").update({
-          status: "REJECTED",
-          updatedAt: now,
-        }).eq("id", decision.request.entityId);
+        }).eq("id", fullDecision.request.entityId);
       }
     }
 
@@ -116,10 +171,22 @@ export async function PUT(
       tenantId: tenantUser.tenantId,
       userId: tenantUser.id,
       action: `approval.${status.toLowerCase()}`,
-      entityType: decision.request.entityType,
-      entityId: decision.request.entityId,
-      details: { title: decision.request.title, comment },
+      entityType: fullDecision.request.entityType,
+      entityId: fullDecision.request.entityId,
+      details: { title: fullDecision.request.title, comment },
     });
+
+    if (comment?.trim()) {
+      await processMentions({
+        tenantId: tenantUser.tenantId,
+        mentionedById: tenantUser.id,
+        mentionedByName: tenantUser.fullName,
+        entityType: "approval_decision",
+        entityId: decisionId,
+        comment: comment.trim(),
+        link: "/approvals",
+      }).catch(() => {});
+    }
 
     return NextResponse.json({
       success: true,

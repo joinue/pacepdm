@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { notify } from "@/lib/notifications";
+import { processMentions } from "@/lib/mentions";
 import { v4 as uuid } from "uuid";
+import { isSolidWorksFile, extractSolidWorksThumbnail } from "@/lib/thumbnail";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { fileId } = await params;
 
@@ -41,9 +44,8 @@ export async function POST(
 
     if (newFile) {
       const storageKey = `${tenantUser.tenantId}/${file.folderId}/${Date.now()}-${newFile.name}`;
-      const supabase = await createServerSupabaseClient();
       const arrayBuffer = await newFile.arrayBuffer();
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await db.storage
         .from("vault")
         .upload(storageKey, arrayBuffer, { contentType: newFile.type, upsert: false });
 
@@ -51,10 +53,29 @@ export async function POST(
         return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
       }
 
+      // Re-extract thumbnail for SolidWorks files
+      let thumbnailKey = file.thumbnailKey;
+      if (isSolidWorksFile(newFile.name)) {
+        try {
+          const thumb = await extractSolidWorksThumbnail(arrayBuffer);
+          if (thumb) {
+            const thumbExt = thumb.mimeType === "image/jpeg" ? "jpg" : "png";
+            thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumbExt}`;
+            await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+              contentType: thumb.mimeType,
+              upsert: false,
+            });
+          }
+        } catch (e) {
+          console.error("Thumbnail extraction failed:", e);
+        }
+      }
+
       await db.from("file_versions").insert({
         id: uuid(),
         fileId,
         version: newVersion,
+        revision: file.revision,
         storageKey,
         fileSize: newFile.size,
         uploadedById: tenantUser.id,
@@ -68,6 +89,7 @@ export async function POST(
         checkedOutById: null,
         checkedOutAt: null,
         updatedAt: now,
+        thumbnailKey,
       }).eq("id", fileId);
     } else {
       await db.from("files").update({
@@ -86,6 +108,33 @@ export async function POST(
       entityId: fileId,
       details: { name: file.name, version: newFile ? newVersion : file.currentVersion },
     });
+
+    // Process @mentions in check-in comment
+    if (comment?.trim()) {
+      await processMentions({
+        tenantId: tenantUser.tenantId,
+        mentionedById: tenantUser.id,
+        mentionedByName: tenantUser.fullName,
+        entityType: "file_version",
+        entityId: fileId,
+        comment: comment.trim(),
+        link: `/vault?file=${fileId}`,
+      }).catch(() => {});
+    }
+
+    // If an admin checked in someone else's file, notify the original checker
+    if (file.checkedOutById && file.checkedOutById !== tenantUser.id) {
+      await notify({
+        tenantId: tenantUser.tenantId,
+        userIds: [file.checkedOutById],
+        title: newFile ? "File checked in by admin" : "Checkout cancelled by admin",
+        message: newFile
+          ? `"${file.name}" was checked in by ${tenantUser.fullName}`
+          : `Your checkout of "${file.name}" was cancelled by ${tenantUser.fullName}`,
+        type: "checkout",
+        link: `/vault?file=${fileId}`,
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ success: true, version: newFile ? newVersion : file.currentVersion });
   } catch {

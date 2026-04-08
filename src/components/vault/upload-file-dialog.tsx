@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,8 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload } from "lucide-react";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Upload, Search } from "lucide-react";
 import { toast } from "sonner";
+import { useTenantUser } from "@/components/providers/tenant-provider";
 
 export function UploadFileDialog({
   open,
@@ -26,11 +31,54 @@ export function UploadFileDialog({
   folderId: string;
   onUploaded: () => void;
 }) {
+  const user = useTenantUser();
+  const isAdmin = user.permissions.includes("*");
   const [file, setFile] = useState<File | null>(null);
   const [partNumber, setPartNumber] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [lifecycleState, setLifecycleState] = useState("");
+  const [lifecycleStates, setLifecycleStates] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [linkToPart, setLinkToPart] = useState(false);
+  const [linkMode, setLinkMode] = useState<"existing" | "new">("existing");
+  const [partSearchQuery, setPartSearchQuery] = useState("");
+  const [partSearchResults, setPartSearchResults] = useState<{id: string; partNumber: string; name: string}[]>([]);
+  const [selectedPart, setSelectedPart] = useState<{id: string; partNumber: string; name: string} | null>(null);
+  const [newPartNumber, setNewPartNumber] = useState("");
+  const [newPartName, setNewPartName] = useState("");
+  const [fileRole, setFileRole] = useState("DRAWING");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open && isAdmin && lifecycleStates.length === 0) {
+      fetch("/api/lifecycle")
+        .then((r) => r.ok ? r.json() : [])
+        .then((lifecycles) => {
+          if (Array.isArray(lifecycles) && lifecycles.length > 0) {
+            const defaultLc = lifecycles.find((lc: { isDefault: boolean }) => lc.isDefault) || lifecycles[0];
+            if (defaultLc?.states) {
+              setLifecycleStates(defaultLc.states.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [open, isAdmin, lifecycleStates.length]);
+
+  useEffect(() => {
+    if (!linkToPart || linkMode !== "existing" || partSearchQuery.length < 2) {
+      setPartSearchResults([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      fetch(`/api/parts?q=${encodeURIComponent(partSearchQuery)}`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((d) => setPartSearchResults(Array.isArray(d) ? d.slice(0, 8) : []))
+        .catch(() => setPartSearchResults([]));
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [partSearchQuery, linkToPart, linkMode]);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -44,23 +92,64 @@ export function UploadFileDialog({
       formData.append("folderId", folderId);
       if (partNumber) formData.append("partNumber", partNumber);
       if (description) formData.append("description", description);
+      if (category) formData.append("category", category);
+      if (lifecycleState) formData.append("lifecycleState", lifecycleState);
 
       const res = await fetch("/api/files", {
         method: "POST",
         body: formData,
       });
 
+      const fileData = await res.json();
+
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || "Failed to upload file");
+        toast.error(fileData.error || "Failed to upload file");
         setLoading(false);
         return;
       }
 
-      toast.success("File uploaded successfully");
+      // Link to part if requested
+      if (linkToPart && linkMode === "existing" && selectedPart) {
+        await fetch(`/api/parts/${selectedPart.id}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: fileData.id, role: fileRole, isPrimary: true }),
+        });
+        toast.success(`File uploaded and linked to ${selectedPart.partNumber}`);
+      } else if (linkToPart && linkMode === "new" && newPartNumber && newPartName) {
+        const partRes = await fetch("/api/parts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ partNumber: newPartNumber, name: newPartName }),
+        });
+        if (partRes.ok) {
+          const part = await partRes.json();
+          await fetch(`/api/parts/${part.id}/files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileId: fileData.id, role: fileRole, isPrimary: true }),
+          });
+          toast.success(`File uploaded, part ${newPartNumber} created and linked`);
+        } else {
+          toast.success("File uploaded but failed to create part");
+        }
+      } else {
+        toast.success("File uploaded successfully");
+      }
+
       setFile(null);
       setPartNumber("");
       setDescription("");
+      setCategory("");
+      setLifecycleState("");
+      setLinkToPart(false);
+      setLinkMode("existing");
+      setPartSearchQuery("");
+      setPartSearchResults([]);
+      setSelectedPart(null);
+      setNewPartNumber("");
+      setNewPartName("");
+      setFileRole("DRAWING");
       onOpenChange(false);
       onUploaded();
     } catch {
@@ -115,6 +204,20 @@ export function UploadFileDialog({
             </div>
 
             <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={category} onValueChange={(v) => setCategory(v ?? "")}>
+                <SelectTrigger><SelectValue placeholder="Auto-detect from extension" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PART">Part</SelectItem>
+                  <SelectItem value="ASSEMBLY">Assembly</SelectItem>
+                  <SelectItem value="DRAWING">Drawing</SelectItem>
+                  <SelectItem value="DOCUMENT">Document</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="description">Description (optional)</Label>
               <Textarea
                 id="description"
@@ -123,6 +226,151 @@ export function UploadFileDialog({
                 placeholder="Brief description of this file"
                 rows={2}
               />
+            </div>
+
+            {isAdmin && lifecycleStates.length > 0 && (
+              <div className="space-y-2">
+                <Label>Initial State</Label>
+                <Select value={lifecycleState} onValueChange={(v) => setLifecycleState(v ?? "")}>
+                  <SelectTrigger><SelectValue placeholder="Default (WIP)" /></SelectTrigger>
+                  <SelectContent>
+                    {lifecycleStates.map((s) => (
+                      <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Override the initial lifecycle state for this file.</p>
+              </div>
+            )}
+
+            {/* Link to Part section */}
+            <div className="border-t pt-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  checked={linkToPart}
+                  onCheckedChange={(v) => setLinkToPart(!!v)}
+                />
+                <span className="text-sm font-medium">Link this file to a part</span>
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </label>
+
+              {linkToPart && (
+                <div className="mt-3 space-y-3 pl-6">
+                  {/* Mode toggle */}
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={linkMode === "existing" ? "default" : "outline"}
+                      onClick={() => setLinkMode("existing")}
+                      className="text-xs h-7"
+                    >
+                      Existing Part
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={linkMode === "new" ? "default" : "outline"}
+                      onClick={() => setLinkMode("new")}
+                      className="text-xs h-7"
+                    >
+                      New Part
+                    </Button>
+                  </div>
+
+                  {linkMode === "existing" ? (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search parts by number or name..."
+                          value={partSearchQuery}
+                          onChange={(e) => {
+                            setPartSearchQuery(e.target.value);
+                            setSelectedPart(null);
+                          }}
+                          className="pl-9"
+                        />
+                      </div>
+                      {selectedPart && (
+                        <div className="flex items-center gap-2 text-sm bg-muted rounded px-2 py-1.5">
+                          <span className="font-medium">{selectedPart.partNumber}</span>
+                          <span className="text-muted-foreground">{selectedPart.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="ml-auto h-5 w-5 p-0 text-muted-foreground"
+                            onClick={() => {
+                              setSelectedPart(null);
+                              setPartSearchQuery("");
+                            }}
+                          >
+                            &times;
+                          </Button>
+                        </div>
+                      )}
+                      {!selectedPart && partSearchResults.length > 0 && (
+                        <div className="border rounded-md max-h-40 overflow-y-auto">
+                          {partSearchResults.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center gap-2"
+                              onClick={() => {
+                                setSelectedPart(p);
+                                setPartSearchQuery(p.partNumber);
+                                setPartSearchResults([]);
+                              }}
+                            >
+                              <span className="font-medium">{p.partNumber}</span>
+                              <span className="text-muted-foreground">{p.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="newPartNumber">Part Number</Label>
+                        <Input
+                          id="newPartNumber"
+                          value={newPartNumber}
+                          onChange={(e) => setNewPartNumber(e.target.value)}
+                          placeholder="e.g., PACE-2001"
+                          required={linkToPart && linkMode === "new"}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="newPartName">Part Name</Label>
+                        <Input
+                          id="newPartName"
+                          value={newPartName}
+                          onChange={(e) => setNewPartName(e.target.value)}
+                          placeholder="e.g., Main Housing"
+                          required={linkToPart && linkMode === "new"}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File role select */}
+                  <div className="space-y-1">
+                    <Label>File Role</Label>
+                    <Select value={fileRole} onValueChange={(v) => setFileRole(v ?? "DRAWING")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DRAWING">Drawing</SelectItem>
+                        <SelectItem value="MODEL_3D">3D Model</SelectItem>
+                        <SelectItem value="SPEC_SHEET">Spec Sheet</SelectItem>
+                        <SelectItem value="DATASHEET">Datasheet</SelectItem>
+                        <SelectItem value="OTHER">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>

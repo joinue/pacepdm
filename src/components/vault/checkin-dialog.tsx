@@ -10,7 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { MentionInput } from "@/components/ui/mention-input";
 import { Label } from "@/components/ui/label";
 import { Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -106,11 +106,11 @@ export function CheckInDialog({
 
             <div className="space-y-2">
               <Label htmlFor="comment">Comment</Label>
-              <Textarea
+              <MentionInput
                 id="comment"
                 value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="What changed in this version?"
+                onChange={setComment}
+                placeholder="What changed in this version? (use @ to mention someone)"
                 rows={2}
               />
             </div>

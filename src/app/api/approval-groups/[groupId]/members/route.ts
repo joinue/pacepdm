@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
+import { logAudit } from "@/lib/audit";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ groupId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_SETTINGS)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -32,6 +34,8 @@ export async function POST(
       throw error;
     }
 
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "approval_group.member_add", entityType: "approval_group", entityId: groupId, details: { memberId: userId } });
+
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to add member" }, { status: 500 });
@@ -43,7 +47,8 @@ export async function DELETE(
   { params }: { params: Promise<{ groupId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     if (!hasPermission(permissions, PERMISSIONS.ADMIN_SETTINGS)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -54,6 +59,8 @@ export async function DELETE(
     const db = getServiceClient();
 
     await db.from("approval_group_members").delete().eq("groupId", groupId).eq("userId", userId);
+
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "approval_group.member_remove", entityType: "approval_group", entityId: groupId, details: { memberId: userId } });
 
     return NextResponse.json({ success: true });
   } catch {

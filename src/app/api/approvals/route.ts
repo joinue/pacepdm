@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser } from "@/lib/auth";
+import { getApiTenantUser } from "@/lib/auth";
 
 // Get pending approvals for the current user
 export async function GET() {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const db = getServiceClient();
 
     // Find all groups this user belongs to

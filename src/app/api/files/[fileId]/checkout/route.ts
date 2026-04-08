@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 export async function POST(
@@ -8,7 +8,8 @@ export async function POST(
   { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { fileId } = await params;
 
@@ -21,6 +22,9 @@ export async function POST(
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+    if (file.isFrozen) {
+      return NextResponse.json({ error: "Cannot check out a frozen/released file. Revise it first." }, { status: 409 });
     }
     if (file.isCheckedOut) {
       return NextResponse.json({ error: "File is already checked out" }, { status: 409 });

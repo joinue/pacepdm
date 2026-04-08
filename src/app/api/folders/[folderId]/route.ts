@@ -1,7 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+
+// Get folder with ancestor chain (for deep-linking breadcrumbs)
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ folderId: string }> }
+) {
+  try {
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { folderId } = await params;
+    const db = getServiceClient();
+
+    const { data: folder } = await db
+      .from("folders")
+      .select("id, name, parentId, path, tenantId")
+      .eq("id", folderId)
+      .single();
+
+    if (!folder || folder.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
+    }
+
+    // Walk up the tree to build ancestor chain
+    const ancestors: { id: string; name: string }[] = [];
+    let current = folder;
+    while (current.parentId) {
+      const { data: parent } = await db
+        .from("folders")
+        .select("id, name, parentId, path, tenantId")
+        .eq("id", current.parentId)
+        .single();
+      if (!parent) break;
+      ancestors.unshift({ id: parent.id, name: parent.parentId ? parent.name : "Vault" });
+      current = parent;
+    }
+    ancestors.push({ id: folder.id, name: folder.name });
+
+    return NextResponse.json({ ...folder, ancestors });
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch folder" }, { status: 500 });
+  }
+}
 
 // Rename folder
 export async function PUT(
@@ -9,7 +51,8 @@ export async function PUT(
   { params }: { params: Promise<{ folderId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { folderId } = await params;
 
@@ -66,7 +109,8 @@ export async function DELETE(
   { params }: { params: Promise<{ folderId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { folderId } = await params;
 

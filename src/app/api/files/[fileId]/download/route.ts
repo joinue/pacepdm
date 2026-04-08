@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser } from "@/lib/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getApiTenantUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 
 export async function GET(
@@ -9,7 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { fileId } = await params;
     const { searchParams } = new URL(request.url);
     const versionNum = searchParams.get("version");
@@ -31,8 +31,7 @@ export async function GET(
       return NextResponse.json({ error: "Version not found" }, { status: 404 });
     }
 
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.storage
+    const { data, error } = await db.storage
       .from("vault")
       .createSignedUrl(version.storageKey, 60);
 

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notify, notifyApprovalGroupMembers } from "@/lib/notifications";
+import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { v4 as uuid } from "uuid";
 
 export async function POST(
@@ -9,7 +11,8 @@ export async function POST(
   { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
-    const tenantUser = await getCurrentTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const permissions = tenantUser.role.permissions as string[];
     const { fileId } = await params;
 
@@ -43,7 +46,34 @@ export async function POST(
       return NextResponse.json({ error: "Transition not valid from current state" }, { status: 400 });
     }
 
-    // Check if this transition has approval rules
+    // 1. Check for a workflow assignment (new system)
+    const workflow = await findWorkflowForTrigger({
+      tenantId: tenantUser.tenantId,
+      transitionId,
+    });
+
+    if (workflow) {
+      const result = await startWorkflow({
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        userFullName: tenantUser.fullName,
+        workflowId: workflow.id,
+        type: "FILE_TRANSITION",
+        entityType: "file",
+        entityId: fileId,
+        transitionId,
+        title: `${transition.name}: ${file.name}`,
+        description: `Transition "${file.name}" from ${transition.fromState.name} to ${transition.toState.name}`,
+      });
+
+      if (!result.success) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+
+      return NextResponse.json(result);
+    }
+
+    // 2. Fall back to legacy transition_approval_rules
     const { data: approvalRules } = await db
       .from("transition_approval_rules")
       .select("*, group:approval_groups!transition_approval_rules_groupId_fkey(id, name)")
@@ -51,7 +81,6 @@ export async function POST(
       .order("sortOrder");
 
     if (approvalRules && approvalRules.length > 0) {
-      // Create an approval request
       const now = new Date().toISOString();
       const requestId = uuid();
 
@@ -70,7 +99,6 @@ export async function POST(
         updatedAt: now,
       });
 
-      // Create a decision entry for each required approval group
       for (const rule of approvalRules) {
         await db.from("approval_decisions").insert({
           id: uuid(),
@@ -82,17 +110,18 @@ export async function POST(
       }
 
       await logAudit({
-        tenantId: tenantUser.tenantId,
-        userId: tenantUser.id,
+        tenantId: tenantUser.tenantId, userId: tenantUser.id,
         action: "file.transition.requested",
-        entityType: "file",
-        entityId: fileId,
-        details: {
-          name: file.name,
-          from: transition.fromState.name,
-          to: transition.toState.name,
-          transition: transition.name,
-        },
+        entityType: "file", entityId: fileId,
+        details: { name: file.name, from: transition.fromState.name, to: transition.toState.name, transition: transition.name },
+      });
+
+      await notifyApprovalGroupMembers({
+        tenantId: tenantUser.tenantId,
+        groupIds: approvalRules.map((r) => r.groupId),
+        title: "Approval Required",
+        message: `${tenantUser.fullName} requests approval to ${transition.name}: "${file.name}"`,
+        link: "/approvals",
       });
 
       return NextResponse.json({
@@ -102,25 +131,51 @@ export async function POST(
       });
     }
 
-    // No approval needed — execute immediately
-    await db.from("files").update({
-      lifecycleState: transition.toState.name,
+    // 3. No approval needed — execute immediately
+    const toStateName = transition.toState.name;
+    const updateData: Record<string, unknown> = {
+      lifecycleState: toStateName,
       updatedAt: new Date().toISOString(),
-    }).eq("id", fileId);
+    };
+
+    if (toStateName === "Released") updateData.isFrozen = true;
+    if (transition.fromState.name === "Released" && toStateName === "WIP") {
+      const nextRevision = String.fromCharCode(file.revision.charCodeAt(0) + 1);
+      updateData.revision = nextRevision;
+      updateData.isFrozen = false;
+    }
+    if (toStateName === "Obsolete") updateData.isFrozen = true;
+
+    await db.from("files").update(updateData).eq("id", fileId);
 
     await logAudit({
-      tenantId: tenantUser.tenantId,
-      userId: tenantUser.id,
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
       action: "file.transition",
-      entityType: "file",
-      entityId: fileId,
-      details: {
-        name: file.name,
-        from: transition.fromState.name,
-        to: transition.toState.name,
-        transition: transition.name,
-      },
+      entityType: "file", entityId: fileId,
+      details: { name: file.name, from: transition.fromState.name, to: transition.toState.name, transition: transition.name },
     });
+
+    // Notify tenant users about significant state changes (Released, Obsolete)
+    const significantStates = ["Released", "Obsolete"];
+    if (significantStates.includes(toStateName)) {
+      const { data: tenantUsers } = await db
+        .from("tenant_users")
+        .select("id")
+        .eq("tenantId", tenantUser.tenantId)
+        .neq("id", tenantUser.id);
+
+      const userIds = (tenantUsers || []).map((u) => u.id);
+      if (userIds.length > 0) {
+        await notify({
+          tenantId: tenantUser.tenantId,
+          userIds,
+          title: `File ${toStateName.toLowerCase()}`,
+          message: `${tenantUser.fullName} moved "${file.name}" to ${toStateName}`,
+          type: "transition",
+          link: `/vault?file=${fileId}`,
+        }).catch(() => {});
+      }
+    }
 
     return NextResponse.json({ success: true, newState: transition.toState.name });
   } catch {

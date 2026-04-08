@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getCurrentTenantUser } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { v4 as uuid } from "uuid";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ lifecycleId: string }> }
 ) {
   try {
-    await getCurrentTenantUser();
+    await getApiTenantUser();
     const { lifecycleId } = await params;
     const { searchParams } = new URL(request.url);
     const fromState = searchParams.get("fromState");
@@ -39,5 +41,126 @@ export async function GET(
     return NextResponse.json(transitions || []);
   } catch {
     return NextResponse.json({ error: "Failed to fetch transitions" }, { status: 500 });
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ lifecycleId: string }> }
+) {
+  try {
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const permissions = tenantUser.role.permissions as string[];
+    if (!hasPermission(permissions, PERMISSIONS.ADMIN_LIFECYCLE)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { lifecycleId } = await params;
+    const { fromStateId, toStateId, name, requiresApproval } = await request.json();
+
+    if (!fromStateId || !toStateId || !name?.trim()) {
+      return NextResponse.json(
+        { error: "fromStateId, toStateId, and name are required" },
+        { status: 400 }
+      );
+    }
+
+    const db = getServiceClient();
+
+    // Verify lifecycle belongs to tenant
+    const { data: lifecycle } = await db
+      .from("lifecycles")
+      .select("id")
+      .eq("id", lifecycleId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+
+    if (!lifecycle) {
+      return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
+    }
+
+    // Verify both states belong to this lifecycle
+    const { data: states } = await db
+      .from("lifecycle_states")
+      .select("id")
+      .eq("lifecycleId", lifecycleId)
+      .in("id", [fromStateId, toStateId]);
+
+    if (!states || states.length < 2) {
+      return NextResponse.json(
+        { error: "One or both states not found in this lifecycle" },
+        { status: 400 }
+      );
+    }
+
+    const { data: transition, error } = await db
+      .from("lifecycle_transitions")
+      .insert({
+        id: uuid(),
+        lifecycleId,
+        fromStateId,
+        toStateId,
+        name: name.trim(),
+        requiresApproval: !!requiresApproval,
+        approvalRoles: [],
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_transition.create", entityType: "lifecycle_transition", entityId: transition.id, details: { name: name.trim(), lifecycleId } });
+
+    return NextResponse.json(transition);
+  } catch {
+    return NextResponse.json({ error: "Failed to create transition" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ lifecycleId: string }> }
+) {
+  try {
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const permissions = tenantUser.role.permissions as string[];
+    if (!hasPermission(permissions, PERMISSIONS.ADMIN_LIFECYCLE)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { lifecycleId } = await params;
+    const { transitionId } = await request.json();
+
+    if (!transitionId) {
+      return NextResponse.json({ error: "transitionId is required" }, { status: 400 });
+    }
+
+    const db = getServiceClient();
+
+    // Verify lifecycle belongs to tenant
+    const { data: lifecycle } = await db
+      .from("lifecycles")
+      .select("id")
+      .eq("id", lifecycleId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+
+    if (!lifecycle) {
+      return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
+    }
+
+    await db
+      .from("lifecycle_transitions")
+      .delete()
+      .eq("id", transitionId)
+      .eq("lifecycleId", lifecycleId);
+
+    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_transition.delete", entityType: "lifecycle_transition", entityId: transitionId, details: { lifecycleId } });
+
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: "Failed to delete transition" }, { status: 500 });
   }
 }

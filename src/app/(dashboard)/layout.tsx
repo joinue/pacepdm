@@ -1,6 +1,7 @@
 import { getCurrentTenantUser } from "@/lib/auth";
 import { AppShell } from "@/components/layout/app-shell";
 import { TenantProvider } from "@/components/providers/tenant-provider";
+import { NotificationProvider } from "@/components/providers/notification-provider";
 
 export default async function DashboardLayout({
   children,
@@ -22,7 +23,9 @@ export default async function DashboardLayout({
         permissions: tenantUser.role.permissions as string[],
       }}
     >
-      <AppShell>{children}</AppShell>
+      <NotificationProvider>
+        <AppShell>{children}</AppShell>
+      </NotificationProvider>
     </TenantProvider>
   );
 }
