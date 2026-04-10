@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { requireFolderAccess } from "@/lib/folder-access-guards";
 
 const RenameFolderSchema = z.object({ name: nonEmptyString });
 
@@ -26,6 +27,9 @@ export async function GET(
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
+
+    const access = await requireFolderAccess(tenantUser, folderId, "view");
+    if (!access.ok) return access.response;
 
     // Walk up the tree to build ancestor chain
     const ancestors: { id: string; name: string }[] = [];
@@ -74,6 +78,9 @@ export async function PUT(
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
+
+    const access = await requireFolderAccess(tenantUser, folderId, "edit");
+    if (!access.ok) return access.response;
 
     if (!folder.parentId) {
       return NextResponse.json({ error: "Cannot rename root folder" }, { status: 400 });
@@ -128,6 +135,9 @@ export async function DELETE(
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
+
+    const access = await requireFolderAccess(tenantUser, folderId, "edit");
+    if (!access.ok) return access.response;
 
     if (!folder.parentId) {
       return NextResponse.json({ error: "Cannot delete root folder" }, { status: 400 });

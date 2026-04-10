@@ -144,8 +144,8 @@ export async function PUT(
             details: { ecoNumber: eco.ecoNumber, from: eco.status, to: status, workflowTriggered: true },
           });
 
-          // Notify ECO creator if someone else triggered the transition
-          if (eco.createdById && eco.createdById !== tenantUser.id) {
+          // Notify ECO creator (notify() filters the actor automatically).
+          if (eco.createdById) {
             await sideEffect(
               notify({
                 tenantId: tenantUser.tenantId,
@@ -154,6 +154,8 @@ export async function PUT(
                 message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
                 type: "eco",
                 link: `/ecos`,
+                refId: eco.id,
+                actorId: tenantUser.id,
               }),
               `notify ECO ${eco.ecoNumber} status change`
             );
@@ -189,8 +191,8 @@ export async function PUT(
         details: { ecoNumber: eco.ecoNumber, from: eco.status, to: status },
       });
 
-      // Notify ECO creator if someone else changed the status
-      if (eco.createdById && eco.createdById !== tenantUser.id) {
+      // Notify ECO creator (notify() filters the actor automatically).
+      if (eco.createdById) {
         await sideEffect(
           notify({
             tenantId: tenantUser.tenantId,
@@ -199,6 +201,8 @@ export async function PUT(
             message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
             type: "eco",
             link: `/ecos`,
+            refId: eco.id,
+            actorId: tenantUser.id,
           }),
           `notify ECO ${eco.ecoNumber} status change`
         );

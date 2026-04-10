@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 export async function DELETE(
   _request: NextRequest,
@@ -23,6 +24,9 @@ export async function DELETE(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
 
     if (file.isCheckedOut) {
       return NextResponse.json({ error: "Cannot delete a checked-out file" }, { status: 409 });

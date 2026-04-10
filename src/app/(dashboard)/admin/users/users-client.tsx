@@ -15,7 +15,7 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { UserPlus, Copy, Check } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 interface User {
@@ -39,8 +39,6 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
   const [fullName, setFullName] = useState("");
   const [roleId, setRoleId] = useState("");
   const [loading, setLoading] = useState(false);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -61,17 +59,17 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
         return;
       }
 
-      if (data.tempPassword) {
-        setTempPassword(data.tempPassword);
-      } else {
-        toast.success("User added to workspace");
-        resetAndClose();
-      }
+      toast.success(
+        data.alreadyExisted
+          ? "User added to workspace (they already have an account)"
+          : `Invitation email sent to ${email}`
+      );
 
       setUsers((prev) => [...prev, {
         ...data.user,
         role: roles.find((r) => r.id === roleId) || null,
       }]);
+      resetAndClose();
     } catch {
       toast.error("Failed to invite user");
     }
@@ -83,8 +81,6 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
     setEmail("");
     setFullName("");
     setRoleId("");
-    setTempPassword(null);
-    setCopied(false);
   }
 
   async function toggleActive(userId: string, currentlyActive: boolean) {
@@ -105,14 +101,6 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
       toast.success(`User ${currentlyActive ? "deactivated" : "activated"}`);
     } catch {
       toast.error("Failed to update user");
-    }
-  }
-
-  async function copyPassword() {
-    if (tempPassword) {
-      await navigator.clipboard.writeText(tempPassword);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
   }
 
@@ -167,33 +155,13 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
       <Dialog open={showInvite} onOpenChange={(open) => { if (!open) resetAndClose(); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{tempPassword ? "User Created" : "Invite User"}</DialogTitle>
-            {!tempPassword && (
-              <DialogDescription>Add a new user to your workspace.</DialogDescription>
-            )}
+            <DialogTitle>Invite User</DialogTitle>
+            <DialogDescription>
+              They&apos;ll receive an email with a link to set their password.
+            </DialogDescription>
           </DialogHeader>
 
-          {tempPassword ? (
-            <div className="space-y-4 py-4">
-              <p className="text-sm">
-                User <span className="font-medium">{fullName}</span> has been created.
-                Share this temporary password with them:
-              </p>
-              <div className="flex items-center gap-2 bg-muted p-3 rounded-md">
-                <code className="flex-1 text-sm font-mono">{tempPassword}</code>
-                <Button variant="ghost" size="sm" onClick={copyPassword}>
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                The user should change their password after first login.
-              </p>
-              <DialogFooter>
-                <Button onClick={resetAndClose}>Done</Button>
-              </DialogFooter>
-            </div>
-          ) : (
-            <form onSubmit={handleInvite}>
+          <form onSubmit={handleInvite}>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label htmlFor="invName">Full Name</Label>
@@ -240,8 +208,7 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
                   {loading ? "Inviting..." : "Invite"}
                 </Button>
               </DialogFooter>
-            </form>
-          )}
+          </form>
         </DialogContent>
       </Dialog>
     </div>

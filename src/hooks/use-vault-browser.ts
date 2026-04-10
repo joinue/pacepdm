@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useVaultNavigation } from "@/hooks/vault/use-vault-navigation";
 import { useVaultContents } from "@/hooks/vault/use-vault-contents";
 import { useVaultSelection } from "@/hooks/vault/use-vault-selection";
@@ -35,24 +35,25 @@ export function useVaultBrowser({ rootFolderId, userId }: UseVaultBrowserOptions
   const [showUpload, setShowUpload] = useState(false);
   const [checkInFileId, setCheckInFileId] = useState<string | null>(null);
 
-  // Navigation: current folder, breadcrumbs, selected file, URL sync
+  // Navigation: current folder, breadcrumbs, selected file, view mode, URL sync
   const navigation = useVaultNavigation(rootFolderId);
 
-  // Contents: load folders + files for the current folder (with abort)
-  const contents = useVaultContents(navigation.currentFolderId);
+  // Contents: load folders + files for the current view (folder or flat).
+  // The hook owns the "reload on source change" effect internally, so the
+  // composition root only needs to forward the inputs.
+  const contents = useVaultContents(navigation.viewMode, navigation.currentFolderId);
 
   // Search/filter, derived from contents
   const filter = useVaultFilter(contents.files);
 
   // Multi-select for bulk actions; selections that aren't visible are
-  // pruned automatically (e.g., when folder changes or filters narrow).
+  // pruned automatically (e.g., when the view changes or filters narrow).
   const selection = useVaultSelection(filter.filteredFiles.map((f) => f.id));
 
-  // Refresh helper used by every mutation hook
-  const refresh = useCallback(
-    () => contents.loadContents(navigation.currentFolderId),
-    [contents, navigation.currentFolderId]
-  );
+  // Refresh helper used by every mutation hook. `contents.refresh` already
+  // knows which source (folder or flat) is active and re-fetches it, so
+  // callers don't need to branch on viewMode themselves.
+  const refresh = contents.refresh;
 
   // Single-file mutations (rename, delete, transition, move) + their dialogs
   const fileActions = useFileActions({
@@ -83,18 +84,21 @@ export function useVaultBrowser({ rootFolderId, userId }: UseVaultBrowserOptions
   // exposed, so existing components don't need to change.
   return {
     // Navigation
+    viewMode: navigation.viewMode,
     currentFolderId: navigation.currentFolderId,
     breadcrumbs: navigation.breadcrumbs,
     selectedFile: navigation.selectedFile,
     selectFile: navigation.selectFile,
     navigateToFolder: navigation.navigateToFolder,
     navigateToBreadcrumb: navigation.navigateToBreadcrumb,
+    enterFlatView: navigation.enterFlatView,
+    exitFlatView: navigation.exitFlatView,
 
     // Contents
     folders: contents.folders,
     files: contents.files,
     loading: contents.loading,
-    loadContents: contents.loadContents,
+    refresh,
 
     // Filter
     searchQuery: filter.searchQuery,

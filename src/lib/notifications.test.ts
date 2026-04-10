@@ -62,6 +62,8 @@ describe("notify", () => {
           type: "system",
           isRead: false,
           link: null,
+          refId: null,
+          actorId: null,
         }),
         expect.objectContaining({
           userId: "user-2",
@@ -85,6 +87,55 @@ describe("notify", () => {
         expect.objectContaining({ link: "/approvals" }),
       ])
     );
+  });
+
+  it("stores refId and actorId when provided", async () => {
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1"],
+      title: "Approved",
+      message: "Done",
+      type: "approval",
+      refId: "request-42",
+      actorId: "actor-9",
+    });
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: "user-1",
+          refId: "request-42",
+          actorId: "actor-9",
+        }),
+      ])
+    );
+  });
+
+  it("filters the actor out of the recipient list", async () => {
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1", "actor-9", "user-2"],
+      title: "Heads up",
+      message: "Something",
+      type: "system",
+      actorId: "actor-9",
+    });
+
+    const inserted = mockInsert.mock.calls[0][0] as Array<{ userId: string }>;
+    expect(inserted.map((n) => n.userId).sort()).toEqual(["user-1", "user-2"]);
+  });
+
+  it("does not insert when the only recipient is the actor", async () => {
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["actor-9"],
+      title: "Self",
+      message: "Only me",
+      type: "system",
+      actorId: "actor-9",
+    });
+
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("does not insert when userIds is empty", async () => {

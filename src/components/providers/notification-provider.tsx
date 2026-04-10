@@ -4,6 +4,11 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { createClient } from "@/lib/supabase/client";
 import { useTenantUser } from "./tenant-provider";
 
+interface NotificationActor {
+  id: string;
+  fullName: string;
+}
+
 interface Notification {
   id: string;
   title: string;
@@ -12,6 +17,13 @@ interface Notification {
   link: string | null;
   isRead: boolean;
   createdAt: string;
+  actor: NotificationActor | null;
+}
+
+interface NotificationListResponse {
+  items: Notification[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 interface NotificationContextValue {
@@ -36,14 +48,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      const r = await fetch("/api/notifications");
-      const data = await r.json();
-      if (Array.isArray(data)) {
-        setNotifications(data.slice(0, 20));
-        setUnreadCount(data.filter((n: Notification) => !n.isRead).length);
-      }
-    } catch {
-      // silent
+      const r = await fetch("/api/notifications?limit=20");
+      if (!r.ok) throw new Error(`GET /api/notifications ${r.status}`);
+      const data = (await r.json()) as NotificationListResponse;
+      setNotifications(data.items || []);
+      setUnreadCount((data.items || []).filter((n) => !n.isRead).length);
+    } catch (err) {
+      console.error("[notifications] fetch failed", err);
     } finally {
       setLoading(false);
     }
@@ -52,12 +63,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const fetchApprovalCount = useCallback(async () => {
     try {
       const r = await fetch("/api/approvals");
-      if (r.ok) {
-        const d = await r.json();
-        setPendingApprovalCount(Array.isArray(d) ? d.length : 0);
-      }
-    } catch {
-      // silent
+      if (!r.ok) throw new Error(`GET /api/approvals ${r.status}`);
+      const d = await r.json();
+      setPendingApprovalCount(Array.isArray(d) ? d.length : 0);
+    } catch (err) {
+      console.error("[notifications] approval count failed", err);
     }
   }, []);
 
@@ -71,7 +81,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  // Supabase realtime: re-fetch when notifications table changes for this user
+  // Supabase realtime: any change (insert/update/delete) to this user's
+  // notifications should refresh the bell. We listen to all events so that
+  // server-side mark-read (e.g. auto-dismiss when an approval is handled)
+  // and cross-tab mark-read both clear the badge without a page reload.
   useEffect(() => {
     const supabase = createClient();
 
@@ -80,7 +93,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "notifications",
           filter: `userId=eq.${user.id}`,
@@ -92,18 +105,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
-          schema: "public",
-          table: "approval_decisions",
-        },
-        () => {
-          fetchApprovalCount();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "approval_decisions",
         },
@@ -120,31 +122,33 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const markRead = useCallback(async (notificationId: string) => {
     try {
-      await fetch("/api/notifications", {
+      const r = await fetch("/api/notifications", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notificationId }),
       });
+      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("[notifications] mark read failed", err);
     }
   }, []);
 
   const markAllRead = useCallback(async () => {
     try {
-      await fetch("/api/notifications", {
+      const r = await fetch("/api/notifications", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markAllRead: true }),
       });
+      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("[notifications] mark all read failed", err);
     }
   }, []);
 

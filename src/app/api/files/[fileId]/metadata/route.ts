@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, optionalString } from "@/lib/validation";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const MetadataSchema = z.object({
   partNumber: optionalString,
@@ -39,6 +40,9 @@ export async function PUT(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
 
     // Frozen files can only be edited by admins
     if (file.isFrozen && !permissions.includes("*")) {

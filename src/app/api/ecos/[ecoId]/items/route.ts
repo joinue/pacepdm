@@ -5,15 +5,36 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
 
-const AddEcoItemSchema = z.object({
-  fileId: nonEmptyString,
-  changeType: z.enum(["ADD", "MODIFY", "REMOVE"]),
-  reason: optionalString,
-});
+// An ECO item targets either a part (preferred — the part is the PDM's
+// central object, and changing a part cascades to its linked files on
+// implement) or a single file (for loose documents not attached to any
+// part). Exactly one of partId/fileId must be supplied — the DB CHECK
+// in migration 017 enforces this too, we just surface a clearer error
+// at the API boundary.
+const AddEcoItemSchema = z
+  .object({
+    partId: z.string().trim().min(1).optional(),
+    fileId: z.string().trim().min(1).optional(),
+    changeType: z.enum(["ADD", "MODIFY", "REMOVE"]),
+    reason: optionalString,
+    // Only meaningful for part items. Server auto-bumps (A→B) when
+    // omitted, so these fields are both optional.
+    fromRevision: optionalString,
+    toRevision: optionalString,
+  })
+  .refine((v) => (v.partId ? 1 : 0) + (v.fileId ? 1 : 0) === 1, {
+    message: "Provide exactly one of partId or fileId",
+    path: ["partId"],
+  });
 
 const RemoveEcoItemSchema = z.object({
   itemId: nonEmptyString,
 });
+
+const ITEM_SELECT =
+  "*, " +
+  "file:files!eco_items_fileId_fkey(id, name, partNumber, lifecycleState, currentVersion), " +
+  "part:parts!eco_items_partId_fkey(id, partNumber, name, revision, lifecycleState, category)";
 
 export async function GET(
   _request: NextRequest,
@@ -31,7 +52,7 @@ export async function GET(
 
     const { data: items } = await db
       .from("eco_items")
-      .select("*, file:files!eco_items_fileId_fkey(id, name, partNumber, lifecycleState, currentVersion)")
+      .select(ITEM_SELECT)
       .eq("ecoId", ecoId)
       .order("createdAt", { ascending: true });
 
@@ -56,7 +77,7 @@ export async function POST(
 
     const parsed = await parseBody(request, AddEcoItemSchema);
     if (!parsed.ok) return parsed.response;
-    const { fileId, changeType, reason } = parsed.data;
+    const { partId, fileId, changeType, reason, fromRevision, toRevision } = parsed.data;
 
     const { ecoId } = await params;
     const db = getServiceClient();
@@ -72,23 +93,60 @@ export async function POST(
       return NextResponse.json({ error: "Can only add items to DRAFT ECOs" }, { status: 400 });
     }
 
-    // Reject duplicate file links — same file can only be in one ECO row
-    const { data: existing } = await db.from("eco_items")
-      .select("id")
-      .eq("ecoId", ecoId)
-      .eq("fileId", fileId)
-      .single();
-    if (existing) {
-      return NextResponse.json({ error: "This file is already in this ECO" }, { status: 409 });
+    // Cross-tenant guard: the target part/file must belong to the caller's
+    // tenant. The DB RLS story is still service-role-based, so we enforce
+    // here. Also capture the part's current revision to seed fromRevision
+    // when the caller didn't supply it — makes the history self-explaining.
+    let seededFromRevision: string | null = fromRevision ?? null;
+    if (partId) {
+      const { data: part } = await db
+        .from("parts")
+        .select("id, tenantId, revision")
+        .eq("id", partId)
+        .single();
+      if (!part || part.tenantId !== tenantUser.tenantId) {
+        return NextResponse.json({ error: "Part not found" }, { status: 404 });
+      }
+      if (!seededFromRevision) seededFromRevision = part.revision;
+
+      const { data: existing } = await db.from("eco_items")
+        .select("id")
+        .eq("ecoId", ecoId)
+        .eq("partId", partId)
+        .maybeSingle();
+      if (existing) {
+        return NextResponse.json({ error: "This part is already in this ECO" }, { status: 409 });
+      }
+    } else if (fileId) {
+      const { data: file } = await db
+        .from("files")
+        .select("id, tenantId")
+        .eq("id", fileId)
+        .single();
+      if (!file || file.tenantId !== tenantUser.tenantId) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
+
+      const { data: existing } = await db.from("eco_items")
+        .select("id")
+        .eq("ecoId", ecoId)
+        .eq("fileId", fileId)
+        .maybeSingle();
+      if (existing) {
+        return NextResponse.json({ error: "This file is already in this ECO" }, { status: 409 });
+      }
     }
 
     const { data: item, error } = await db.from("eco_items").insert({
       id: uuid(),
       ecoId,
-      fileId,
+      partId: partId ?? null,
+      fileId: fileId ?? null,
       changeType,
       reason: reason ?? null,
-    }).select("*, file:files!eco_items_fileId_fkey(id, name, partNumber, lifecycleState, currentVersion)").single();
+      fromRevision: seededFromRevision,
+      toRevision: toRevision ?? null,
+    }).select(ITEM_SELECT).single();
 
     if (error) throw error;
 
@@ -98,7 +156,13 @@ export async function POST(
       action: "eco.item.added",
       entityType: "eco",
       entityId: ecoId,
-      details: { ecoNumber: eco.ecoNumber, fileId, changeType },
+      details: {
+        ecoNumber: eco.ecoNumber,
+        target: partId ? "part" : "file",
+        partId: partId ?? null,
+        fileId: fileId ?? null,
+        changeType,
+      },
     });
 
     return NextResponse.json(item);

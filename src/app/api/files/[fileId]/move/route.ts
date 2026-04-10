@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { canEditFolder, canViewFolder, getFolderAccessScope } from "@/lib/folder-access";
 
 const MoveSchema = z.object({ folderId: nonEmptyString });
 
@@ -34,6 +35,29 @@ export async function PUT(
     const { data: folder } = await db.from("folders").select("id, path, tenantId").eq("id", folderId).single();
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Target folder not found" }, { status: 404 });
+    }
+
+    // A move is simultaneously a delete from the source folder and an
+    // insert into the destination, so the user needs EDIT on both. One
+    // scope lookup covers both checks.
+    const scope = await getFolderAccessScope(tenantUser);
+    if (!canViewFolder(scope, file.folderId)) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+    if (!canEditFolder(scope, file.folderId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (!canViewFolder(scope, folderId)) {
+      return NextResponse.json({ error: "Target folder not found" }, { status: 404 });
+    }
+    if (!canEditFolder(scope, folderId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Released/Obsolete files are immutable — folder location is part
+    // of the audit trail. Use Revise to drop back to WIP first.
+    if (file.isFrozen) {
+      return NextResponse.json({ error: "Cannot move a frozen/released file. Revise it first." }, { status: 409 });
     }
 
     const { error } = await db.from("files")

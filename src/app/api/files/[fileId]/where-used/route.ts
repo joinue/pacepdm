@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 export async function GET(
   _request: NextRequest,
@@ -11,6 +12,17 @@ export async function GET(
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { fileId } = await params;
     const db = getServiceClient();
+
+    const { data: file } = await db
+      .from("files")
+      .select("id, tenantId, folderId")
+      .eq("id", fileId)
+      .single();
+    if (!file || file.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+    const access = await requireFileAccess(tenantUser, file, "view");
+    if (!access.ok) return access.response;
 
     // Find all BOM items that reference this file, and join the parent BOM
     const { data: items } = await db

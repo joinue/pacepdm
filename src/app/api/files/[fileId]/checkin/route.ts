@@ -5,7 +5,8 @@ import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { processMentions } from "@/lib/mentions";
 import { v4 as uuid } from "uuid";
-import { isSolidWorksFile, extractSolidWorksThumbnail } from "@/lib/thumbnail";
+import { extractThumbnail } from "@/lib/thumbnail";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 export async function POST(
   request: NextRequest,
@@ -27,6 +28,10 @@ export async function POST(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
+
     if (!file.isCheckedOut) {
       return NextResponse.json({ error: "File is not checked out" }, { status: 409 });
     }
@@ -34,6 +39,15 @@ export async function POST(
       if (!hasPermission(permissions, "admin.settings")) {
         return NextResponse.json({ error: "File is checked out by another user" }, { status: 403 });
       }
+    }
+    // Defense in depth: refuse to commit a new version if the file
+    // froze during the checkout window. In normal flow `isCheckedOut`
+    // and `isFrozen` are mutually exclusive (transition routes refuse
+    // checked-out files, checkout refuses frozen files), but a buggy
+    // path or direct DB write could still land us here. The released
+    // artifact stays immutable.
+    if (file.isFrozen) {
+      return NextResponse.json({ error: "Cannot check in a frozen/released file. The release happened during your checkout — undo your checkout instead." }, { status: 409 });
     }
 
     const formData = await request.formData();
@@ -53,22 +67,21 @@ export async function POST(
         return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
       }
 
-      // Re-extract thumbnail for SolidWorks files
+      // Regenerate the thumbnail via the format dispatcher. Keeps the old
+      // key on failure so the file list still has *something* to show; the
+      // dispatcher returns null for unsupported formats, which is fine.
       let thumbnailKey = file.thumbnailKey;
-      if (isSolidWorksFile(newFile.name)) {
-        try {
-          const thumb = await extractSolidWorksThumbnail(arrayBuffer);
-          if (thumb) {
-            const thumbExt = thumb.mimeType === "image/jpeg" ? "jpg" : "png";
-            thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumbExt}`;
-            await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
-              contentType: thumb.mimeType,
-              upsert: false,
-            });
-          }
-        } catch (e) {
-          console.error("Thumbnail extraction failed:", e);
+      try {
+        const thumb = await extractThumbnail(arrayBuffer, newFile.name);
+        if (thumb) {
+          thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
+          await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+            contentType: thumb.mimeType,
+            upsert: false,
+          });
         }
+      } catch (e) {
+        console.error("Thumbnail generation failed:", e);
       }
 
       await db.from("file_versions").insert({
@@ -125,8 +138,10 @@ export async function POST(
       );
     }
 
-    // If an admin checked in someone else's file, notify the original checker
-    if (file.checkedOutById && file.checkedOutById !== tenantUser.id) {
+    // If an admin checked in someone else's file, notify the original
+    // checker. notify() filters the actor, so the self-checkin case is
+    // a no-op.
+    if (file.checkedOutById) {
       await sideEffect(
         notify({
           tenantId: tenantUser.tenantId,
@@ -137,6 +152,8 @@ export async function POST(
             : `Your checkout of "${file.name}" was cancelled by ${tenantUser.fullName}`,
           type: "checkout",
           link: `/vault?file=${fileId}`,
+          refId: fileId,
+          actorId: tenantUser.id,
         }),
         `notify checkout owner about admin checkin of ${fileId}`
       );

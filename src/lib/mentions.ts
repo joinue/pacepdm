@@ -60,6 +60,8 @@ export async function processMentions(ctx: MentionContext): Promise<void> {
         : ctx.comment,
     type: "system",
     link: ctx.link,
+    refId: ctx.entityId,
+    actorId: ctx.mentionedById,
   });
 }
 

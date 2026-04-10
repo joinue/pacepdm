@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { useNotifications } from "@/components/providers/notification-provider";
 import { createClient } from "@/lib/supabase/client";
@@ -26,6 +26,7 @@ const breadcrumbLabels: Record<string, string> = {
   vault: "Vault",
   search: "Search",
   parts: "Parts",
+  vendors: "Vendors",
   approvals: "Approvals",
   ecos: "ECOs",
   boms: "BOMs",
@@ -34,6 +35,7 @@ const breadcrumbLabels: Record<string, string> = {
   notifications: "Notifications",
   admin: "Admin",
   users: "Users",
+  roles: "Roles",
   workflows: "Workflows",
   "approval-groups": "Approval Groups",
   lifecycle: "Lifecycle",
@@ -84,10 +86,52 @@ export function Header({
   const mounted = useHasMounted();
 
   const segments = pathname.split("/").filter(Boolean);
-  const crumbs = segments.map((seg, i) => ({
-    label: breadcrumbLabels[seg] || seg,
-    href: "/" + segments.slice(0, i + 1).join("/"),
-  }));
+
+  // Some routes embed an entity id as the last segment (e.g. /boms/<uuid>).
+  // Resolve that id to a human-friendly name so the breadcrumb shows
+  // "BOMs > Widget Frame" instead of "BOMs > 3f2a...". Keyed by the parent
+  // segment so we only fetch for routes we know how to resolve.
+  const dynamicSegment = useMemo(() => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const segs = pathname.split("/").filter(Boolean);
+    if (segs.length < 2) return null;
+    const last = segs[segs.length - 1];
+    const parent = segs[segs.length - 2];
+    if (!UUID_RE.test(last)) return null;
+    if (parent === "boms") return { id: last, endpoint: `/api/boms/${last}` };
+    if (parent === "ecos") return { id: last, endpoint: `/api/ecos/${last}` };
+    return null;
+  }, [pathname]);
+
+  const [dynamicLabel, setDynamicLabel] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dynamicSegment) {
+      setDynamicLabel(null);
+      return;
+    }
+    let cancelled = false;
+    setDynamicLabel(null);
+    fetch(dynamicSegment.endpoint)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const name = data.name || data.title || data.ecoNumber || null;
+        if (name) setDynamicLabel(name);
+      })
+      .catch(() => { /* leave the uuid as-is on failure */ });
+    return () => { cancelled = true; };
+  }, [dynamicSegment]);
+
+  const crumbs = segments.map((seg, i) => {
+    const isLast = i === segments.length - 1;
+    const label = isLast && dynamicSegment?.id === seg && dynamicLabel
+      ? dynamicLabel
+      : breadcrumbLabels[seg] || seg;
+    return {
+      label,
+      href: "/" + segments.slice(0, i + 1).join("/"),
+    };
+  });
 
   const [notifOpen, setNotifOpen] = useState(false);
 
@@ -232,38 +276,54 @@ export function Header({
                 </div>
               ) : (
                 <div className="flex flex-col">
-                  {notifications.map((notif) => (
-                    <button
-                      key={notif.id}
-                      className="flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors w-full border-b border-border/50 last:border-b-0"
-                      onClick={() => handleClickNotification(notif)}
-                    >
-                      {/* Unread dot */}
-                      <div className="mt-1.5 shrink-0">
-                        {!notif.isRead ? (
-                          <span className="block w-2 h-2 rounded-full bg-primary" />
-                        ) : (
-                          <span className="block w-2 h-2" />
-                        )}
-                      </div>
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-sm font-medium truncate">{notif.title}</span>
-                          <Badge
-                            variant={typeBadgeVariant[notif.type] || "muted"}
-                            className="text-[10px] h-4 px-1.5 shrink-0"
-                          >
-                            {notif.type}
-                          </Badge>
+                  {notifications.map((notif) => {
+                    const actorInitials = notif.actor?.fullName
+                      ? notif.actor.fullName
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2)
+                      : null;
+                    return (
+                      <button
+                        key={notif.id}
+                        className="flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors w-full border-b border-border/50 last:border-b-0"
+                        onClick={() => handleClickNotification(notif)}
+                      >
+                        {/* Unread dot */}
+                        <div className="mt-1.5 shrink-0">
+                          {!notif.isRead ? (
+                            <span className="block w-2 h-2 rounded-full bg-primary" />
+                          ) : (
+                            <span className="block w-2 h-2" />
+                          )}
                         </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2">{notif.message}</p>
-                        <span className="text-[10px] text-muted-foreground/60 mt-0.5 block">
-                          {formatRelativeTime(notif.createdAt)}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
+                        {/* Actor avatar (falls back to a Bell icon for system events) */}
+                        <Avatar className="w-6 h-6 mt-0.5 shrink-0">
+                          <AvatarFallback className="text-[9px] bg-foreground/8 text-foreground font-medium">
+                            {actorInitials ?? <Bell className="w-3 h-3" />}
+                          </AvatarFallback>
+                        </Avatar>
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-sm font-medium truncate">{notif.title}</span>
+                            <Badge
+                              variant={typeBadgeVariant[notif.type] || "muted"}
+                              className="text-[10px] h-4 px-1.5 shrink-0"
+                            >
+                              {notif.type}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{notif.message}</p>
+                          <span className="text-[10px] text-muted-foreground/60 mt-0.5 block">
+                            {formatRelativeTime(notif.createdAt)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </ScrollArea>

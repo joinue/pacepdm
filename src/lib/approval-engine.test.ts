@@ -68,7 +68,7 @@ vi.mock("@/lib/notifications", () => ({
 
 vi.mock("uuid", () => ({ v4: () => "mock-uuid" }));
 
-import { startWorkflow, recallRequest, findWorkflowForTrigger } from "./approval-engine";
+import { startWorkflow, recallRequest, findWorkflowForTrigger, processDecision, rejectForRework } from "./approval-engine";
 import { logAudit } from "./audit";
 import { notifyApprovalGroupMembers } from "./notifications";
 
@@ -352,5 +352,85 @@ describe("findWorkflowForTrigger", () => {
     };
     const result = await findWorkflowForTrigger({ tenantId: "tenant-1", ecoTrigger: "SUBMITTED" });
     expect(result).toEqual({ id: "wf-2", name: "ECO Review", isActive: true });
+  });
+});
+
+// ── Multi-tenant defense-in-depth guards ──────────────────────────────────
+//
+// processDecision and rejectForRework take a `tenantId` parameter from the
+// caller (the API route uses tenantUser.tenantId). They must verify that the
+// fetched decision actually belongs to that tenant before mutating anything.
+// Group-membership checks would also block cross-tenant calls in practice,
+// but tenant scoping should be enforced explicitly so future refactors don't
+// silently drop the only line of defense.
+
+describe("processDecision — tenant guard", () => {
+  beforeEach(resetMockState);
+
+  it("returns 'Decision not found' when the decision belongs to another tenant", async () => {
+    tableResults["approval_decisions"] = {
+      data: {
+        id: "dec-1",
+        groupId: "group-1",
+        stepId: "step-1",
+        status: "PENDING",
+        approvalMode: "ANY",
+        request: {
+          id: "req-1",
+          tenantId: "tenant-2", // ← belongs to a DIFFERENT tenant
+          entityType: "file",
+          entityId: "file-1",
+          requestedById: "user-99",
+          title: "Cross-tenant target",
+        },
+      },
+      error: null,
+    };
+
+    const result = await processDecision({
+      decisionId: "dec-1",
+      tenantId: "tenant-1", // caller is in tenant-1
+      userId: "user-1",
+      userFullName: "Alice",
+      status: "APPROVED",
+    });
+
+    expect(result).toEqual({ error: "Decision not found" });
+
+    // Critical: NO updates should have been issued. If the guard fired late,
+    // we'd see an update on approval_decisions or approval_requests here.
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
+describe("rejectForRework — tenant guard", () => {
+  beforeEach(resetMockState);
+
+  it("returns 'Decision not found' when the decision belongs to another tenant", async () => {
+    tableResults["approval_decisions"] = {
+      data: {
+        id: "dec-1",
+        groupId: "group-1",
+        status: "PENDING",
+        request: {
+          id: "req-1",
+          tenantId: "tenant-2",
+          requestedById: "user-99",
+          title: "Cross-tenant target",
+        },
+      },
+      error: null,
+    };
+
+    const result = await rejectForRework({
+      decisionId: "dec-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "Alice",
+      comment: "should never be applied",
+    });
+
+    expect(result).toEqual({ error: "Decision not found" });
+    expect(updateCalls).toHaveLength(0);
   });
 });

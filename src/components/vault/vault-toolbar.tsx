@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  FolderPlus, Upload, Download, Trash2, Search,
+  FolderPlus, Upload, Download, Trash2, Search, LogOut, ArrowLeft,
 } from "lucide-react";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -20,19 +20,61 @@ interface VaultToolbarProps {
   vault: VaultBrowserState;
 }
 
+// Human-readable metadata for each flat (cross-folder) view the vault can
+// render. Keeping this map alongside the toolbar means adding a new flat
+// view (e.g. "recent", "in WIP") is a single entry rather than a scatter
+// of ad-hoc conditionals.
+const FLAT_VIEW_META: Record<
+  Exclude<VaultBrowserState["viewMode"], "folder">,
+  { title: string; description: string }
+> = {
+  checkouts: {
+    title: "My checked-out files",
+    description:
+      "Files you've checked out across every folder, oldest first.",
+  },
+};
+
 export function VaultToolbar({ vault }: VaultToolbarProps) {
   const { can } = usePermissions();
   const canUpload = can(PERMISSIONS.FILE_UPLOAD);
   const canCreateFolder = can(PERMISSIONS.FOLDER_CREATE);
   const canDelete = can(PERMISSIONS.FILE_DELETE);
+  const flatMeta =
+    vault.viewMode !== "folder" ? FLAT_VIEW_META[vault.viewMode] : null;
+  const isFlat = flatMeta !== null;
 
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold">Vault</h2>
-          <VaultBreadcrumbs vault={vault} />
+        <div className="min-w-0">
+          {isFlat && flatMeta ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 -ml-2 text-muted-foreground hover:text-foreground"
+                  onClick={vault.exitFlatView}
+                >
+                  <ArrowLeft className="w-4 h-4 mr-1" />
+                  Back to vault
+                </Button>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold mt-1">
+                {flatMeta.title}
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                {flatMeta.description}
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-xl sm:text-2xl font-bold">Vault</h2>
+              <VaultBreadcrumbs vault={vault} />
+            </>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           {vault.selectedFiles.size > 0 && (
@@ -51,16 +93,25 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
               )}
             </>
           )}
-          {canCreateFolder && (
+          {/* Folder-scoped actions (create folder, upload) don't make sense
+              in flat views — there's no single destination folder — so we
+              hide them. Exiting the flat view brings them back. */}
+          {!isFlat && canCreateFolder && (
             <Button variant="outline" size="sm" onClick={() => vault.setShowCreateFolder(true)}>
               <FolderPlus className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">New Folder</span>
             </Button>
           )}
-          {canUpload && (
+          {!isFlat && canUpload && (
             <Button size="sm" onClick={() => vault.setShowUpload(true)}>
               <Upload className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">Upload</span>
+            </Button>
+          )}
+          {isFlat && (
+            <Button variant="outline" size="sm" onClick={vault.exitFlatView}>
+              <LogOut className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Exit view</span>
             </Button>
           )}
         </div>

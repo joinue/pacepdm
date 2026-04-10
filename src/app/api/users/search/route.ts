@@ -9,17 +9,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const q = request.nextUrl.searchParams.get("q") || "";
-    if (q.length < 1) return NextResponse.json([]);
 
     const db = getServiceClient();
-    const { data: users } = await db
+    // Empty q returns the first batch of active tenant members (used by the
+    // folder-access picker to populate a dropdown). Non-empty q narrows by
+    // name prefix like before.
+    let query = db
       .from("tenant_users")
       .select("id, fullName, email")
       .eq("tenantId", tenantUser.tenantId)
       .eq("isActive", true)
-      .ilike("fullName", `%${q}%`)
       .neq("id", tenantUser.id)
-      .limit(10);
+      .limit(q.length > 0 ? 10 : 50);
+
+    if (q.length > 0) {
+      query = query.ilike("fullName", `%${q}%`);
+    }
+
+    const { data: users } = await query;
 
     return NextResponse.json(users || []);
   } catch {

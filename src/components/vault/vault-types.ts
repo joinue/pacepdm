@@ -3,6 +3,7 @@ export interface FolderItem {
   name: string;
   parentId: string | null;
   path: string;
+  isRestricted?: boolean;
   _count: { children: number; files: number };
 }
 
@@ -24,6 +25,9 @@ export interface FileItem {
   checkedOutBy: { fullName: string } | null;
   updatedAt: string;
   thumbnailUrl: string | null;
+  // Populated only when the list was fetched via a flat (cross-folder) view
+  // such as `?checkedOutByMe=1`, so the row can render its parent folder.
+  folder?: { id: string; name: string; path: string } | null;
   versions: {
     version: number;
     fileSize: number;

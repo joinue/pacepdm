@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Search, Loader2, Building2, MoreHorizontal, Pencil, Trash2, ExternalLink,
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
+import {
+  Plus, Search, Loader2, Building2, MoreHorizontal, Pencil, Trash2, ExternalLink, Mail, Phone, User, Package, ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,6 +33,21 @@ interface Vendor {
   contactPhone: string | null;
   notes: string | null;
   partCount?: number;
+}
+
+interface VendorPartLink {
+  id: string;
+  partId: string;
+  vendorPartNumber: string | null;
+  unitCost: number | null;
+  currency: string | null;
+  leadTimeDays: number | null;
+  isPrimary: boolean;
+  part: { id: string; partNumber: string; name: string } | null;
+}
+
+interface VendorDetail extends Vendor {
+  usedBy: VendorPartLink[];
 }
 
 const EMPTY_FORM = {
@@ -51,6 +70,11 @@ export default function VendorsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
+  // Detail sheet — shows contact info + parts linked to this vendor
+  const [detailVendor, setDetailVendor] = useState<VendorDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+
   const loadVendors = useCallback(async (q?: string) => {
     const params = new URLSearchParams();
     params.set("withCounts", "1");
@@ -69,6 +93,20 @@ export default function VendorsPage() {
     const id = setTimeout(() => { void loadVendors(searchQuery); }, 250);
     return () => clearTimeout(id);
   }, [searchQuery, loadVendors]);
+
+  async function openDetail(v: Vendor) {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailVendor(null);
+    const res = await fetch(`/api/vendors/${v.id}`);
+    setDetailLoading(false);
+    if (!res.ok) {
+      toast.error("Failed to load vendor details");
+      setDetailOpen(false);
+      return;
+    }
+    setDetailVendor(await res.json());
+  }
 
   function openCreate() {
     setEditingId(null);
@@ -169,11 +207,11 @@ export default function VendorsPage() {
             </TableHeader>
             <TableBody>
               {vendors.map((v) => (
-                <TableRow key={v.id}>
+                <TableRow key={v.id} className="cursor-pointer hover:bg-muted/40" onClick={() => openDetail(v)}>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
-                      {v.name}
+                      <span className="hover:underline">{v.name}</span>
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -181,7 +219,7 @@ export default function VendorsPage() {
                   </TableCell>
                   <TableCell className="text-sm">
                     {v.website ? (
-                      <a href={v.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                      <a href={v.website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-primary hover:underline inline-flex items-center gap-1">
                         Link <ExternalLink className="w-3 h-3" />
                       </a>
                     ) : (
@@ -195,7 +233,7 @@ export default function VendorsPage() {
                       <span className="text-xs text-muted-foreground">0</span>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger render={
                         <Button variant="ghost" size="icon-xs"><MoreHorizontal className="w-4 h-4" /></Button>
@@ -216,6 +254,134 @@ export default function VendorsPage() {
           </Table>
         </Card>
       )}
+
+      <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
+        <SheetContent className="w-full sm:max-w-xl flex flex-col overflow-hidden">
+          <SheetHeader className="border-b">
+            <SheetTitle className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-muted-foreground" />
+              {detailVendor?.name || "Vendor"}
+            </SheetTitle>
+            <SheetDescription>
+              Contact details and parts sourced from this vendor.
+            </SheetDescription>
+          </SheetHeader>
+
+          {detailLoading || !detailVendor ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-5">
+              <div className="space-y-2 text-sm">
+                {detailVendor.website && (
+                  <a href={detailVendor.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-primary hover:underline">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    {detailVendor.website}
+                  </a>
+                )}
+                {detailVendor.contactName && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <User className="w-3.5 h-3.5" />
+                    {detailVendor.contactName}
+                  </div>
+                )}
+                {detailVendor.contactEmail && (
+                  <a href={`mailto:${detailVendor.contactEmail}`} className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+                    <Mail className="w-3.5 h-3.5" />
+                    {detailVendor.contactEmail}
+                  </a>
+                )}
+                {detailVendor.contactPhone && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Phone className="w-3.5 h-3.5" />
+                    {detailVendor.contactPhone}
+                  </div>
+                )}
+                {detailVendor.notes && (
+                  <p className="text-muted-foreground whitespace-pre-wrap pt-1">{detailVendor.notes}</p>
+                )}
+                {!detailVendor.website && !detailVendor.contactName && !detailVendor.contactEmail && !detailVendor.contactPhone && !detailVendor.notes && (
+                  <p className="text-xs text-muted-foreground italic">No contact details on file.</p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" />
+                    Linked Parts
+                  </h3>
+                  <Badge variant="secondary">{detailVendor.usedBy.length}</Badge>
+                </div>
+
+                {detailVendor.usedBy.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-6 text-center text-xs text-muted-foreground">
+                      No parts are linked to this vendor yet.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Part</TableHead>
+                          <TableHead>Vendor P/N</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead className="text-right">Lead</TableHead>
+                          <TableHead className="w-8" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detailVendor.usedBy.map((link) => (
+                          <TableRow key={link.id}>
+                            <TableCell className="font-medium">
+                              {link.part ? (
+                                <div className="flex flex-col">
+                                  <span className="flex items-center gap-1.5">
+                                    {link.part.partNumber}
+                                    {link.isPrimary && <Badge variant="info" className="text-[10px] px-1 py-0">Primary</Badge>}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground truncate max-w-45">{link.part.name}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground italic">Unknown part</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {link.vendorPartNumber || <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-xs text-right">
+                              {link.unitCost != null ? `${link.currency || ""} ${Number(link.unitCost).toFixed(2)}`.trim() : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-xs text-right">
+                              {link.leadTimeDays != null ? `${link.leadTimeDays}d` : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell>
+                              {link.part && (
+                                <Link href={`/parts?partId=${link.part.id}`} className="text-muted-foreground hover:text-foreground inline-flex" aria-label="Open part">
+                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                </Link>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Card>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button size="sm" variant="outline" onClick={() => { setDetailOpen(false); if (detailVendor) openEdit(detailVendor); }}>
+                  <Pencil className="w-3.5 h-3.5 mr-2" /> Edit vendor
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent>

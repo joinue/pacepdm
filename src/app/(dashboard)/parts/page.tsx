@@ -21,6 +21,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { statusVariants as ecoStatusVariants } from "../ecos/constants";
+import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useTenantUser } from "@/components/providers/tenant-provider";
 import {
   Plus, Search, Loader2, Package, MoreHorizontal, Pencil,
   Trash2, X, FileText, Building2, ImageIcon, Upload, Download, ExternalLink,
@@ -53,6 +56,16 @@ interface PartDetail extends Part {
   vendors: PartVendorLink[];
   files: { id: string; fileId: string; role: string; isPrimary: boolean; file: { id: string; name: string; partNumber: string | null; revision: string; lifecycleState: string; fileType: string } }[];
   whereUsed: { bomId: string; bomName: string; bomRevision: string; bomStatus: string; quantity: number; unit: string }[];
+  ecoHistory: {
+    ecoId: string;
+    ecoNumber: string;
+    title: string;
+    status: string;
+    implementedAt: string | null;
+    createdAt: string;
+    fromRevision: string | null;
+    toRevision: string | null;
+  }[];
 }
 
 // A row from `part_vendors` joined with the canonical `vendors` record.
@@ -112,8 +125,12 @@ function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: n
 export default function PartsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const user = useTenantUser();
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
+  // Numbering mode comes from tenant settings; AUTO lets the server allocate
+  // PRT-00001/00002/... so users don't have to type a number when creating.
+  const [partNumberMode, setPartNumberMode] = useState<"AUTO" | "MANUAL">("AUTO");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
@@ -135,6 +152,18 @@ export default function PartsPage() {
     partNumber: "", name: "", description: "", category: "MANUFACTURED",
     material: "", unitCost: "", unit: "EA", notes: "",
   });
+  // Thumbnail state for the create/edit dialog. Kept separate from formData
+  // because the actual upload is multipart and runs after the part PUT/POST
+  // succeeds. `thumbnailFile` is the freshly picked image (preview shown via
+  // an object URL); `thumbnailExistingUrl` is the signed URL from the server
+  // for the part being edited; `thumbnailRemoved` distinguishes "user
+  // cleared the thumbnail" from "no thumbnail to begin with" so we know
+  // whether to fire DELETE on save.
+  const dialogThumbnailRef = useRef<HTMLInputElement>(null);
+  const [dialogThumbnailFile, setDialogThumbnailFile] = useState<File | null>(null);
+  const [dialogThumbnailPreview, setDialogThumbnailPreview] = useState<string | null>(null);
+  const [dialogThumbnailExistingUrl, setDialogThumbnailExistingUrl] = useState<string | null>(null);
+  const [dialogThumbnailRemoved, setDialogThumbnailRemoved] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Add vendor — vendorName has been replaced with a vendor picker
@@ -187,6 +216,52 @@ export default function PartsPage() {
     void (async () => { await loadParts(); })();
   }, [loadParts]);
 
+  // ─── Realtime ────────────────────────────────────────────────────────
+  //
+  // Any part insert/update/delete in this tenant refreshes the list.
+  // When a detail panel is open, also refresh it on `eco_items` changes
+  // so the "ECO History" section updates live as approvers act on an
+  // ECO that touches this part — the synergy with the part-centric ECO
+  // history added in the previous change. Same trick for `bom_items`:
+  // when another user adds this part to a BOM, the "Used in BOMs"
+  // list refreshes without the user hitting reload.
+  useRealtimeTable({
+    table: "parts",
+    filter: `tenantId=eq.${user.tenantId}`,
+    onChange: () => {
+      void loadParts(searchQuery, categoryFilter, stateFilter);
+      if (selectedPartId) void loadPartDetail(selectedPartId);
+    },
+  });
+  useRealtimeTable({
+    table: "eco_items",
+    onChange: () => {
+      if (selectedPartId) void loadPartDetail(selectedPartId);
+    },
+    enabled: !!selectedPartId,
+  });
+  useRealtimeTable({
+    table: "bom_items",
+    onChange: () => {
+      if (selectedPartId) void loadPartDetail(selectedPartId);
+    },
+    enabled: !!selectedPartId,
+  });
+
+  // One-shot fetch of tenant settings to discover the numbering mode. Failure
+  // is non-fatal — we fall back to AUTO and the server still enforces the rule.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (!res.ok) return;
+        const data = await res.json();
+        const mode = data?.settings?.partNumberMode;
+        if (mode === "MANUAL") setPartNumberMode("MANUAL");
+      } catch { /* keep AUTO default */ }
+    })();
+  }, []);
+
   // Auto-select part from URL query param. Declared after loadPartDetail
   // so the effect can reference it without violating hook ordering rules.
   useEffect(() => {
@@ -234,7 +309,18 @@ export default function PartsPage() {
     setFormData({ partNumber: "", name: "", description: "", category: "MANUFACTURED", material: "", unitCost: "", unit: "EA", notes: "" });
     setAttachFile(null);
     setAttachFileRole("DRAWING");
+    resetDialogThumbnail();
     setShowCreate(true);
+  }
+
+  function resetDialogThumbnail() {
+    if (dialogThumbnailPreview && dialogThumbnailPreview.startsWith("blob:")) {
+      URL.revokeObjectURL(dialogThumbnailPreview);
+    }
+    setDialogThumbnailFile(null);
+    setDialogThumbnailPreview(null);
+    setDialogThumbnailExistingUrl(null);
+    setDialogThumbnailRemoved(false);
   }
 
   function openEditDialog(part: Part) {
@@ -244,6 +330,8 @@ export default function PartsPage() {
       category: part.category, material: part.material || "",
       unitCost: part.unitCost != null ? String(part.unitCost) : "", unit: part.unit, notes: part.notes || "",
     });
+    resetDialogThumbnail();
+    setDialogThumbnailExistingUrl(part.thumbnailUrl || null);
     setShowCreate(true);
   }
 
@@ -251,13 +339,18 @@ export default function PartsPage() {
     e.preventDefault();
     setSaving(true);
 
-    const payload = {
+    // Strip partNumber when AUTO + creating: server will allocate the next
+    // number from the per-tenant sequence. Editing always sends what's typed.
+    const payload: Record<string, unknown> = {
       ...formData,
       unitCost: formData.unitCost ? parseFloat(formData.unitCost) : null,
       description: formData.description || null,
       material: formData.material || null,
       notes: formData.notes || null,
     };
+    if (!editingPart && partNumberMode === "AUTO" && !formData.partNumber.trim()) {
+      delete payload.partNumber;
+    }
 
     const url = editingPart ? `/api/parts/${editingPart.id}` : "/api/parts";
     const method = editingPart ? "PUT" : "POST";
@@ -266,6 +359,29 @@ export default function PartsPage() {
     if (!res.ok) { const d = await res.json(); toast.error(d.error); setSaving(false); return; }
 
     const partData = await res.json();
+
+    // Thumbnail mutations run as a separate request because the storage
+    // upload uses multipart form data — see /api/parts/[partId]/thumbnail.
+    // Order matters: when both a remove and a new file are pending we
+    // skip the explicit DELETE and let the upload overwrite the previous
+    // object server-side.
+    if (dialogThumbnailFile) {
+      try {
+        const fd = new FormData();
+        fd.append("file", dialogThumbnailFile);
+        const tRes = await fetch(`/api/parts/${partData.id}/thumbnail`, { method: "POST", body: fd });
+        if (!tRes.ok) {
+          const d = await tRes.json().catch(() => ({}));
+          toast.error(d.error || "Thumbnail upload failed");
+        }
+      } catch {
+        toast.error("Thumbnail upload failed");
+      }
+    } else if (editingPart && dialogThumbnailRemoved) {
+      try {
+        await fetch(`/api/parts/${partData.id}/thumbnail`, { method: "DELETE" });
+      } catch { /* non-fatal */ }
+    }
 
     // If creating a new part with a file attached, upload and link it
     if (!editingPart && attachFile) {
@@ -278,8 +394,9 @@ export default function PartsPage() {
           const formData = new FormData();
           formData.append("file", attachFile);
           formData.append("folderId", rootFolder.id);
-          formData.append("partNumber", payload.partNumber);
-          if (payload.description) formData.append("description", payload.description);
+          // Use the part number the server actually persisted (may be auto-allocated)
+          formData.append("partNumber", partData.partNumber);
+          if (typeof payload.description === "string") formData.append("description", payload.description);
           const fileRes = await fetch("/api/files", { method: "POST", body: formData });
           if (fileRes.ok) {
             const fileData = await fileRes.json();
@@ -303,6 +420,7 @@ export default function PartsPage() {
     setShowCreate(false);
     setAttachFile(null);
     setAttachFileRole("DRAWING");
+    resetDialogThumbnail();
     setSaving(false);
     loadParts(searchQuery, categoryFilter, stateFilter);
     if (editingPart && selectedPartId === editingPart.id) loadPartDetail(editingPart.id);
@@ -432,24 +550,48 @@ export default function PartsPage() {
 
   // --- Thumbnail ---
 
+  // Dialog picker: stage the picked File and show a local object URL as
+  // preview. The actual storage upload happens after the part PUT/POST
+  // succeeds, via the dedicated /api/parts/[partId]/thumbnail endpoint.
+  function handleDialogThumbnailPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (dialogThumbnailPreview && dialogThumbnailPreview.startsWith("blob:")) {
+      URL.revokeObjectURL(dialogThumbnailPreview);
+    }
+    setDialogThumbnailFile(file);
+    setDialogThumbnailPreview(URL.createObjectURL(file));
+    setDialogThumbnailRemoved(false);
+  }
+
+  function handleDialogThumbnailRemove() {
+    if (dialogThumbnailPreview && dialogThumbnailPreview.startsWith("blob:")) {
+      URL.revokeObjectURL(dialogThumbnailPreview);
+    }
+    setDialogThumbnailFile(null);
+    setDialogThumbnailPreview(null);
+    setDialogThumbnailExistingUrl(null);
+    setDialogThumbnailRemoved(true);
+  }
+
+  // Detail-panel picker: in-place upload for an already-saved part. Hits
+  // the dedicated thumbnail endpoint with multipart form data.
   async function handleThumbnailUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!selectedPartId || !e.target.files?.[0]) return;
     const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      const res = await fetch(`/api/parts/${selectedPartId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ thumbnailUrl: dataUrl }),
-      });
-      if (res.ok) {
-        toast.success("Thumbnail updated");
-        loadPartDetail(selectedPartId);
-        loadParts(searchQuery, categoryFilter, stateFilter);
-      }
-    };
-    reader.readAsDataURL(file);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/parts/${selectedPartId}/thumbnail`, { method: "POST", body: fd });
+    if (res.ok) {
+      toast.success("Thumbnail updated");
+      loadPartDetail(selectedPartId);
+      loadParts(searchQuery, categoryFilter, stateFilter);
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast.error(d.error || "Thumbnail upload failed");
+    }
+    // Clear the input so picking the same file twice still fires onChange.
+    e.target.value = "";
   }
 
   return (
@@ -747,6 +889,39 @@ export default function PartsPage() {
                     )}
                   </div>
 
+                  <Separator />
+
+                  {/* ECO History */}
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">ECO History</p>
+                    {detail.ecoHistory.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No ECOs have touched this part yet.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {detail.ecoHistory.map((eh) => (
+                          <button
+                            key={eh.ecoId}
+                            className="w-full text-left text-sm p-1.5 rounded hover:bg-muted/50 transition-colors"
+                            onClick={() => router.push(`/ecos?ecoId=${eh.ecoId}`)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs">{eh.ecoNumber}</span>
+                              <Badge variant={ecoStatusVariants[eh.status] || "muted"} className="text-[9px] px-1 py-0">
+                                {eh.status}
+                              </Badge>
+                              {eh.fromRevision && eh.toRevision && (
+                                <span className="text-xs font-mono text-muted-foreground">
+                                  {eh.fromRevision} → {eh.toRevision}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">{eh.title}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {detail.notes && (
                     <>
                       <Separator />
@@ -774,10 +949,63 @@ export default function PartsPage() {
           </DialogHeader>
           <form onSubmit={handleSavePart}>
             <div className="space-y-4 py-4">
+              {(() => {
+                const previewSrc = dialogThumbnailPreview || dialogThumbnailExistingUrl;
+                return (
+                  <div className="flex items-start gap-3">
+                    <label className="cursor-pointer shrink-0 group relative">
+                      {previewSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={previewSrc} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                      ) : (
+                        <div className="w-16 h-16 rounded-lg bg-muted border border-dashed flex items-center justify-center">
+                          <ImageIcon className="w-5 h-5 text-muted-foreground/40" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Upload className="w-4 h-4 text-white" />
+                      </div>
+                      <input
+                        ref={dialogThumbnailRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleDialogThumbnailPick}
+                      />
+                    </label>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <Label className="text-xs">Thumbnail</Label>
+                      <p className="text-[11px] text-muted-foreground">Click the image to {previewSrc ? "replace" : "upload"}. Stored in Supabase Storage on save.</p>
+                      {previewSrc && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={handleDialogThumbnailRemove}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Part Number</Label>
-                  <Input value={formData.partNumber} onChange={(e) => setFormData({ ...formData, partNumber: e.target.value })} placeholder="PACE-1001" className="h-8 text-sm" required />
+                  <Label className="text-xs">
+                    Part Number
+                    {!editingPart && partNumberMode === "AUTO" && (
+                      <span className="ml-1 text-muted-foreground font-normal">(optional)</span>
+                    )}
+                  </Label>
+                  <Input
+                    value={formData.partNumber}
+                    onChange={(e) => setFormData({ ...formData, partNumber: e.target.value })}
+                    placeholder={!editingPart && partNumberMode === "AUTO" ? "Auto-generated" : "PACE-1001"}
+                    className="h-8 text-sm"
+                    required={editingPart != null || partNumberMode === "MANUAL"}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Category</Label>
@@ -859,7 +1087,14 @@ export default function PartsPage() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving || !formData.partNumber.trim() || !formData.name.trim()}>
+              <Button
+                type="submit"
+                disabled={
+                  saving ||
+                  !formData.name.trim() ||
+                  ((editingPart != null || partNumberMode === "MANUAL") && !formData.partNumber.trim())
+                }
+              >
                 {saving ? "Saving..." : editingPart ? "Save Changes" : "Create Part"}
               </Button>
             </DialogFooter>

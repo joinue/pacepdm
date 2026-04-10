@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
+import { getFolderAccessScope, filterViewable } from "@/lib/folder-access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,6 +18,13 @@ export async function GET(request: NextRequest) {
     }
 
     const db = getServiceClient();
+    // Resolve once per request — files, folders, and (future) other
+    // folder-scoped entities all share the same scope. Filtering happens
+    // in memory after the raw query because the allowed set can be large
+    // and `.in()` with thousands of IDs degrades quickly; this post-filter
+    // is bounded by the query's `.limit(50)` ceiling. If this becomes the
+    // bottleneck, switch to an RPC that joins inside the DB.
+    const scope = await getFolderAccessScope(tenantUser);
     const results: { files?: unknown[]; ecos?: unknown[]; parts?: unknown[]; boms?: unknown[]; folders?: unknown[] } = {};
 
     // Files search
@@ -43,7 +51,10 @@ export async function GET(request: NextRequest) {
       }
 
       const { data: files } = await fileQuery;
-      results.files = files || [];
+      // Strip files whose containing folder the user can't view. Silent drop
+      // — no "hidden result" placeholder — so a user can't confirm existence
+      // of a file by searching for its name or part number.
+      results.files = filterViewable(scope, files || [], (f: { folderId: string }) => f.folderId);
     }
 
     // ECOs search
@@ -118,7 +129,7 @@ export async function GET(request: NextRequest) {
       }
 
       const { data: folders } = await folderQuery;
-      results.folders = folders || [];
+      results.folders = filterViewable(scope, folders || [], (f: { id: string }) => f.id);
     }
 
     return NextResponse.json(results);

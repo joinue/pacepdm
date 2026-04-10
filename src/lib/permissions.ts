@@ -11,6 +11,13 @@ export const PERMISSIONS = {
   FOLDER_CREATE: "folder.create",
   FOLDER_EDIT: "folder.edit",
   FOLDER_DELETE: "folder.delete",
+  // Grant/revoke per-folder ACL rows. Implicitly held by anyone with ADMIN
+  // level on a specific folder, but this permission grants the ability
+  // tenant-wide (e.g., for admins who set up the initial access model).
+  FOLDER_MANAGE_ACCESS: "folder.manage_access",
+  // Bypass the folder access resolver entirely. Used by support/debug roles
+  // to see everything regardless of per-folder ACLs. "*" grants this too.
+  FOLDER_ACCESS_BYPASS: "folder.bypass_access",
   ECO_CREATE: "eco.create",
   ECO_EDIT: "eco.edit",
   ECO_APPROVE: "eco.approve",

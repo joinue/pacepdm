@@ -20,9 +20,12 @@ export async function GET() {
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const db = getServiceClient();
 
+    // Include the createdBy join so the list has the same shape as the
+    // single-ECO GET — lets the client use one data source for both the
+    // sidebar list and the detail panel, without a second fetch per row.
     const { data: ecos } = await db
       .from("ecos")
-      .select("*")
+      .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
       .eq("tenantId", tenantUser.tenantId)
       .order("createdAt", { ascending: false });
 
@@ -115,6 +118,8 @@ export async function POST(request: NextRequest) {
           message: `${tenantUser.fullName} created ${ecoNumber}: ${title}`,
           type: "eco",
           link: `/ecos`,
+          refId: eco.id,
+          actorId: tenantUser.id,
         }),
         `notify approvers about new ECO ${ecoNumber}`
       );

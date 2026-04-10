@@ -20,16 +20,37 @@ export interface ECO {
 export interface ECOItem {
   id: string;
   ecoId: string;
-  fileId: string;
+  // Exactly one of partId/fileId is set — XOR enforced in DB + API.
+  partId: string | null;
+  fileId: string | null;
   changeType: string;
   reason: string | null;
+  fromRevision: string | null;
+  toRevision: string | null;
+  part: {
+    id: string;
+    partNumber: string;
+    name: string;
+    revision: string;
+    lifecycleState: string;
+    category: string;
+  } | null;
   file: {
     id: string;
     name: string;
     partNumber: string | null;
     lifecycleState: string;
     currentVersion: number;
-  };
+  } | null;
+}
+
+export interface SearchPart {
+  id: string;
+  partNumber: string;
+  name: string;
+  revision: string;
+  lifecycleState: string;
+  category: string;
 }
 
 export interface ApprovalData {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 export async function POST(
   _request: NextRequest,
@@ -23,6 +24,10 @@ export async function POST(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
+
     if (file.isFrozen) {
       return NextResponse.json({ error: "Cannot check out a frozen/released file. Revise it first." }, { status: 409 });
     }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW } from "@/lib/status-flows";
 import { z, parseBody } from "@/lib/validation";
 
@@ -67,7 +68,7 @@ export async function PUT(
     // Verify ownership
     const { data: existing } = await db
       .from("boms")
-      .select("status, name")
+      .select("status, name, createdById")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
@@ -123,6 +124,25 @@ export async function PUT(
       entityId: bomId,
       details: changes,
     });
+
+    // Notify the BOM creator on status transitions. Only fires when the
+    // status actually changed (not on bare name/revision edits) — those
+    // are noisy and the audit log already covers them.
+    if (updates.status && existing.createdById) {
+      await sideEffect(
+        notify({
+          tenantId: tenantUser.tenantId,
+          userIds: [existing.createdById],
+          title: `BOM ${body.status!.toLowerCase()}`,
+          message: `${tenantUser.fullName} moved "${existing.name}" to ${body.status}`,
+          type: "transition",
+          link: `/boms/${bomId}`,
+          refId: bomId,
+          actorId: tenantUser.id,
+        }),
+        `notify BOM ${bomId} status change`
+      );
+    }
 
     return NextResponse.json(bom);
   } catch (err) {

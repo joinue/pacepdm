@@ -12,12 +12,35 @@ const SETTINGS_KEYS = [
   "emailNotifications",
   "digestFrequency",
   "autoReleasePrefix",
+  "partNumberMode",
+  "partNumberPrefix",
+  "partNumberPadding",
 ] as const;
 
 const UpdateSettingsSchema = z.object({
   name: nonEmptyString,
   settings: z.record(z.string(), z.unknown()).optional(),
 });
+
+export async function GET() {
+  try {
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const db = getServiceClient();
+    const { data: tenant } = await db
+      .from("tenants")
+      .select("name, settings")
+      .eq("id", tenantUser.tenantId)
+      .single();
+    return NextResponse.json({
+      name: tenant?.name ?? "",
+      settings: (tenant?.settings as Record<string, unknown> | null) ?? {},
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch settings";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function PUT(request: NextRequest) {
   try {

@@ -74,19 +74,76 @@ export async function DELETE(
     const { workflowId } = await params;
     const db = getServiceClient();
 
-    // Check for active approval requests using this workflow
-    const { count } = await db.from("approval_requests").select("*", { count: "exact", head: true })
-      .eq("workflowId", workflowId).eq("status", "PENDING");
+    const { data: workflow } = await db
+      .from("approval_workflows")
+      .select("id, tenantId, name")
+      .eq("id", workflowId)
+      .single();
+    if (!workflow || workflow.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
-    if (count && count > 0) {
-      return NextResponse.json({ error: `Cannot delete — ${count} pending approval request(s) use this workflow` }, { status: 400 });
+    // Pending requests are a hard block — there's a real user waiting
+    // on this workflow to resolve right now.
+    const { count: pendingCount } = await db
+      .from("approval_requests")
+      .select("*", { count: "exact", head: true })
+      .eq("workflowId", workflowId)
+      .eq("status", "PENDING");
+
+    if (pendingCount && pendingCount > 0) {
+      return NextResponse.json(
+        { error: `Cannot delete — ${pendingCount} pending approval request(s) use this workflow` },
+        { status: 400 }
+      );
+    }
+
+    // Historical (non-pending) requests preserve the audit trail. If
+    // any exist we soft-delete (deactivate) so the request → workflow
+    // linkage stays resolvable forever. Only never-used workflows are
+    // removed outright.
+    const { count: historyCount } = await db
+      .from("approval_requests")
+      .select("*", { count: "exact", head: true })
+      .eq("workflowId", workflowId);
+
+    if (historyCount && historyCount > 0) {
+      await db.from("approval_workflows")
+        .update({ isActive: false, updatedAt: new Date().toISOString() })
+        .eq("id", workflowId);
+
+      // Drop the assignments so it's no longer wired to any transition
+      // or ECO trigger — archiving means "don't use for new requests".
+      await db.from("approval_workflow_assignments").delete().eq("workflowId", workflowId);
+
+      await logAudit({
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        action: "workflow.archive",
+        entityType: "workflow",
+        entityId: workflowId,
+        details: { name: workflow.name, historyCount },
+      });
+
+      return NextResponse.json({
+        success: true,
+        archived: true,
+        message: `Workflow archived — preserves ${historyCount} historical approval request(s).`,
+      });
     }
 
     await db.from("approval_workflows").delete().eq("id", workflowId).eq("tenantId", tenantUser.tenantId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow.delete", entityType: "workflow", entityId: workflowId });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow.delete",
+      entityType: "workflow",
+      entityId: workflowId,
+      details: { name: workflow.name },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, archived: false });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete workflow";
     return NextResponse.json({ error: message }, { status: 500 });

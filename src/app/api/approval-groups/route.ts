@@ -10,26 +10,40 @@ const CreateGroupSchema = z.object({
   description: optionalString,
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const db = getServiceClient();
 
-    const { data: groups } = await db
+    // The workflow editor's group picker passes activeOnly=true so
+    // archived groups can't be wired into new workflow steps. The
+    // approval-groups admin page omits the flag to show everything.
+    const activeOnly = request.nextUrl.searchParams.get("activeOnly") === "true";
+
+    let query = db
       .from("approval_groups")
       .select("*")
       .eq("tenantId", tenantUser.tenantId)
       .order("name");
+    if (activeOnly) query = query.eq("isActive", true);
 
-    // Get members for each group
+    const { data: groups } = await query;
+
+    // Enrich with members + usage count (number of workflow steps that
+    // reference the group). The admin UI uses usageCount to disambiguate
+    // archive (referenced) from delete (pristine) before the user clicks.
     const enriched = await Promise.all(
       (groups || []).map(async (group) => {
-        const { data: members } = await db
-          .from("approval_group_members")
-          .select("*, user:tenant_users!approval_group_members_userId_fkey(id, fullName, email)")
-          .eq("groupId", group.id);
-        return { ...group, members: members || [] };
+        const [{ data: members }, { count: usageCount }] = await Promise.all([
+          db.from("approval_group_members")
+            .select("*, user:tenant_users!approval_group_members_userId_fkey(id, fullName, email)")
+            .eq("groupId", group.id),
+          db.from("approval_workflow_steps")
+            .select("*", { count: "exact", head: true })
+            .eq("groupId", group.id),
+        ]);
+        return { ...group, members: members || [], usageCount: usageCount ?? 0 };
       })
     );
 

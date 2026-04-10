@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 export async function GET(
   _request: NextRequest,
@@ -25,6 +26,9 @@ export async function GET(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "view");
+    if (!access.ok) return access.response;
 
     const [{ data: versions }, { data: metadata }] = await Promise.all([
       db.from("file_versions")

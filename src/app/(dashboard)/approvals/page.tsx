@@ -17,6 +17,8 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { toast } from "sonner";
+import { ApprovalTimeline } from "@/components/approvals/approval-timeline";
+import { useRealtimeTable } from "@/hooks/use-realtime-table";
 
 // --- Types ---
 
@@ -152,6 +154,31 @@ export default function ApprovalsPage() {
     });
     return () => controller.abort();
   }, [fetchPending, fetchMyRequests]);
+
+  // ─── Realtime ────────────────────────────────────────────────────────
+  //
+  // Approvals is the one surface where staleness is a correctness bug,
+  // not just an annoyance: two reviewers looking at the same queue will
+  // collide if one claims an item and the other's list doesn't update.
+  // Subscribing to `approval_decisions` (any change) and
+  // `approval_requests` (status flips when a request completes) keeps
+  // both tabs — "Pending" and "My Requests" — in sync across sessions.
+  // No tenantId filter because neither table carries the column; RLS
+  // and the server route already enforce scoping.
+  useRealtimeTable({
+    table: "approval_decisions",
+    onChange: () => {
+      void fetchPending();
+      void fetchMyRequests();
+    },
+  });
+  useRealtimeTable({
+    table: "approval_requests",
+    onChange: () => {
+      void fetchPending();
+      void fetchMyRequests();
+    },
+  });
 
   async function loadRequestDetail(requestId: string) {
     setLoadingDetail(true);
@@ -547,22 +574,18 @@ export default function ApprovalsPage() {
 
                 <Separator />
 
-                {/* Timeline */}
+                {/* Timeline — rendered via the shared component so the
+                    ECO approval tab and this dialog stay in visual sync.
+                    Requests created via the legacy approval path prior
+                    to the engine fix won't have any history rows; the
+                    shared component surfaces a clear message in that
+                    case instead of rendering an empty section. */}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Timeline</p>
-                  <div className="space-y-2">
-                    {viewRequest.timeline.map((event) => (
-                      <div key={event.id} className="flex gap-2 text-xs">
-                        <span className="text-muted-foreground shrink-0 w-32">
-                          <FormattedDate date={event.createdAt} />
-                        </span>
-                        <div>
-                          {event.user && <span className="font-medium">{event.user.fullName}: </span>}
-                          <span className="text-muted-foreground">{event.details}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <ApprovalTimeline
+                    events={viewRequest.timeline}
+                    emptyMessage="No timeline events were recorded. This request was created before timeline tracking was added to the legacy approval path — new requests will populate a full timeline."
+                  />
                 </div>
               </div>
             </>

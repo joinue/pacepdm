@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const PREVIEWABLE_IMAGES = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
 const PREVIEWABLE_TEXT = ["txt", "csv", "md", "json", "xml"];
@@ -21,6 +22,9 @@ export async function GET(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "view");
+    if (!access.ok) return access.response;
 
     const ext = (file.fileType || file.name?.split(".").pop() || "").toLowerCase();
 

@@ -4,6 +4,139 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString, optionalUuid } from "@/lib/validation";
+import { wouldCreateCycle, type RollupBom } from "@/lib/bom-rollup";
+
+// ─── Mutation guard ───────────────────────────────────────────────────────
+//
+// A BOM item is mutable iff:
+//   1. The BOM exists in the caller's tenant
+//   2. The BOM itself is not RELEASED or OBSOLETE
+//   3. The parent file (if any) is not frozen
+//
+// Rule 3 closes a gap where a BOM in WIP could be edited even though
+// its parent file had been independently released — the audit trail of
+// the released file would then drift from the BOM rows. BOMs without a
+// parent file (`fileId IS NULL`) bypass rule 3.
+async function requireBomMutable(
+  db: ReturnType<typeof getServiceClient>,
+  bomId: string,
+  tenantId: string
+): Promise<{ ok: true; bom: { id: string; status: string; fileId: string | null } } | { ok: false; status: number; error: string }> {
+  const { data: bom } = await db
+    .from("boms")
+    .select("id, status, fileId, file:files!boms_fileId_fkey(isFrozen)")
+    .eq("id", bomId)
+    .eq("tenantId", tenantId)
+    .single();
+
+  if (!bom) {
+    return { ok: false, status: 404, error: "BOM not found" };
+  }
+  if (bom.status === "RELEASED" || bom.status === "OBSOLETE") {
+    return { ok: false, status: 400, error: `Cannot modify items on a ${bom.status} BOM` };
+  }
+  // Supabase returns the joined relation as either a single row or an
+  // array depending on the join cardinality — handle both shapes.
+  const parentFile = Array.isArray(bom.file) ? bom.file[0] : bom.file;
+  if (parentFile?.isFrozen) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Cannot modify items on a BOM whose parent file is frozen/released. Revise the file first.",
+    };
+  }
+  return { ok: true, bom: { id: bom.id, status: bom.status, fileId: bom.fileId } };
+}
+
+// ─── Cycle check helper ───────────────────────────────────────────────────
+//
+// When a BOM item sets `linkedBomId`, we need to refuse the write if the
+// link would close a cycle (BOM A → BOM B → BOM A). The check fetches
+// every BOM reachable from the target sub-BOM in the same tenant, then
+// runs the pure DFS in `wouldCreateCycle`.
+//
+// Tenant-scoped: we deliberately only fetch BOMs from the caller's tenant
+// so a cross-tenant link is rejected as "BOM not found" before we even
+// reach the cycle check.
+async function checkLinkedBomSafe(
+  db: ReturnType<typeof getServiceClient>,
+  tenantId: string,
+  parentBomId: string,
+  targetBomId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Verify the target BOM exists and is in the same tenant.
+  const { data: target } = await db
+    .from("boms")
+    .select("id")
+    .eq("id", targetBomId)
+    .eq("tenantId", tenantId)
+    .single();
+  if (!target) {
+    return { ok: false, error: "Linked BOM not found" };
+  }
+
+  // Walk every BOM reachable from the target so the in-memory cycle check
+  // has the full subtree to traverse. We use a small BFS that mirrors the
+  // rollup endpoint — same MAX_BOMS guard against runaway trees.
+  const MAX_BOMS = 500;
+  const bomsById = new Map<string, RollupBom>();
+  const toFetch = new Set<string>([parentBomId, targetBomId]);
+  let safety = 0;
+
+  while (toFetch.size > 0) {
+    if (++safety > MAX_BOMS) {
+      return { ok: false, error: "BOM tree exceeds maximum size for cycle check" };
+    }
+    const ids = Array.from(toFetch);
+    toFetch.clear();
+
+    const [{ data: bomRows }, { data: itemRows }] = await Promise.all([
+      db
+        .from("boms")
+        .select("id, name, revision")
+        .eq("tenantId", tenantId)
+        .in("id", ids),
+      db
+        .from("bom_items")
+        .select("id, bomId, linkedBomId, itemNumber, partNumber, name, quantity, unit, unitCost")
+        .in("bomId", ids),
+    ]);
+
+    const itemsByBom = new Map<string, RollupBom["items"]>();
+    for (const item of itemRows || []) {
+      const list = itemsByBom.get(item.bomId) || [];
+      list.push({
+        id: item.id,
+        bomId: item.bomId,
+        linkedBomId: item.linkedBomId,
+        itemNumber: item.itemNumber || "",
+        partNumber: item.partNumber,
+        name: item.name || "",
+        quantity: item.quantity ?? 0,
+        unit: item.unit || "EA",
+        unitCost: item.unitCost,
+      });
+      itemsByBom.set(item.bomId, list);
+      if (item.linkedBomId && !bomsById.has(item.linkedBomId)) {
+        toFetch.add(item.linkedBomId);
+      }
+    }
+    for (const b of bomRows || []) {
+      bomsById.set(b.id, {
+        id: b.id,
+        name: b.name,
+        revision: b.revision,
+        items: itemsByBom.get(b.id) || [],
+      });
+    }
+  }
+
+  const cyclePath = wouldCreateCycle(parentBomId, targetBomId, bomsById);
+  if (cyclePath) {
+    return { ok: false, error: `Cycle detected: ${cyclePath.join(" → ")}` };
+  }
+  return { ok: true };
+}
 
 // ─── Validation schemas ───────────────────────────────────────────────────
 //
@@ -71,11 +204,45 @@ export async function GET(
 
     const { data: items } = await db
       .from("bom_items")
-      .select("*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, category, thumbnailUrl, unitCost), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status)")
+      // The `part:parts!...` join fetches *live* fields so the UI can
+      // prefer them over the snapshot columns on `bom_items`. This is the
+      // fix for "BOMs showing stale part data after a part is renamed or
+      // rev-bumped" — the snapshot still sits on the row as a fallback
+      // for free-text items and for deleted parts, but when partId is
+      // set the table reads partNumber/name/description/material/unit/
+      // unitCost/revision/lifecycleState from the part itself.
+      .select("*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, description, category, revision, lifecycleState, material, unit, unitCost, thumbnailKey), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status)")
       .eq("bomId", bomId)
       .order("sortOrder");
 
-    return NextResponse.json(items || []);
+    // Resolve part thumbnailKey -> signed URL (300s) so the BOM table can
+    // render previews. Frontend reads `part.thumbnailUrl`, mirroring the
+    // shape returned by the parts list/detail endpoints.
+    const rows = items || [];
+    const keys = Array.from(
+      new Set(
+        rows
+          .map((r) => (r.part as { thumbnailKey: string | null } | null)?.thumbnailKey)
+          .filter((k): k is string => !!k),
+      ),
+    );
+    const urlByKey = new Map<string, string>();
+    if (keys.length > 0) {
+      await Promise.all(
+        keys.map(async (k) => {
+          const { data } = await db.storage.from("vault").createSignedUrl(k, 300);
+          if (data?.signedUrl) urlByKey.set(k, data.signedUrl);
+        }),
+      );
+    }
+    const withThumbs = rows.map((r) => {
+      const part = r.part as ({ thumbnailKey: string | null } & Record<string, unknown>) | null;
+      if (!part) return r;
+      const key = part.thumbnailKey;
+      return { ...r, part: { ...part, thumbnailUrl: key ? urlByKey.get(key) || null : null } };
+    });
+
+    return NextResponse.json(withThumbs);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch BOM items";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -218,21 +385,9 @@ export async function POST(
     const db = getServiceClient();
     const now = new Date().toISOString();
 
-    // Tenant ownership check — guards against cross-tenant writes by ID guessing
-    const { data: bom } = await db
-      .from("boms")
-      .select("id, status")
-      .eq("id", bomId)
-      .eq("tenantId", tenantUser.tenantId)
-      .single();
-    if (!bom) {
-      return NextResponse.json({ error: "BOM not found" }, { status: 404 });
-    }
-    if (bom.status === "RELEASED" || bom.status === "OBSOLETE") {
-      return NextResponse.json(
-        { error: `Cannot modify items on a ${bom.status} BOM` },
-        { status: 400 }
-      );
+    const guard = await requireBomMutable(db, bomId, tenantUser.tenantId);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
     // Bulk path: schema discriminates on the presence of `items`
@@ -241,6 +396,20 @@ export async function POST(
       if (inputs.length === 0) {
         return NextResponse.json({ items: [], inserted: 0 });
       }
+
+      // Cycle check for any sub-assembly links in the batch. Done up
+      // front so a single bad row aborts the whole batch instead of
+      // landing N-1 rows and failing the cycle row at the end.
+      const linkedTargets = Array.from(
+        new Set(inputs.map((it) => it.linkedBomId).filter((v): v is string => !!v))
+      );
+      for (const target of linkedTargets) {
+        const check = await checkLinkedBomSafe(db, tenantUser.tenantId, bomId, target);
+        if (!check.ok) {
+          return NextResponse.json({ error: check.error }, { status: 400 });
+        }
+      }
+
       const partSnaps = await fetchPartSnapshots(db, tenantUser.tenantId, inputs);
       const rows = inputs.map((it) =>
         buildItemRow(bomId, applyPartSnapshot(it, partSnaps.get(it.partId || "")), now)
@@ -259,6 +428,12 @@ export async function POST(
 
     // Single-item path
     const single = body;
+    if (single.linkedBomId) {
+      const check = await checkLinkedBomSafe(db, tenantUser.tenantId, bomId, single.linkedBomId);
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 });
+      }
+    }
     const partSnaps = await fetchPartSnapshots(db, tenantUser.tenantId, [single]);
     const filled = applyPartSnapshot(single, partSnaps.get(single.partId || ""));
     const { data: item, error } = await db
@@ -301,6 +476,11 @@ export async function DELETE(
     const { bomId } = await params;
     const db = getServiceClient();
 
+    const guard = await requireBomMutable(db, bomId, tenantUser.tenantId);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
     // Get item name for audit before deleting
     const { data: existing } = await db
       .from("bom_items")
@@ -341,6 +521,20 @@ export async function PUT(
 
     const { bomId } = await params;
     const db = getServiceClient();
+
+    const guard = await requireBomMutable(db, bomId, tenantUser.tenantId);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // If the update is linking the row to a sub-BOM, refuse cycles
+    // before touching the row.
+    if (rest.linkedBomId) {
+      const check = await checkLinkedBomSafe(db, tenantUser.tenantId, bomId, rest.linkedBomId);
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 });
+      }
+    }
 
     // If this update is linking the row to a part, snapshot the part's
     // copyable fields into the update — same rule as POST: only fill fields

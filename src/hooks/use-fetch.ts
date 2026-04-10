@@ -37,7 +37,7 @@ interface UseFetchResult<T> {
  *   if (!boms) return null;
  *   return <BomList boms={boms} onChange={refetch} />;
  *
- * For server components, prefer fetching directly via Supabase/Prisma in
+ * For server components, prefer fetching directly via Supabase in
  * the async page component — this hook is only for the client side.
  */
 export function useFetch<T>(url: string | null, options: UseFetchOptions = {}): UseFetchResult<T> {

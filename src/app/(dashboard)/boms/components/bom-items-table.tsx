@@ -48,6 +48,19 @@ export function BomItemsTable({
   const treeItems = buildTree(items);
   const hasChildren = new Set(items.filter((i) => i.parentItemId).map((i) => i.parentItemId!));
 
+  // When a BOM item is linked to a part, display fields come from the
+  // live part record (via the `part:parts!...` join) instead of the
+  // per-row snapshot columns. That way a renamed or rev-bumped part
+  // propagates to every BOM without a backfill. The snapshot still wins
+  // for free-text items and for rows whose part was later deleted.
+  const displayOf = (item: BOMItem) => ({
+    partNumber: item.part?.partNumber ?? item.partNumber ?? item.file?.partNumber ?? null,
+    name: item.part?.name ?? item.name,
+    material: item.part?.material ?? item.material,
+    unit: item.part?.unit ?? item.unit,
+    unitCost: item.part?.unitCost ?? item.unitCost,
+  });
+
   function toggleCollapse(itemId: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -148,6 +161,9 @@ export function BomItemsTable({
               const hasKids = hasChildren.has(item.id);
               const isCollapsed = collapsed.has(item.id);
 
+              const display = displayOf(item);
+              const extCost = display.unitCost != null ? display.unitCost * item.quantity : null;
+
               return (
                 <TableRow key={item.id} className={item.level > 0 ? "bg-muted/20" : ""}>
                   {/* Item # with tree indent */}
@@ -170,7 +186,7 @@ export function BomItemsTable({
                   <TableCell className="font-medium text-sm">
                     {isEditing ? (
                       <Input value={editValues.name} onChange={(e) => setEditValues({ ...editValues, name: e.target.value })} className="h-6 text-xs px-1" />
-                    ) : item.name}
+                    ) : display.name}
                   </TableCell>
 
                   {/* Part # */}
@@ -178,7 +194,7 @@ export function BomItemsTable({
                     {isEditing ? (
                       <Input value={editValues.partNumber} onChange={(e) => setEditValues({ ...editValues, partNumber: e.target.value })} className="h-6 text-xs px-1" />
                     ) : (
-                      item.partNumber || item.file?.partNumber || "—"
+                      display.partNumber || "—"
                     )}
                   </TableCell>
 
@@ -193,7 +209,7 @@ export function BomItemsTable({
                   <TableCell className="text-xs">
                     {isEditing ? (
                       <Input value={editValues.unit} onChange={(e) => setEditValues({ ...editValues, unit: e.target.value })} className="h-6 w-12 text-xs px-1" />
-                    ) : item.unit}
+                    ) : display.unit}
                   </TableCell>
 
                   {/* Source: part / sub-assembly / file */}
@@ -205,10 +221,12 @@ export function BomItemsTable({
                   <TableCell className="text-sm">
                     {isEditing ? (
                       <Input value={editValues.material} onChange={(e) => setEditValues({ ...editValues, material: e.target.value })} className="h-6 text-xs px-1" />
-                    ) : item.material || "—"}
+                    ) : display.material || "—"}
                   </TableCell>
 
-                  {/* Vendor */}
+                  {/* Vendor — stays on the snapshot: parts don't have a
+                      vendor column of their own (primary vendor is a
+                      relation), so there's nothing live to prefer. */}
                   <TableCell className="text-sm">
                     {isEditing ? (
                       <Input value={editValues.vendor} onChange={(e) => setEditValues({ ...editValues, vendor: e.target.value })} className="h-6 text-xs px-1" />
@@ -219,12 +237,12 @@ export function BomItemsTable({
                   <TableCell className="font-mono text-sm">
                     {isEditing ? (
                       <Input type="number" value={editValues.unitCost} onChange={(e) => setEditValues({ ...editValues, unitCost: e.target.value })} className="h-6 w-20 text-xs px-1" min="0" step="0.01" />
-                    ) : item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
+                    ) : display.unitCost != null ? `$${display.unitCost.toFixed(2)}` : "—"}
                   </TableCell>
 
                   {/* Ext. Cost */}
                   <TableCell className="font-mono text-sm">
-                    {item.unitCost != null ? `$${(item.unitCost * item.quantity).toFixed(2)}` : "—"}
+                    {extCost != null ? `$${extCost.toFixed(2)}` : "—"}
                   </TableCell>
 
                   {/* Actions */}
@@ -270,17 +288,18 @@ function ItemSourceCell({
   onNavigateToParts: () => void;
 }) {
   if (item.part) {
-    const part = item.part as BOMItem["part"] & { category: string };
+    const part = item.part;
     return (
       <div className="flex items-center gap-1.5">
         <Cpu className="w-3 h-3 text-muted-foreground shrink-0" />
         <button
           className="text-xs hover:underline truncate max-w-28"
           onClick={onNavigateToParts}
-          title={item.part.name}
+          title={`${part.name} · Rev ${part.revision}`}
         >
-          {item.part.partNumber}
+          {part.partNumber}
         </button>
+        <span className="text-[10px] font-mono text-muted-foreground">Rev {part.revision}</span>
         <Badge variant={categoryVariants[part.category] || "secondary"} className="text-[9px] px-1 py-0">
           {part.category.replace("_", " ").toLowerCase()}
         </Badge>

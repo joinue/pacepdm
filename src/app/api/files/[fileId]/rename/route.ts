@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const RenameSchema = z.object({ name: nonEmptyString });
 
@@ -29,6 +30,15 @@ export async function PUT(
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
+
+    // Released/Obsolete files are immutable — name is part of the
+    // audit trail. Use Revise to drop back to WIP first.
+    if (file.isFrozen) {
+      return NextResponse.json({ error: "Cannot rename a frozen/released file. Revise it first." }, { status: 409 });
     }
 
     const oldName = file.name;

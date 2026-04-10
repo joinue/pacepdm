@@ -32,6 +32,18 @@ export async function POST(
     const { partId } = await params;
     const db = getServiceClient();
 
+    // Snapshot the file name for the audit log — tenant-scoped lookup also
+    // prevents linking a file from another tenant by guessing IDs.
+    const { data: fileRecord } = await db
+      .from("files")
+      .select("id, name")
+      .eq("id", body.fileId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+    if (!fileRecord) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
     // If setting as primary, unset others
     if (body.isPrimary) {
       await db.from("part_files").update({ isPrimary: false }).eq("partId", partId);
@@ -52,7 +64,14 @@ export async function POST(
       }
       throw error;
     }
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.file_link", entityType: "part", entityId: partId, details: { fileId: body.fileId, role: body.role || "DRAWING" } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.file_link",
+      entityType: "part",
+      entityId: partId,
+      details: { fileId: body.fileId, fileName: fileRecord.name, role: body.role || "DRAWING" },
+    });
 
     return NextResponse.json(pf);
   } catch (err) {
@@ -80,9 +99,25 @@ export async function DELETE(
     const { partId } = await params;
     const db = getServiceClient();
 
+    // Snapshot the file name before the link is gone, so the audit entry
+    // remains readable even if the file is later renamed or deleted.
+    const { data: fileRecord } = await db
+      .from("files")
+      .select("name")
+      .eq("id", fileId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+
     await db.from("part_files").delete().eq("partId", partId).eq("fileId", fileId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.file_unlink", entityType: "part", entityId: partId, details: { fileId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.file_unlink",
+      entityType: "part",
+      entityId: partId,
+      details: { fileId, fileName: fileRecord?.name ?? null },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

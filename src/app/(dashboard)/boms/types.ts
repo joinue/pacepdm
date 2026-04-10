@@ -34,13 +34,22 @@ export interface BOMItem {
     revision: string;
     lifecycleState: string;
   } | null;
+  // Live snapshot of the linked part. When non-null, the BOM items table
+  // prefers these fields over the per-row snapshot columns — so renaming
+  // a part or releasing a new revision shows up immediately on every BOM
+  // that references it (no backfill required).
   part: {
     id: string;
     partNumber: string;
     name: string;
+    description: string | null;
     category: string;
-    thumbnailUrl: string | null;
+    revision: string;
+    lifecycleState: string;
+    material: string | null;
+    unit: string;
     unitCost: number | null;
+    thumbnailUrl: string | null;
   } | null;
   linkedBom: {
     id: string;

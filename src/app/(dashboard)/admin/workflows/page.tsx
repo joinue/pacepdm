@@ -94,7 +94,7 @@ export default function WorkflowsPage() {
   const loadData = useCallback(async () => {
     const [wfRes, gRes, tRes] = await Promise.all([
       fetch("/api/workflows"),
-      fetch("/api/approval-groups"),
+      fetch("/api/approval-groups?activeOnly=true"),
       fetch("/api/lifecycle/transitions"),
     ]);
     const wfData = await wfRes.json();
@@ -446,7 +446,7 @@ export default function WorkflowsPage() {
               <div className="space-y-2">
                 <Label>Deadline (hours, optional)</Label>
                 <Input type="number" value={stepDeadline} onChange={(e) => setStepDeadline(e.target.value)} placeholder="e.g., 72" min="1" />
-                <p className="text-xs text-muted-foreground">If set, approvers will be reminded when the deadline approaches.</p>
+                <p className="text-xs text-muted-foreground">Recorded on the request for reference and SLA reporting. Automatic reminders are not yet sent.</p>
               </div>
             </div>
             <DialogFooter>

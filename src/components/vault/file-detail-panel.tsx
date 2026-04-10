@@ -23,10 +23,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus } from "lucide-react";
+import { useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
+import { useRealtimeTable } from "@/hooks/use-realtime-table";
 
 // --- Preview components ---
 
@@ -38,6 +40,12 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
     url?: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  // Bumped after a successful thumbnail regenerate so the preview effect
+  // re-fetches and shows the new image instead of cached state.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [regenerating, setRegenerating] = useState(false);
+  const [uploadingThumb, setUploadingThumb] = useState(false);
+  const thumbInputRef = useRef<HTMLInputElement>(null);
 
   // Note: setLoading(true) is omitted from the effect body because the lint
   // rule react-hooks/set-state-in-effect forbids synchronous setState in
@@ -68,19 +76,131 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
       cancelled = true;
       controller.abort();
     };
-  }, [fileId]);
+  }, [fileId, refreshKey]);
+
+  // Re-runs the server-side extractor against the file already in storage.
+  // Uses /api/files/[fileId]/thumbnail/regenerate which downloads the file,
+  // runs the same extractor used at upload time, and updates thumbnailKey.
+  // Critical for files uploaded before the extraction pipeline was working.
+  async function handleRegenerate() {
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/files/${fileId}/thumbnail/regenerate`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to regenerate thumbnail");
+        return;
+      }
+      if (data.regenerated) {
+        toast.success("Thumbnail regenerated");
+        setRefreshKey((k) => k + 1);
+      } else {
+        toast.warning(data.reason || "No thumbnail could be extracted from this file");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to regenerate thumbnail");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  // Manual thumbnail upload — the escape hatch for files whose format
+  // has no embedded preview that we can extract (e.g., newer SolidWorks
+  // files saved without "Save preview picture", or any non-image CAD
+  // format). User picks a PNG/JPEG, we normalise it through the image
+  // branch of the dispatcher and store it as the thumbnail.
+  async function handleThumbnailUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingThumb(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch(`/api/files/${fileId}/thumbnail/set`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to upload thumbnail");
+        return;
+      }
+      toast.success("Thumbnail updated");
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to upload thumbnail");
+    } finally {
+      setUploadingThumb(false);
+      // Reset so selecting the same file twice in a row still fires onChange
+      if (thumbInputRef.current) thumbInputRef.current.value = "";
+    }
+  }
 
   if (loading) return <p className="text-sm text-muted-foreground text-center py-12">Loading preview...</p>;
   if (!preview || !preview.canPreview) {
+    // Message distinguishes three real cases so we don't mislead users
+    // into thinking a supported format is unsupported:
+    //
+    //   1. SolidWorks files — extraction is supported, but this specific
+    //      file has no embedded preview (or hasn't been processed yet).
+    //      Both "Try auto-extract" and "Upload thumbnail" are useful.
+    //
+    //   2. Other CAD formats (step/stl/dwg/dxf/iges) — pure-JS preview
+    //      isn't possible. Only "Upload thumbnail" is useful.
+    //
+    //   3. Anything else unsupported for preview — generic fallback.
+    const ext = (preview?.fileType || "").toLowerCase();
+    const isSolidWorks = ["sldprt", "sldasm", "slddrw"].includes(ext);
+    const isOtherCad = ["step", "stp", "stl", "dwg", "dxf", "iges", "igs"].includes(ext);
+    const headline = isSolidWorks
+      ? "No preview extracted yet for this file"
+      : isOtherCad
+        ? `In-browser preview isn't supported for .${ext} files`
+        : `Preview not available for .${ext || "unknown"} files`;
     return (
       <div className="text-center py-12">
         <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground">Preview not available for .{preview?.fileType || "unknown"} files</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => {
-          fetch(`/api/files/${fileId}/download`).then(r => r.json()).then(d => { if (d.url) window.open(d.url, "_blank"); });
-        }}>
-          <Download className="w-3.5 h-3.5 mr-1.5" />Download file
-        </Button>
+        <p className="text-sm text-muted-foreground">{headline}</p>
+        <div className="mt-3 flex gap-2 justify-center flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => {
+            fetch(`/api/files/${fileId}/download`).then(r => r.json()).then(d => { if (d.url) window.open(d.url, "_blank"); });
+          }}>
+            <Download className="w-3.5 h-3.5 mr-1.5" />Download file
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={regenerating}>
+            {regenerating
+              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              : <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            }
+            {regenerating ? "Regenerating..." : "Try auto-extract"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => thumbInputRef.current?.click()}
+            disabled={uploadingThumb}
+          >
+            {uploadingThumb
+              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              : <ImagePlus className="w-3.5 h-3.5 mr-1.5" />
+            }
+            {uploadingThumb ? "Uploading..." : "Upload thumbnail"}
+          </Button>
+          <input
+            ref={thumbInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp"
+            className="hidden"
+            onChange={handleThumbnailUpload}
+          />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground/80 max-w-sm mx-auto">
+          {isSolidWorks
+            ? "Auto-extract reads an embedded preview from the SolidWorks file itself. If the file has no preview (the Save preview picture option was off when it was saved), upload one manually."
+            : isOtherCad
+              ? "This format has no embedded raster preview we can read. Upload a thumbnail image to represent the file in the vault."
+              : "Auto-extract reads an embedded preview from the file. Upload thumbnail lets you set one manually."}
+        </p>
       </div>
     );
   }
@@ -215,16 +335,32 @@ export function FileDetailPanel({
     itemNumber: string; itemName: string; quantity: number; unit: string;
   }[]>([]);
   const [linkedEcos, setLinkedEcos] = useState<{id: string; changeType: string; reason: string | null; eco: { id: string; ecoNumber: string; title: string; status: string; priority: string }}[]>([]);
+  // Per-version revision history with linked ECO. Lives alongside `file.versions`
+  // (which is the lightweight summary embedded in the file fetch) — this one
+  // is the richer view rendered in the Versions tab so engineers can see
+  // "v3 (rev B) — released by ECO-0042".
+  const [revisions, setRevisions] = useState<{
+    id: string;
+    version: number;
+    revision: string | null;
+    fileSize: number;
+    comment: string | null;
+    createdAt: string;
+    ecoId: string | null;
+    uploadedBy: { fullName: string };
+    eco: { id: string; ecoNumber: string; title: string; status: string } | null;
+  }[]>([]);
 
   // Reusable refresh function — called after mutations (save, transition, etc).
   // Returns a promise so callers can await completion.
   const refreshFile = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const [data, wu, ecos] = await Promise.all([
+        const [data, wu, ecos, revs] = await Promise.all([
           fetchJson<FileDetail>(`/api/files/${fileId}`, { signal }),
           fetchJson<typeof whereUsed>(`/api/files/${fileId}/where-used`, { signal }),
           fetchJson<typeof linkedEcos>(`/api/files/${fileId}/ecos`, { signal }),
+          fetchJson<typeof revisions>(`/api/files/${fileId}/revisions`, { signal }),
         ]);
         if (signal?.aborted) return;
         setFile(data);
@@ -239,6 +375,7 @@ export function FileDetailPanel({
         setMetadataValues(values);
         setWhereUsed(Array.isArray(wu) ? wu : []);
         setLinkedEcos(Array.isArray(ecos) ? ecos : []);
+        setRevisions(Array.isArray(revs) ? revs : []);
       } catch (err) {
         if (isAbortError(err)) return;
         toast.error(errorMessage(err) || "Failed to load file details");
@@ -262,6 +399,28 @@ export function FileDetailPanel({
     })();
     return () => controller.abort();
   }, [refreshFile]);
+
+  // ─── Realtime ────────────────────────────────────────────────────────
+  //
+  // An engineer can stare at the detail panel for minutes deciding
+  // whether to use a part — this is the worst possible place for stale
+  // data. Subscribe to the *one* files row and its file_versions so
+  // checkout toggles, renames, lifecycle transitions, and ECO-driven
+  // revision releases all land in the panel within 250ms.
+  //
+  // Filters are by id/fileId so only events for the currently-open
+  // file wake this component. When the user navigates away (fileId
+  // changes or panel unmounts), the channels tear down automatically.
+  useRealtimeTable({
+    table: "files",
+    filter: `id=eq.${fileId}`,
+    onChange: () => { void refreshFile(); },
+  });
+  useRealtimeTable({
+    table: "file_versions",
+    filter: `fileId=eq.${fileId}`,
+    onChange: () => { void refreshFile(); },
+  });
 
   async function handleSaveMetadata() {
     setSaving(true);
@@ -540,13 +699,28 @@ export function FileDetailPanel({
 
       <TabsContent value="versions" className="flex-1 overflow-auto mt-2">
         <div className="space-y-3">
-          {file.versions.map((v) => {
+          {/* Prefer the richer /revisions response (includes ecoId + linked
+              ECO) over the inline file.versions summary, but fall back to it
+              if the revisions fetch hasn't returned yet. */}
+          {(revisions.length > 0 ? revisions : file.versions.map((v) => ({
+            id: v.id,
+            version: v.version,
+            revision: null,
+            fileSize: v.fileSize,
+            comment: v.comment,
+            createdAt: v.createdAt,
+            ecoId: null,
+            uploadedBy: v.uploadedBy,
+            eco: null,
+          }))).map((v) => {
             const isCurrent = v.version === file.currentVersion;
             return (
               <div key={v.id} className={`border rounded p-3 text-sm space-y-1 ${isCurrent ? "border-primary/30 bg-primary/5" : ""}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">Version {v.version}</span>
+                    <span className="font-medium">
+                      {v.revision ? `Rev ${v.revision}.${v.version}` : `Version ${v.version}`}
+                    </span>
                     {isCurrent && <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Current</Badge>}
                   </div>
                   <div className="flex items-center gap-1">
@@ -566,6 +740,15 @@ export function FileDetailPanel({
                 <p className="text-muted-foreground">
                   <FormattedDate date={v.createdAt} />
                 </p>
+                {v.eco && (
+                  <Link
+                    href="/ecos"
+                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
+                    <ClipboardList className="w-3 h-3" />
+                    Released by {v.eco.ecoNumber} &mdash; {v.eco.title}
+                  </Link>
+                )}
                 {v.comment && <p className="text-muted-foreground italic">&ldquo;{v.comment}&rdquo;</p>}
               </div>
             );

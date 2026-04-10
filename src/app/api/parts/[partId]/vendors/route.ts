@@ -98,9 +98,32 @@ export async function DELETE(
     const { vendorId } = await request.json();
     const db = getServiceClient();
 
+    // Snapshot the vendor label before the link row is deleted. `vendorId` in
+    // the request body is actually the part_vendors row id (see .eq("id",
+    // vendorId) below) — the legacy naming is misleading but load-bearing for
+    // existing clients, so we just read through it here.
+    const { data: existingLink } = await db
+      .from("part_vendors")
+      .select("vendorId, vendorName, vendorPartNumber")
+      .eq("id", vendorId)
+      .eq("partId", partId)
+      .single();
+
     await db.from("part_vendors").delete().eq("id", vendorId).eq("partId", partId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.vendor_remove", entityType: "part", entityId: partId, details: { vendorId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.vendor_remove",
+      entityType: "part",
+      entityId: partId,
+      details: {
+        linkId: vendorId,
+        vendorId: existingLink?.vendorId ?? null,
+        vendorName: existingLink?.vendorName ?? null,
+        vendorPartNumber: existingLink?.vendorPartNumber ?? null,
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch {

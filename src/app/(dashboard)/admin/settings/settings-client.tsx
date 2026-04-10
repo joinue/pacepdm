@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Save, Building2, HardDrive, FileType, Bell } from "lucide-react";
+import { Save, Building2, HardDrive, FileType, Bell, Hash } from "lucide-react";
 import { toast } from "sonner";
 
 export interface TenantSettings {
@@ -21,6 +21,9 @@ export interface TenantSettings {
   emailNotifications: boolean;
   digestFrequency: "REALTIME" | "DAILY" | "WEEKLY";
   autoReleasePrefix: string;
+  partNumberMode: "AUTO" | "MANUAL";
+  partNumberPrefix: string;
+  partNumberPadding: number;
 }
 
 const DEFAULT_SETTINGS: TenantSettings = {
@@ -31,6 +34,9 @@ const DEFAULT_SETTINGS: TenantSettings = {
   emailNotifications: true,
   digestFrequency: "DAILY",
   autoReleasePrefix: "REL-",
+  partNumberMode: "AUTO",
+  partNumberPrefix: "PRT-",
+  partNumberPadding: 5,
 };
 
 export function SettingsClient({
@@ -203,6 +209,64 @@ export function SettingsClient({
                 Prepended to auto-generated release numbers (e.g., REL-001)
               </p>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Part Numbering */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Hash className="w-4 h-4 text-primary" />
+              Part Numbering
+            </CardTitle>
+            <CardDescription>
+              How new parts get a number when created
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Numbering Mode</Label>
+              <Select
+                value={settings.partNumberMode}
+                onValueChange={(v) => updateSetting("partNumberMode", v as "AUTO" | "MANUAL")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AUTO">Auto (server assigns next number)</SelectItem>
+                  <SelectItem value="MANUAL">Manual (user types each number)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Separator />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="partPrefix">Prefix</Label>
+                <Input
+                  id="partPrefix"
+                  value={settings.partNumberPrefix}
+                  onChange={(e) => updateSetting("partNumberPrefix", e.target.value)}
+                  placeholder="PRT-"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="partPadding">Zero-Padding Width</Label>
+                <Input
+                  id="partPadding"
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={settings.partNumberPadding}
+                  onChange={(e) => updateSetting("partNumberPadding", parseInt(e.target.value) || 5)}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Preview: <span className="font-mono">{settings.partNumberPrefix}{"1".padStart(settings.partNumberPadding, "0")}</span>
+              {", "}
+              <span className="font-mono">{settings.partNumberPrefix}{"2".padStart(settings.partNumberPadding, "0")}</span>, …
+            </p>
           </CardContent>
         </Card>
 

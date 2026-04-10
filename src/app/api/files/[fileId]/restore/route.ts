@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody } from "@/lib/validation";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const RestoreSchema = z.object({
   version: z.number().int().positive(),
@@ -28,6 +29,9 @@ export async function POST(
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
+
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
 
     if (file.isCheckedOut) {
       return NextResponse.json({ error: "Cannot restore while file is checked out" }, { status: 409 });

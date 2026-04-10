@@ -10,11 +10,20 @@ import {
 } from "@/components/ui/dialog";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 
+interface CreatedBom {
+  id: string;
+  name: string;
+}
+
 interface CreateBomDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called after a successful create so the parent can refresh its list. */
-  onCreated: () => void;
+  /**
+   * Called after a successful create. Receives the new BOM so the parent
+   * can do things like navigate to it. The argument is optional because
+   * older callers passed a zero-arg callback; the type stays compatible.
+   */
+  onCreated: (bom?: CreatedBom) => void;
 }
 
 /**
@@ -35,10 +44,10 @@ export function CreateBomDialog({ open, onOpenChange, onCreated }: CreateBomDial
     if (!name.trim()) return;
     setCreating(true);
     try {
-      await fetchJson("/api/boms", { method: "POST", body: { name: name.trim() } });
+      const created = await fetchJson<CreatedBom>("/api/boms", { method: "POST", body: { name: name.trim() } });
       toast.success("BOM created");
       close();
-      onCreated();
+      onCreated(created);
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to create BOM");
     } finally {

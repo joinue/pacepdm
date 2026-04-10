@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { canEditFolder, canViewFolder, getFolderAccessScope } from "@/lib/folder-access";
 
 const BulkTransitionSchema = z.object({
   fileIds: z.array(nonEmptyString).min(1, "At least one fileId is required"),
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     const { fileIds, transitionId } = parsed.data;
 
     const db = getServiceClient();
+    const scope = await getFolderAccessScope(tenantUser);
 
     const { data: transition } = await db
       .from("lifecycle_transitions")
@@ -35,13 +37,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
     }
 
-    // Check for approval rules
-    const { data: approvalRules } = await db
-      .from("transition_approval_rules")
+    // Workflow-gated transitions can't be bulk-applied — every file
+    // needs its own approval request, so route the user through the
+    // single-file flow instead.
+    const { data: workflowAssignment } = await db
+      .from("approval_workflow_assignments")
       .select("id")
-      .eq("transitionId", transitionId);
+      .eq("tenantId", tenantUser.tenantId)
+      .eq("transitionId", transitionId)
+      .limit(1);
 
-    if (approvalRules && approvalRules.length > 0) {
+    if (workflowAssignment && workflowAssignment.length > 0) {
       return NextResponse.json({
         error: "This transition requires approval. Transition files individually.",
       }, { status: 400 });
@@ -56,6 +62,17 @@ export async function POST(request: NextRequest) {
 
       if (!file || file.tenantId !== tenantUser.tenantId) {
         errors.push(`File ${fileId}: not found`);
+        continue;
+      }
+      // Folder ACL — silently skip files the user can't see, so bulk
+      // operations from a privileged route can't be used to probe for
+      // the existence of restricted files.
+      if (!canViewFolder(scope, file.folderId)) {
+        errors.push(`File ${fileId}: not found`);
+        continue;
+      }
+      if (!canEditFolder(scope, file.folderId)) {
+        errors.push(`${file.name}: no edit access`);
         continue;
       }
       if (file.lifecycleState !== transition.fromState.name) {

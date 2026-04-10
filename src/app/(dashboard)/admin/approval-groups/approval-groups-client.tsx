@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -17,8 +17,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Users, Shield, X } from "lucide-react";
+import { Plus, Trash2, Users, Shield, X, Archive, ArchiveRestore } from "lucide-react";
 import { toast } from "sonner";
 
 interface User {
@@ -37,42 +36,25 @@ interface ApprovalGroup {
   id: string;
   name: string;
   description: string | null;
+  isActive: boolean;
+  usageCount: number;
   members: GroupMember[];
-}
-
-interface TransitionRule {
-  id: string;
-  groupId: string;
-  isRequired: boolean;
-  sortOrder: number;
-}
-
-interface Transition {
-  id: string;
-  name: string;
-  requiresApproval: boolean;
-  lifecycleName: string;
-  fromState: { name: string } | { name: string }[];
-  toState: { name: string } | { name: string }[];
-  rules: TransitionRule[];
 }
 
 export function ApprovalGroupsClient({
   users,
-  transitions: initialTransitions,
 }: {
   users: User[];
-  transitions: Transition[];
 }) {
   const [groups, setGroups] = useState<ApprovalGroup[]>([]);
-  const [transitions, setTransitions] = useState(initialTransitions);
   const [showCreate, setShowCreate] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ApprovalGroup | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [addMemberGroup, setAddMemberGroup] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadGroups = useCallback(async () => {
     const res = await fetch("/api/approval-groups");
@@ -85,6 +67,11 @@ export function ApprovalGroupsClient({
     // (the callback transitively updates state). See src/lib/README.md.
     void (async () => { await loadGroups(); })();
   }, [loadGroups]);
+
+  const { activeGroups, archivedGroups } = useMemo(() => ({
+    activeGroups: groups.filter((g) => g.isActive),
+    archivedGroups: groups.filter((g) => !g.isActive),
+  }), [groups]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -104,11 +91,23 @@ export function ApprovalGroupsClient({
   }
 
   async function handleDelete() {
-    if (!deleteId) return;
-    const res = await fetch(`/api/approval-groups/${deleteId}`, { method: "DELETE" });
+    if (!deleteTarget) return;
+    const res = await fetch(`/api/approval-groups/${deleteTarget.id}`, { method: "DELETE" });
     if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
-    toast.success("Group deleted");
-    setDeleteId(null);
+    const result = await res.json();
+    toast.success(result.archived ? "Group archived" : "Group deleted");
+    setDeleteTarget(null);
+    loadGroups();
+  }
+
+  async function handleRestore(groupId: string) {
+    const res = await fetch(`/api/approval-groups/${groupId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: true }),
+    });
+    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    toast.success("Group restored");
     loadGroups();
   }
 
@@ -137,40 +136,94 @@ export function ApprovalGroupsClient({
     loadGroups();
   }
 
-  async function toggleTransitionRule(transitionId: string, groupId: string, currentlyAssigned: boolean) {
-    if (currentlyAssigned) {
-      // Remove the rule
-      const transition = transitions.find((t) => t.id === transitionId);
-      const rule = transition?.rules.find((r) => r.groupId === groupId);
-      if (rule) {
-        await fetch(`/api/transition-rules/${rule.id}`, { method: "DELETE" });
-        setTransitions((prev) =>
-          prev.map((t) =>
-            t.id === transitionId
-              ? { ...t, rules: t.rules.filter((r) => r.groupId !== groupId) }
-              : t
-          )
-        );
-      }
-    } else {
-      // Add a rule
-      const res = await fetch("/api/transition-rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transitionId, groupId }),
-      });
-      if (res.ok) {
-        const rule = await res.json();
-        setTransitions((prev) =>
-          prev.map((t) =>
-            t.id === transitionId
-              ? { ...t, rules: [...t.rules, rule] }
-              : t
-          )
-        );
-      }
-    }
+  function renderGroupCard(group: ApprovalGroup, archived = false) {
+    return (
+      <Card key={group.id} className={archived ? "opacity-70" : undefined}>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between">
+            <div className="min-w-0 flex-1">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="w-4 h-4 text-primary shrink-0" />
+                <span className="truncate">{group.name}</span>
+                {group.usageCount > 0 && (
+                  <Badge variant="secondary" className="text-xs font-normal">
+                    {group.usageCount} step{group.usageCount === 1 ? "" : "s"}
+                  </Badge>
+                )}
+              </CardTitle>
+              {group.description && (
+                <CardDescription className="mt-1">{group.description}</CardDescription>
+              )}
+            </div>
+            {archived ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                title="Restore"
+                onClick={() => handleRestore(group.id)}
+              >
+                <ArchiveRestore className="w-3.5 h-3.5" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-destructive"
+                title={group.usageCount > 0 ? "Archive" : "Delete"}
+                onClick={() => setDeleteTarget(group)}
+              >
+                {group.usageCount > 0 ? <Archive className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</p>
+              {!archived && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-xs px-2"
+                  onClick={() => { setAddMemberGroup(group.id); setSelectedUser(""); }}
+                >
+                  <Plus className="w-3 h-3 mr-1" />Add
+                </Button>
+              )}
+            </div>
+            {group.members.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic py-2">No members yet</p>
+            ) : (
+              <div className="space-y-1">
+                {group.members.map((member) => (
+                  <div key={member.id} className="flex items-center justify-between py-1">
+                    <div>
+                      <span className="text-sm">{member.user.fullName}</span>
+                      <span className="text-xs text-muted-foreground ml-2">{member.user.email}</span>
+                    </div>
+                    {!archived && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => handleRemoveMember(group.id, member.userId)}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
+
+  const willArchive = (deleteTarget?.usageCount ?? 0) > 0;
 
   return (
     <div className="space-y-8">
@@ -178,7 +231,7 @@ export function ApprovalGroupsClient({
         <div>
           <h2 className="text-2xl font-bold">Approval Groups</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Define who can approve lifecycle transitions and ECOs
+            Manage groups of users. Attach groups to approval steps in Admin → Workflows.
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
@@ -187,115 +240,37 @@ export function ApprovalGroupsClient({
         </Button>
       </div>
 
-      {/* Groups */}
-      {groups.length === 0 ? (
+      {/* Active groups */}
+      {activeGroups.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No approval groups yet. Create one to set up approval workflows.</p>
+            <p className="text-sm">No active approval groups. Create one to set up approval workflows.</p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {groups.map((group) => (
-            <Card key={group.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-primary" />
-                      {group.name}
-                    </CardTitle>
-                    {group.description && (
-                      <CardDescription className="mt-1">{group.description}</CardDescription>
-                    )}
-                  </div>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteId(group.id)}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Members</p>
-                    <Button variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => { setAddMemberGroup(group.id); setSelectedUser(""); }}>
-                      <Plus className="w-3 h-3 mr-1" />Add
-                    </Button>
-                  </div>
-                  {group.members.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic py-2">No members yet</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {group.members.map((member) => (
-                        <div key={member.id} className="flex items-center justify-between py-1">
-                          <div>
-                            <span className="text-sm">{member.user.fullName}</span>
-                            <span className="text-xs text-muted-foreground ml-2">{member.user.email}</span>
-                          </div>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleRemoveMember(group.id, member.userId)}>
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          {activeGroups.map((g) => renderGroupCard(g))}
         </div>
       )}
 
-      {/* Transition Rules */}
-      {groups.length > 0 && (
-        <>
-          <Separator />
-          <div>
-            <h3 className="text-lg font-semibold">Transition Approval Rules</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Check which approval groups must approve each lifecycle transition
-            </p>
-          </div>
-
-          <div className="border rounded-lg bg-background overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left p-3 font-medium">Transition</th>
-                  {groups.map((g) => (
-                    <th key={g.id} className="text-center p-3 font-medium min-w-25">{g.name}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {transitions.map((t) => (
-                  <tr key={t.id} className="border-b last:border-0">
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">{Array.isArray(t.fromState) ? t.fromState[0]?.name : t.fromState.name}</span>
-                        <span className="text-muted-foreground">&rarr;</span>
-                        <span>{Array.isArray(t.toState) ? t.toState[0]?.name : t.toState.name}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{t.name}</p>
-                    </td>
-                    {groups.map((g) => {
-                      const isAssigned = t.rules.some((r) => r.groupId === g.id);
-                      return (
-                        <td key={g.id} className="text-center p-3">
-                          <Checkbox
-                            checked={isAssigned}
-                            onCheckedChange={() => toggleTransitionRule(t.id, g.id, isAssigned)}
-                          />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+      {/* Archived groups */}
+      {archivedGroups.length > 0 && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowArchived((s) => !s)}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>{showArchived ? "Hide" : "Show"} archived ({archivedGroups.length})</span>
+          </button>
+          {showArchived && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {archivedGroups.map((g) => renderGroupCard(g, true))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Create dialog */}
@@ -348,16 +323,34 @@ export function ApprovalGroupsClient({
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+      {/* Delete / archive confirm — copy adapts to whether the group is in use */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete approval group?</AlertDialogTitle>
-            <AlertDialogDescription>This will remove all members and approval rules for this group.</AlertDialogDescription>
+            <AlertDialogTitle>
+              {willArchive ? "Archive approval group?" : "Delete approval group?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {willArchive ? (
+                <>
+                  &quot;{deleteTarget?.name}&quot; is referenced by {deleteTarget?.usageCount} workflow step
+                  {deleteTarget?.usageCount === 1 ? "" : "s"}, so it will be archived instead of deleted to
+                  preserve the audit trail. It will no longer appear in workflow pickers and can be restored
+                  later from the archived section.
+                </>
+              ) : (
+                <>This group has never been used. It will be permanently deleted along with its members.</>
+              )}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className={willArchive ? undefined : "bg-destructive text-destructive-foreground hover:bg-destructive/90"}
+            >
+              {willArchive ? "Archive" : "Delete"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

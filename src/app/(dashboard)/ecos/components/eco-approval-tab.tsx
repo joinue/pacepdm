@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { approvalStatusConfig, modeLabels } from "../constants";
 import type { ApprovalData, ApprovalDecision } from "../types";
+import { ApprovalTimeline, formatDuration } from "@/components/approvals/approval-timeline";
 
 interface EcoApprovalTabProps {
   approval: ApprovalData | null;
@@ -54,10 +55,21 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
   const completedCount = approval.decisions.filter((d) => d.status === "APPROVED").length;
   const showProgress = approval.decisions.length > 1;
 
+  // For completed requests we can show a concrete "took N" duration
+  // (both timestamps come from props, so the subtraction is pure). For
+  // open requests we'd need Date.now(), which React 19 forbids during
+  // render — instead we show the start time and let the user read the
+  // relative "X ago" from FormattedDate.
+  const completedDurationMs = approval.completedAt
+    ? new Date(approval.completedAt).getTime() - new Date(approval.createdAt).getTime()
+    : null;
+
   return (
     <ScrollArea className="h-[calc(100vh-22rem)]">
       <div className="space-y-5 pr-1">
-        {/* Request header */}
+        {/* Request header — status badge, workflow name, and the lifetime
+            of the request. The age field resolves the "how long has this
+            been sitting there?" question without scrolling the timeline. */}
         <div className="flex items-center gap-2 flex-wrap">
           <Badge variant={approvalStatusConfig[approval.status]?.variant || "muted"}>
             {approvalStatusConfig[approval.status]?.label || approval.status}
@@ -68,10 +80,18 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
           <span className="text-xs text-muted-foreground">
             Started <FormattedDate date={approval.createdAt} variant="date" />
           </span>
-          {approval.completedAt && (
-            <span className="text-xs text-muted-foreground">
-              Completed <FormattedDate date={approval.completedAt} variant="date" />
-            </span>
+          {approval.completedAt && completedDurationMs !== null && (
+            <>
+              <span className="text-xs text-muted-foreground">
+                &middot; Took{" "}
+                <span className="font-medium text-foreground">
+                  {formatDuration(completedDurationMs)}
+                </span>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Completed <FormattedDate date={approval.completedAt} variant="date" />
+              </span>
+            </>
           )}
         </div>
 
@@ -106,30 +126,14 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
 
         <Separator />
 
-        {/* Timeline */}
-        {approval.timeline && approval.timeline.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2.5">
-              Timeline
-            </p>
-            <div className="space-y-0 border-l-2 border-muted ml-2">
-              {approval.timeline.map((event) => (
-                <div key={event.id} className="flex gap-3 text-xs pl-4 py-2 relative">
-                  <div className="absolute -left-1.25 top-3 w-2 h-2 rounded-full bg-muted-foreground/30" />
-                  <div className="flex-1">
-                    <span className="text-muted-foreground/60">
-                      <FormattedDate date={event.createdAt} />
-                    </span>
-                    <p className="mt-0.5">
-                      {event.user && <span className="font-medium">{event.user.fullName}: </span>}
-                      <span className="text-muted-foreground">{event.details}</span>
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Timeline — uses the shared renderer so the approvals-page
+            dialog and the ECO tab stay visually in lock-step. */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2.5">
+            Timeline
+          </p>
+          <ApprovalTimeline events={approval.timeline || []} />
+        </div>
       </div>
     </ScrollArea>
   );

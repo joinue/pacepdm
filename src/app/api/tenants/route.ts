@@ -115,13 +115,75 @@ export async function POST(request: NextRequest) {
       { id: obsoleteId, lifecycleId, name: "Obsolete", color: "#EF4444", isInitial: false, isFinal: true, sortOrder: 3 },
     ]);
 
+    const approveReleaseId = uuid();
     await db.from("lifecycle_transitions").insert([
       { id: uuid(), lifecycleId, fromStateId: wipId, toStateId: inReviewId, name: "Submit for Review", requiresApproval: false },
       { id: uuid(), lifecycleId, fromStateId: inReviewId, toStateId: wipId, name: "Return to WIP", requiresApproval: false },
-      { id: uuid(), lifecycleId, fromStateId: inReviewId, toStateId: releasedId, name: "Approve & Release", requiresApproval: true, approvalRoles: ["Admin", "Engineer"] },
+      { id: approveReleaseId, lifecycleId, fromStateId: inReviewId, toStateId: releasedId, name: "Approve & Release", requiresApproval: true, approvalRoles: ["Admin", "Engineer"] },
       { id: uuid(), lifecycleId, fromStateId: releasedId, toStateId: wipId, name: "Revise", requiresApproval: false },
       { id: uuid(), lifecycleId, fromStateId: releasedId, toStateId: obsoleteId, name: "Mark Obsolete", requiresApproval: false },
     ]);
+
+    // Default approval group, workflow, and assignment so a fresh tenant
+    // can release files immediately. The Admin (creator) is the initial
+    // sole member of "Approvers"; they can add real reviewers later.
+    // Migration 018 backfills the same shape for existing tenants.
+    const approversGroupId = uuid();
+    await db.from("approval_groups").insert({
+      id: approversGroupId,
+      tenantId,
+      name: "Approvers",
+      description: "Default approval group. Add members in Admin → Approval Groups.",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { data: creatorUser } = await db
+      .from("tenant_users")
+      .select("id")
+      .eq("tenantId", tenantId)
+      .eq("authUserId", authUserId)
+      .single();
+
+    if (creatorUser) {
+      await db.from("approval_group_members").insert({
+        id: uuid(),
+        groupId: approversGroupId,
+        userId: creatorUser.id,
+        createdAt: now,
+      });
+    }
+
+    const defaultWorkflowId = uuid();
+    await db.from("approval_workflows").insert({
+      id: defaultWorkflowId,
+      tenantId,
+      name: "Standard Release Approval",
+      description: "Default single-step release approval. Edit in Admin → Workflows.",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.from("approval_workflow_steps").insert({
+      id: uuid(),
+      workflowId: defaultWorkflowId,
+      groupId: approversGroupId,
+      stepOrder: 1,
+      approvalMode: "ANY",
+      signatureLabel: "Released",
+      deadlineHours: null,
+      createdAt: now,
+    });
+
+    await db.from("approval_workflow_assignments").insert({
+      id: uuid(),
+      tenantId,
+      workflowId: defaultWorkflowId,
+      transitionId: approveReleaseId,
+      ecoTrigger: null,
+      createdAt: now,
+    });
 
     // 6. Create default metadata fields
     for (const field of DEFAULT_METADATA_FIELDS) {

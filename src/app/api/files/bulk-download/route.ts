@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { filterViewable, getFolderAccessScope } from "@/lib/folder-access";
 
 const BulkDownloadSchema = z.object({
   fileIds: z.array(nonEmptyString)
@@ -22,11 +23,17 @@ export async function POST(request: NextRequest) {
     const db = getServiceClient();
 
     // Fetch files and their latest versions
-    const { data: files } = await db
+    const { data: rawFiles } = await db
       .from("files")
-      .select("id, name, currentVersion, tenantId")
+      .select("id, name, currentVersion, tenantId, folderId")
       .in("id", fileIds)
       .eq("tenantId", tenantUser.tenantId);
+
+    // Silently drop files in folders the user can't view. Same convention
+    // as the search route — a user can't enumerate restricted files by
+    // bulk-downloading a guessed ID set.
+    const scope = await getFolderAccessScope(tenantUser);
+    const files = filterViewable(scope, rawFiles || [], (f) => f.folderId);
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: "No files found" }, { status: 404 });

@@ -46,7 +46,7 @@ describe("PERMISSIONS constants", () => {
 
   it("permission values follow domain.action format", () => {
     for (const value of Object.values(PERMISSIONS)) {
-      expect(value).toMatch(/^[a-z]+\.[a-z]+$/);
+      expect(value).toMatch(/^[a-z]+\.[a-z_]+$/);
     }
   });
 

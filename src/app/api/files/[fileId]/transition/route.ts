@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { notify, notifyApprovalGroupMembers, sideEffect } from "@/lib/notifications";
+import { notifyFileTransition, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
-import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const TransitionSchema = z.object({ transitionId: nonEmptyString });
 
@@ -34,6 +34,9 @@ export async function POST(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
+    const access = await requireFileAccess(tenantUser, file, "edit");
+    if (!access.ok) return access.response;
+
     if (file.isCheckedOut) {
       return NextResponse.json({ error: "Cannot transition a checked-out file" }, { status: 409 });
     }
@@ -52,13 +55,23 @@ export async function POST(
       return NextResponse.json({ error: "Transition not valid from current state" }, { status: 400 });
     }
 
-    // 1. Check for a workflow assignment (new system)
+    // Workflow gate: if a workflow is assigned to this transition, route
+    // the request through the engine. Otherwise the transition fires
+    // directly. Every requiresApproval=true transition gets a default
+    // workflow on tenant creation (see /api/tenants/route.ts) so the
+    // "no workflow on a gated transition" case is essentially extinct.
     const workflow = await findWorkflowForTrigger({
       tenantId: tenantUser.tenantId,
       transitionId,
     });
 
     if (workflow) {
+      // Idempotency-Key (RFC draft) — clients send the same key on
+      // retries so a network blip can't create a second approval
+      // request. Engine de-dupes via a unique index on
+      // (tenantId, clientRequestKey).
+      const idempotencyKey = request.headers.get("idempotency-key") || undefined;
+
       const result = await startWorkflow({
         tenantId: tenantUser.tenantId,
         userId: tenantUser.id,
@@ -70,6 +83,7 @@ export async function POST(
         transitionId,
         title: `${transition.name}: ${file.name}`,
         description: `Transition "${file.name}" from ${transition.fromState.name} to ${transition.toState.name}`,
+        clientRequestKey: idempotencyKey,
       });
 
       if (!result.success) {
@@ -79,65 +93,7 @@ export async function POST(
       return NextResponse.json(result);
     }
 
-    // 2. Fall back to legacy transition_approval_rules
-    const { data: approvalRules } = await db
-      .from("transition_approval_rules")
-      .select("*, group:approval_groups!transition_approval_rules_groupId_fkey(id, name)")
-      .eq("transitionId", transitionId)
-      .order("sortOrder");
-
-    if (approvalRules && approvalRules.length > 0) {
-      const now = new Date().toISOString();
-      const requestId = uuid();
-
-      await db.from("approval_requests").insert({
-        id: requestId,
-        tenantId: tenantUser.tenantId,
-        type: "FILE_TRANSITION",
-        entityType: "file",
-        entityId: fileId,
-        transitionId,
-        requestedById: tenantUser.id,
-        status: "PENDING",
-        title: `${transition.name}: ${file.name}`,
-        description: `Transition "${file.name}" from ${transition.fromState.name} to ${transition.toState.name}`,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      for (const rule of approvalRules) {
-        await db.from("approval_decisions").insert({
-          id: uuid(),
-          requestId,
-          groupId: rule.groupId,
-          status: "PENDING",
-          createdAt: now,
-        });
-      }
-
-      await logAudit({
-        tenantId: tenantUser.tenantId, userId: tenantUser.id,
-        action: "file.transition.requested",
-        entityType: "file", entityId: fileId,
-        details: { name: file.name, from: transition.fromState.name, to: transition.toState.name, transition: transition.name },
-      });
-
-      await notifyApprovalGroupMembers({
-        tenantId: tenantUser.tenantId,
-        groupIds: approvalRules.map((r) => r.groupId),
-        title: "Approval Required",
-        message: `${tenantUser.fullName} requests approval to ${transition.name}: "${file.name}"`,
-        link: "/approvals",
-      });
-
-      return NextResponse.json({
-        success: true,
-        pendingApproval: true,
-        message: `Approval requested from: ${approvalRules.map((r) => r.group.name).join(", ")}`,
-      });
-    }
-
-    // 3. No approval needed — execute immediately
+    // No workflow — execute immediately
     const toStateName = transition.toState.name;
     const updateData: Record<string, unknown> = {
       lifecycleState: toStateName,
@@ -161,30 +117,18 @@ export async function POST(
       details: { name: file.name, from: transition.fromState.name, to: transition.toState.name, transition: transition.name },
     });
 
-    // Notify tenant users about significant state changes (Released, Obsolete)
-    const significantStates = ["Released", "Obsolete"];
-    if (significantStates.includes(toStateName)) {
-      const { data: tenantUsers } = await db
-        .from("tenant_users")
-        .select("id")
-        .eq("tenantId", tenantUser.tenantId)
-        .neq("id", tenantUser.id);
-
-      const userIds = (tenantUsers || []).map((u) => u.id);
-      if (userIds.length > 0) {
-        await sideEffect(
-          notify({
-            tenantId: tenantUser.tenantId,
-            userIds,
-            title: `File ${toStateName.toLowerCase()}`,
-            message: `${tenantUser.fullName} moved "${file.name}" to ${toStateName}`,
-            type: "transition",
-            link: `/vault?file=${fileId}`,
-          }),
-          `notify tenant about transition of file ${fileId} to ${toStateName}`
-        );
-      }
-    }
+    await sideEffect(
+      notifyFileTransition({
+        tenantId: tenantUser.tenantId,
+        fileId,
+        fileName: file.name,
+        toStateName,
+        actorId: tenantUser.id,
+        actorFullName: tenantUser.fullName,
+        createdById: file.createdById ?? null,
+      }),
+      `notify about transition of file ${fileId} to ${toStateName}`
+    );
 
     return NextResponse.json({ success: true, newState: transition.toState.name });
   } catch (err) {

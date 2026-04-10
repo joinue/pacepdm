@@ -52,25 +52,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
 
-    // Create auth user via Supabase Admin API
+    // Create auth user + send invite email via Supabase Admin API
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
-    const tempPassword = `Welcome-${uuid().slice(0, 8)}`;
+    const origin = new URL(request.url).origin;
+    const redirectTo = `${origin}/auth/callback?next=/accept-invite`;
 
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
       email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: { full_name: fullName },
-    });
+      { data: { full_name: fullName }, redirectTo }
+    );
 
     if (authError) {
       // User might already exist in auth but not in this tenant
-      if (authError.message.includes("already been registered")) {
+      if (
+        authError.message.includes("already been registered") ||
+        authError.message.toLowerCase().includes("already registered") ||
+        authError.message.toLowerCase().includes("already exists")
+      ) {
         // Look up existing auth user
         const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
         const existingAuthUser = users.find((u) => u.email === email);
@@ -104,7 +107,7 @@ export async function POST(request: NextRequest) {
             details: { email, fullName, role: roleId },
           });
 
-          return NextResponse.json({ user: newUser, tempPassword: null });
+          return NextResponse.json({ user: newUser, alreadyExisted: true });
         }
       }
       return NextResponse.json({ error: authError.message }, { status: 400 });
@@ -139,7 +142,7 @@ export async function POST(request: NextRequest) {
       details: { email, fullName },
     });
 
-    return NextResponse.json({ user: newUser, tempPassword });
+    return NextResponse.json({ user: newUser, alreadyExisted: false });
   } catch (err) {
     console.error("Invite error:", err);
     const message = err instanceof Error ? err.message : "Failed to invite user";

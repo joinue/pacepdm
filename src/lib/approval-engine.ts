@@ -1,6 +1,6 @@
 import { getServiceClient } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { notify, notifyApprovalGroupMembers } from "@/lib/notifications";
+import { notify, notifyApprovalGroupMembers, notifyFileTransition, markNotificationsReadByRef } from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -20,6 +20,14 @@ interface StartWorkflowParams {
   transitionId?: string;
   title: string;
   description: string;
+  /**
+   * Optional idempotency token from the caller. If a request with the
+   * same (tenantId, clientRequestKey) already exists, startWorkflow
+   * returns that request's ID instead of creating a duplicate. Lets
+   * clients safely retry on network errors and lets the UI debounce
+   * double-clicked approve buttons without server-side coordination.
+   */
+  clientRequestKey?: string;
 }
 
 interface WorkflowStep {
@@ -38,6 +46,27 @@ export async function startWorkflow(params: StartWorkflowParams) {
   const now = new Date().toISOString();
   const requestId = uuid();
 
+  // Idempotency short-circuit: if the caller passed a key and a request
+  // with that (tenantId, key) already exists, return it instead of
+  // creating a duplicate. We do an explicit pre-check to avoid the
+  // common-case unique-violation error path.
+  if (params.clientRequestKey) {
+    const { data: existing } = await db
+      .from("approval_requests")
+      .select("id")
+      .eq("tenantId", params.tenantId)
+      .eq("clientRequestKey", params.clientRequestKey)
+      .maybeSingle();
+    if (existing) {
+      return {
+        success: true,
+        requestId: existing.id,
+        pendingApproval: true,
+        message: "Approval workflow already started",
+      };
+    }
+  }
+
   // Get workflow steps
   const { data: steps } = await db
     .from("approval_workflow_steps")
@@ -49,8 +78,12 @@ export async function startWorkflow(params: StartWorkflowParams) {
     return { success: false, error: "Workflow has no steps" };
   }
 
-  // Create the approval request
-  await db.from("approval_requests").insert({
+  // Create the approval request. The unique partial index on
+  // (tenantId, clientRequestKey) is the second line of defense against
+  // a race between the pre-check above and this insert: if another
+  // caller landed first, this insert hits 23505 and we re-fetch instead
+  // of double-creating.
+  const { error: insertErr } = await db.from("approval_requests").insert({
     id: requestId,
     tenantId: params.tenantId,
     type: params.type,
@@ -63,9 +96,27 @@ export async function startWorkflow(params: StartWorkflowParams) {
     status: "PENDING",
     title: params.title,
     description: params.description,
+    clientRequestKey: params.clientRequestKey || null,
     createdAt: now,
     updatedAt: now,
   });
+
+  if (insertErr && insertErr.code === "23505" && params.clientRequestKey) {
+    const { data: existing } = await db
+      .from("approval_requests")
+      .select("id")
+      .eq("tenantId", params.tenantId)
+      .eq("clientRequestKey", params.clientRequestKey)
+      .maybeSingle();
+    if (existing) {
+      return {
+        success: true,
+        requestId: existing.id,
+        pendingApproval: true,
+        message: "Approval workflow already started",
+      };
+    }
+  }
 
   // Create decisions for ALL steps (but only activate step 1)
   for (const step of steps as WorkflowStep[]) {
@@ -97,6 +148,8 @@ export async function startWorkflow(params: StartWorkflowParams) {
     title: "Approval Required",
     message: `${params.userFullName} requests approval: "${params.title}"`,
     link: "/approvals",
+    refId: requestId,
+    actorId: params.userId,
   });
 
   await logAudit({
@@ -138,6 +191,12 @@ export async function processDecision({
     .single();
 
   if (!decision) return { error: "Decision not found" };
+  // Defense in depth: refuse cross-tenant decisions explicitly. The group
+  // membership check below would also block this in practice (a user from
+  // tenant A is never a member of a tenant B group), but relying on that
+  // side effect is fragile — tenant scoping should be enforced directly.
+  // Return the same "not found" message so we don't leak existence.
+  if (decision.request?.tenantId !== tenantId) return { error: "Decision not found" };
   if (decision.status !== "PENDING") return { error: "This step has already been decided" };
 
   // Verify user is in the approval group
@@ -153,15 +212,37 @@ export async function processDecision({
   const request = decision.request;
   const requestId = decision.requestId;
 
-  // Record the individual decision
-  await db.from("approval_decisions").update({
-    status,
-    deciderId: userId,
-    comment: comment || null,
-    decidedAt: now,
-  }).eq("id", decisionId);
+  // Atomic claim: compare-and-swap on `status = 'PENDING'`. Postgres
+  // serializes UPDATEs on the same row, so if two ANY-mode approvers
+  // click simultaneously the second one's UPDATE matches zero rows and
+  // we bail out cleanly. This is the pessimistic gate that prevents
+  // double-counting in ALL/MAJORITY mode and double-side-effects in
+  // ANY mode.
+  const { data: claimed } = await db
+    .from("approval_decisions")
+    .update({
+      status,
+      deciderId: userId,
+      comment: comment || null,
+      decidedAt: now,
+    })
+    .eq("id", decisionId)
+    .eq("status", "PENDING")
+    .select("id")
+    .maybeSingle();
 
-  await addHistory(requestId, status, userId, `${userFullName}: ${decision.signatureLabel || "Approved"} — ${status}${comment ? ` — "${comment}"` : ""}`);
+  if (!claimed) return { error: "This step has already been decided" };
+
+  // The decider just handled this request — clear any still-unread
+  // "Approval Required" notification for them so it doesn't nag after
+  // the fact.
+  await markNotificationsReadByRef({ tenantId, userId, refId: requestId });
+
+  // History `details` is the "what" only — the UI renders the actor's
+  // name separately from `user.fullName`, so prefixing it here would
+  // double it up in the timeline.
+  void userFullName;
+  await addHistory(requestId, status, userId, `${decision.signatureLabel || "Approved"} — ${status}${comment ? ` — "${comment}"` : ""}`);
 
   // Now evaluate the step based on approvalMode
   const stepId = decision.stepId;
@@ -247,6 +328,8 @@ export async function processDecision({
       message: `Your request "${request.title}" was rejected${comment ? `: "${comment}"` : ""}`,
       type: "approval",
       link: "/approvals",
+      refId: requestId,
+      actorId: userId,
     });
 
     // Execute rejection side effects
@@ -316,6 +399,8 @@ export async function processDecision({
         title: "Approval Required",
         message: `Step ${nextStepData.stepOrder} now needs your approval: "${request.title}"`,
         link: "/approvals",
+        refId: requestId,
+        actorId: userId,
       });
     }
 
@@ -347,6 +432,8 @@ export async function processDecision({
     message: `Your request "${request.title}" has been fully approved`,
     type: "approval",
     link: "/approvals",
+    refId: requestId,
+    actorId: userId,
   });
 
   // Execute approval side effects
@@ -391,7 +478,8 @@ export async function recallRequest({
   await db.from("approval_decisions").update({ status: "RECALLED" })
     .eq("requestId", requestId).in("status", ["PENDING", "WAITING"]);
 
-  await addHistory(requestId, "RECALLED", userId, `${userFullName} recalled the request`);
+  void userFullName; // UI renders actor from user.fullName — don't double it
+  await addHistory(requestId, "RECALLED", userId, `Request recalled`);
 
   return { success: true };
 }
@@ -416,6 +504,8 @@ export async function rejectForRework({
   const { data: decision } = await db.from("approval_decisions").select("*, request:approval_requests!approval_decisions_requestId_fkey(*)").eq("id", decisionId).single();
 
   if (!decision) return { error: "Decision not found" };
+  // Defense in depth — see processDecision for the rationale.
+  if (decision.request?.tenantId !== tenantId) return { error: "Decision not found" };
   if (decision.status !== "PENDING") return { error: "Step already decided" };
 
   // Verify membership
@@ -432,10 +522,14 @@ export async function rejectForRework({
     decidedAt: now,
   }).eq("id", decisionId);
 
+  // Clear the decider's own "Approval Required" notification now that
+  // they've acted on this request.
+  await markNotificationsReadByRef({ tenantId, userId, refId: request.id });
+
   // Set request to REWORK status
   await db.from("approval_requests").update({ status: "REWORK", updatedAt: now }).eq("id", request.id);
 
-  await addHistory(request.id, "REWORK_REQUESTED", userId, `${userFullName} requested rework: "${comment}"`);
+  await addHistory(request.id, "REWORK_REQUESTED", userId, `Rework requested: "${comment}"`);
 
   // Notify the requester
   await notify({
@@ -445,6 +539,8 @@ export async function rejectForRework({
     message: `${userFullName} requested changes on "${request.title}": "${comment}"`,
     type: "approval",
     link: "/approvals",
+    refId: request.id,
+    actorId: userId,
   });
 
   return { success: true };
@@ -471,6 +567,9 @@ export async function resubmitAfterRework({
   if (!request) return { error: "Request not found" };
   if (request.requestedById !== userId) return { error: "Only the requester can resubmit" };
   if (request.status !== "REWORK") return { error: "Request must be in rework status" };
+
+  // The requester acted on the rework notification — clear it.
+  await markNotificationsReadByRef({ tenantId, userId, refId: requestId });
 
   // Reset all decisions — step 1 to PENDING, rest to WAITING
   const { data: decisions } = await db.from("approval_decisions")
@@ -499,7 +598,8 @@ export async function resubmitAfterRework({
     completedAt: null,
   }).eq("id", requestId);
 
-  await addHistory(requestId, "RESUBMITTED", userId, `${userFullName} resubmitted after rework`);
+  void userFullName;
+  await addHistory(requestId, "RESUBMITTED", userId, `Resubmitted after rework`);
 
   // Notify step 1 group
   const step1Decisions = (decisions || []).filter((d) => {
@@ -514,6 +614,8 @@ export async function resubmitAfterRework({
       title: "Approval Re-Requested",
       message: `${userFullName} resubmitted "${request.title}" after rework`,
       link: "/approvals",
+      refId: requestId,
+      actorId: userId,
     });
   }
 
@@ -543,9 +645,17 @@ async function handleRequestCompletion(
         updatedAt: now,
       };
 
+      // Pull the file up-front so we have name + createdById for the
+      // transition notification below, and revision for the optional
+      // revision bump on Released→WIP.
+      const { data: file } = await db
+        .from("files")
+        .select("name, revision, createdById")
+        .eq("id", request.entityId)
+        .single();
+
       if (transition.toState.name === "Released") updateData.isFrozen = true;
       if (transition.fromState.name === "Released" && transition.toState.name === "WIP") {
-        const { data: file } = await db.from("files").select("revision").eq("id", request.entityId).single();
         if (file?.revision) {
           updateData.revision = String.fromCharCode(file.revision.charCodeAt(0) + 1);
         }
@@ -554,6 +664,25 @@ async function handleRequestCompletion(
       if (transition.toState.name === "Obsolete") updateData.isFrozen = true;
 
       await db.from("files").update(updateData).eq("id", request.entityId);
+
+      if (file) {
+        // Use the actor's display name from the completion context — the
+        // decider — since they're the one who pushed the state forward.
+        const { data: actor } = await db
+          .from("tenant_users")
+          .select("fullName")
+          .eq("id", userId)
+          .single();
+        await notifyFileTransition({
+          tenantId,
+          fileId: request.entityId,
+          fileName: file.name,
+          toStateName: transition.toState.name,
+          actorId: userId,
+          actorFullName: actor?.fullName || "A reviewer",
+          createdById: file.createdById ?? null,
+        });
+      }
 
       await logAudit({
         tenantId, userId,
@@ -573,7 +702,6 @@ async function handleRequestCompletion(
   }
 }
 
-/** Add a history event to an approval request */
 async function addHistory(requestId: string, event: string, userId: string | null, details: string) {
   const db = getServiceClient();
   await db.from("approval_history").insert({

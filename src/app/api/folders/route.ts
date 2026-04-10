@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { getFolderAccessScope, canViewFolder, canEditFolder, filterViewable, isRestrictedFolder } from "@/lib/folder-access";
 
 const CreateFolderSchema = z.object({
   name: nonEmptyString,
@@ -33,15 +34,24 @@ export async function GET(request: NextRequest) {
 
     const { data: folders } = await query;
 
+    // Filter the raw list by the user's folder access scope. This is the
+    // single place directory listings get gated — file-level and search
+    // gating go through the same resolver elsewhere. Folders the user can't
+    // view are silently omitted (no "locked" placeholder) so existence isn't
+    // leaked via name.
+    const scope = await getFolderAccessScope(tenantUser);
+    const visibleFolders = filterViewable(scope, folders || [], (f) => f.id);
+
     // Get counts for each folder
     const foldersWithCounts = await Promise.all(
-      (folders || []).map(async (folder) => {
+      visibleFolders.map(async (folder) => {
         const [{ count: childCount }, { count: fileCount }] = await Promise.all([
           db.from("folders").select("*", { count: "exact", head: true }).eq("parentId", folder.id),
           db.from("files").select("*", { count: "exact", head: true }).eq("folderId", folder.id),
         ]);
         return {
           ...folder,
+          isRestricted: isRestrictedFolder(scope, folder.id) || folder.isRestricted === true,
           _count: { children: childCount || 0, files: fileCount || 0 },
         };
       })
@@ -80,6 +90,16 @@ export async function POST(request: NextRequest) {
         .single();
       if (!parent || parent.tenantId !== tenantUser.tenantId) {
         return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
+      }
+      // Creating a subfolder counts as "edit" on the parent. If the user
+      // can't see the parent at all (404 semantics), return 404 rather
+      // than 403 to avoid leaking its existence.
+      const scope = await getFolderAccessScope(tenantUser);
+      if (!canViewFolder(scope, parentId)) {
+        return NextResponse.json({ error: "Parent folder not found" }, { status: 404 });
+      }
+      if (!canEditFolder(scope, parentId)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       parentPath = parent.path === "/" ? "/" : parent.path + "/";
     }

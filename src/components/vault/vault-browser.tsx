@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVaultBrowser } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { PERMISSIONS } from "@/lib/permissions";
 import { CreateFolderDialog } from "./create-folder-dialog";
 import { UploadFileDialog } from "./upload-file-dialog";
@@ -28,6 +29,22 @@ export function VaultBrowser({
   const vault = useVaultBrowser({ rootFolderId, userId: user.id });
   const { can } = usePermissions();
 
+  // Live updates: whenever any file or folder in this tenant is touched
+  // — uploaded, renamed, checked out, transitioned, deleted — refresh
+  // the current folder view. Scoped by tenantId so one tenant's writes
+  // don't wake another tenant's clients. The hook debounces bursts so
+  // a bulk-transition storm only triggers one refetch.
+  useRealtimeTable({
+    table: "files",
+    filter: `tenantId=eq.${user.tenantId}`,
+    onChange: vault.refresh,
+  });
+  useRealtimeTable({
+    table: "folders",
+    filter: `tenantId=eq.${user.tenantId}`,
+    onChange: vault.refresh,
+  });
+
   const selectedFileData = vault.files.find((f) => f.id === vault.selectedFile);
 
   // Pass undefined for actions the user can't perform — the detail panel
@@ -37,7 +54,7 @@ export function VaultBrowser({
     fileId: vault.selectedFile,
     metadataFields,
     onClose: () => vault.selectFile(null),
-    onRefresh: () => vault.loadContents(vault.currentFolderId),
+    onRefresh: () => vault.refresh(),
     userId: user.id,
     onCheckIn: can(PERMISSIONS.FILE_CHECKIN)
       ? () => vault.setCheckInFileId(vault.selectedFile!)
@@ -83,9 +100,9 @@ export function VaultBrowser({
       </div>
 
       {/* Dialogs */}
-      <CreateFolderDialog open={vault.showCreateFolder} onOpenChange={vault.setShowCreateFolder} parentId={vault.currentFolderId} onCreated={() => vault.loadContents(vault.currentFolderId)} />
-      <UploadFileDialog open={vault.showUpload} onOpenChange={vault.setShowUpload} folderId={vault.currentFolderId} onUploaded={() => vault.loadContents(vault.currentFolderId)} />
-      {vault.checkInFileId && <CheckInDialog open={!!vault.checkInFileId} onOpenChange={(open) => !open && vault.setCheckInFileId(null)} fileId={vault.checkInFileId} onCheckedIn={() => { vault.setCheckInFileId(null); vault.loadContents(vault.currentFolderId); }} />}
+      <CreateFolderDialog open={vault.showCreateFolder} onOpenChange={vault.setShowCreateFolder} parentId={vault.currentFolderId} onCreated={() => vault.refresh()} />
+      <UploadFileDialog open={vault.showUpload} onOpenChange={vault.setShowUpload} folderId={vault.currentFolderId} onUploaded={() => vault.refresh()} />
+      {vault.checkInFileId && <CheckInDialog open={!!vault.checkInFileId} onOpenChange={(open) => !open && vault.setCheckInFileId(null)} fileId={vault.checkInFileId} onCheckedIn={() => { vault.setCheckInFileId(null); vault.refresh(); }} />}
 
       <VaultDialogs vault={vault} />
     </div>
