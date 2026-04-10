@@ -3,6 +3,12 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+
+const CreateWorkflowSchema = z.object({
+  name: nonEmptyString,
+  description: optionalString,
+});
 
 export async function GET() {
   try {
@@ -19,12 +25,13 @@ export async function GET() {
     // Sort steps by stepOrder
     const sorted = (workflows || []).map((w) => ({
       ...w,
-      steps: ((w.steps || []) as { stepOrder: number }[]).sort((a: { stepOrder: number }, b: { stepOrder: number }) => a.stepOrder - b.stepOrder),
+      steps: ((w.steps || []) as { stepOrder: number }[]).sort((a, b) => a.stepOrder - b.stepOrder),
     }));
 
     return NextResponse.json(sorted);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch workflows" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch workflows";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -37,10 +44,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, description } = await request.json();
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateWorkflowSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, description } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -48,8 +54,8 @@ export async function POST(request: NextRequest) {
     const { data: workflow, error } = await db.from("approval_workflows").insert({
       id: uuid(),
       tenantId: tenantUser.tenantId,
-      name: name.trim(),
-      description: description?.trim() || null,
+      name,
+      description: description ?? null,
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -60,10 +66,15 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow.create", entityType: "workflow", entityId: workflow.id, details: { name: name.trim() } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "workflow.create", entityType: "workflow",
+      entityId: workflow.id, details: { name },
+    });
 
     return NextResponse.json(workflow);
-  } catch {
-    return NextResponse.json({ error: "Failed to create workflow" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create workflow";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -16,8 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Sun, Moon, Menu, Bell, ChevronRight, CheckCheck } from "lucide-react";
+import { LogOut, User, Sun, Moon, Menu, PanelLeft, Bell, ChevronRight, CheckCheck } from "lucide-react";
 import { toast } from "sonner";
+import { useHasMounted } from "@/hooks/use-has-mounted";
 import Link from "next/link";
 import { GlobalSearch } from "@/components/layout/global-search";
 
@@ -67,15 +68,20 @@ function formatRelativeTime(dateStr: string): string {
   return `${diffYear}y ago`;
 }
 
-export function Header({ onMenuClick }: { onMenuClick: () => void }) {
+export function Header({
+  onMenuClick,
+  desktopSidebarOpen = true,
+}: {
+  onMenuClick: () => void;
+  desktopSidebarOpen?: boolean;
+}) {
   const user = useTenantUser();
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
   const { resolvedTheme, setTheme } = useTheme();
   const { unreadCount, notifications, loading: loadingNotifs, refresh, markRead, markAllRead } = useNotifications();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useHasMounted();
 
   const segments = pathname.split("/").filter(Boolean);
   const crumbs = segments.map((seg, i) => ({
@@ -141,8 +147,21 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
           size="sm"
           className="h-8 w-8 p-0 md:hidden shrink-0"
           onClick={onMenuClick}
+          aria-label="Open navigation menu"
         >
           <Menu className="w-4 h-4" />
+        </Button>
+        {/* Desktop sidebar toggle */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 hidden md:inline-flex shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onMenuClick}
+          aria-label={desktopSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          aria-expanded={desktopSidebarOpen}
+          title={`${desktopSidebarOpen ? "Collapse" : "Expand"} sidebar (\u2318\\)`}
+        >
+          <PanelLeft className="w-4 h-4" />
         </Button>
         {/* Breadcrumbs */}
         <nav className="flex items-center gap-1 text-xs text-muted-foreground/60 min-w-0 overflow-hidden">

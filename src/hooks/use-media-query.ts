@@ -1,15 +1,24 @@
-import { useState, useEffect } from "react";
+"use client";
 
+import { useSyncExternalStore } from "react";
+
+/**
+ * Subscribe to a CSS media query and return whether it currently matches.
+ *
+ * Uses `useSyncExternalStore` so React 18+ concurrent rendering reads a
+ * consistent value across renders, and so the effect rule against
+ * synchronous setState doesn't apply (this hook stores nothing in state).
+ *
+ * Returns `false` during SSR to keep server and client output stable.
+ */
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    setMatches(mql.matches);
-    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
-    mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
-  }, [query]);
-
-  return matches;
+  return useSyncExternalStore(
+    (notify) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", notify);
+      return () => mql.removeEventListener("change", notify);
+    },
+    () => window.matchMedia(query).matches,
+    () => false // SSR snapshot — assume "doesn't match"
+  );
 }

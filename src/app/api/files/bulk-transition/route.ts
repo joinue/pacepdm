@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const BulkTransitionSchema = z.object({
+  fileIds: z.array(nonEmptyString).min(1, "At least one fileId is required"),
+  transitionId: nonEmptyString,
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,11 +19,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { fileIds, transitionId } = await request.json();
-
-    if (!Array.isArray(fileIds) || fileIds.length === 0 || !transitionId) {
-      return NextResponse.json({ error: "fileIds and transitionId are required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, BulkTransitionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { fileIds, transitionId } = parsed.data;
 
     const db = getServiceClient();
 
@@ -95,7 +99,8 @@ export async function POST(request: NextRequest) {
       errors,
       newState: transition.toState.name,
     });
-  } catch {
-    return NextResponse.json({ error: "Failed to perform bulk transition" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to perform bulk transition";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

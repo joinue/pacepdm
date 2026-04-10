@@ -2,6 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, optionalString } from "@/lib/validation";
+
+// Update is partial — any of these fields can be supplied. The schema
+// keeps the route from blindly trusting arbitrary keys.
+const UpdatePartSchema = z.object({
+  partNumber: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
+  description: optionalString,
+  category: z.string().optional(),
+  revision: z.string().optional(),
+  lifecycleState: z.string().optional(),
+  material: optionalString,
+  weight: z.number().nullable().optional(),
+  weightUnit: z.string().optional(),
+  unitCost: z.number().nullable().optional(),
+  currency: z.string().optional(),
+  unit: z.string().optional(),
+  thumbnailUrl: z.string().nullable().optional(),
+  notes: optionalString,
+});
 
 export async function GET(
   _request: NextRequest,
@@ -26,7 +46,13 @@ export async function GET(
 
     // Fetch vendors, files, and where-used in parallel
     const [{ data: vendors }, { data: partFiles }, { data: bomItems }] = await Promise.all([
-      db.from("part_vendors").select("*").eq("partId", partId).order("isPrimary", { ascending: false }),
+      // Join the canonical vendors row so we get a stable name even if the
+      // legacy `vendorName` text column is later dropped. Order by isPrimary
+      // first so the primary vendor lands at index 0.
+      db.from("part_vendors")
+        .select("*, vendor:vendors!part_vendors_vendorId_fkey(id, name, website, contactName, contactEmail, contactPhone)")
+        .eq("partId", partId)
+        .order("isPrimary", { ascending: false }),
       db.from("part_files").select("*, file:files!part_files_fileId_fkey(id, name, partNumber, revision, lifecycleState, fileType)").eq("partId", partId),
       db.from("bom_items").select("id, itemNumber, name, quantity, unit, bomId, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId)").eq("partId", partId),
     ]);
@@ -48,8 +74,9 @@ export async function GET(
       files: (partFiles || []).map((pf) => ({ ...pf, file: pf.file as unknown })),
       whereUsed,
     });
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch part" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch part";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -65,21 +92,25 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdatePartSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
+
     const { partId } = await params;
-    const body = await request.json();
     const db = getServiceClient();
 
-    const { data: existing } = await db.from("parts").select("partNumber").eq("id", partId).eq("tenantId", tenantUser.tenantId).single();
+    const { data: existing } = await db.from("parts")
+      .select("partNumber")
+      .eq("id", partId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
     if (!existing) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
     }
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-    const allowed = ["partNumber", "name", "description", "category", "revision", "lifecycleState", "material", "weight", "weightUnit", "unitCost", "currency", "unit", "thumbnailUrl", "notes"];
-    for (const field of allowed) {
-      if (body[field] !== undefined) {
-        updates[field] = body[field];
-      }
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined) updates[key] = value;
     }
 
     const { data: part, error } = await db.from("parts").update(updates).eq("id", partId).select().single();
@@ -97,8 +128,9 @@ export async function PUT(
     });
 
     return NextResponse.json(part);
-  } catch {
-    return NextResponse.json({ error: "Failed to update part" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update part";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -138,7 +170,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete part" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete part";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

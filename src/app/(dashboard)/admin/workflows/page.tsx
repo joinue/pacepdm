@@ -106,7 +106,9 @@ export default function WorkflowsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    void (async () => { await loadData(); })();
+  }, [loadData]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

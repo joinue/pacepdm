@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateTenantSchema = z.object({
+  companyName: nonEmptyString,
+  fullName: nonEmptyString,
+  email: z.string().email("Must be a valid email"),
+  authUserId: nonEmptyString,
+});
 
 function slugify(text: string): string {
   return text
@@ -14,14 +22,9 @@ function slugify(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { companyName, fullName, email, authUserId } = await request.json();
-
-    if (!companyName || !fullName || !email || !authUserId) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
+    const parsed = await parseBody(request, CreateTenantSchema);
+    if (!parsed.ok) return parsed.response;
+    const { companyName, fullName, email, authUserId } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -138,11 +141,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ tenantId, slug });
-  } catch (error) {
-    console.error("Tenant creation error:", error);
-    return NextResponse.json(
-      { error: "Failed to create workspace" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("Tenant creation error:", err);
+    const message = err instanceof Error ? err.message : "Failed to create workspace";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

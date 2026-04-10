@@ -68,7 +68,18 @@
       "WebFetch(domain:www.sibe.io)",
       "WebFetch(domain:blog.cadrooms.com)",
       "Bash(wc -l /c/Users/MarcS/Documents/pace-pdm/src/app/api/*/route.ts)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(find /c/Users/MarcS/Documents/pace-pdm -name \"*.prisma\" -type f -exec grep -l \"BOM\\\\|bom\" {} \\\\;)",
+      "Bash(grep -n \"handleRestore\\\\|restore.*version\" /c/Users/MarcS/Documents/pace-pdm/src/app/api/files/*/route.ts)",
+      "Bash(npx eslint:*)",
+      "Bash(git stash:*)",
+      "Bash(npm test:*)",
+      "Bash(grep -v \"approval-engine.test\\\\|Avoid calling\\\\|Effects are\\\\|Calling setState\\\\|read.dev\\\\|^$\\\\|line 1\\\\|line 2\\\\|line 3\\\\|line 4\\\\|^\\\\*\\\\|^>\")",
+      "Bash(curl -s \"https://example.invalid\")",
+      "Bash(wc -l \"src/app/\\(dashboard\\)/boms/\"*.ts \"src/app/\\(dashboard\\)/boms/\"*.tsx \"src/app/\\(dashboard\\)/boms/components/\"*.tsx)",
+      "Bash(wc -l \"src/app/\\(dashboard\\)/ecos/\"*.ts \"src/app/\\(dashboard\\)/ecos/\"*.tsx \"src/app/\\(dashboard\\)/ecos/components/\"*.tsx)",
+      "Bash(grep -l \"request.json\\(\\)\" \"src/app/api/folders/\" \"src/app/api/folders/\"*\"/\")",
+      "Bash(npm uninstall:*)"
     ]
   }
 }

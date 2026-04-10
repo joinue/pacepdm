@@ -50,20 +50,29 @@ interface Part {
 }
 
 interface PartDetail extends Part {
-  vendors: Vendor[];
+  vendors: PartVendorLink[];
   files: { id: string; fileId: string; role: string; isPrimary: boolean; file: { id: string; name: string; partNumber: string | null; revision: string; lifecycleState: string; fileType: string } }[];
   whereUsed: { bomId: string; bomName: string; bomRevision: string; bomStatus: string; quantity: number; unit: string }[];
 }
 
-interface Vendor {
+// A row from `part_vendors` joined with the canonical `vendors` record.
+// `vendor.name` is the source of truth for display; the legacy `vendorName`
+// text column on part_vendors is kept in sync until migration 010 drops it.
+interface PartVendorLink {
   id: string;
-  vendorName: string;
+  vendorId: string;
+  vendor: { id: string; name: string } | null;
   vendorPartNumber: string | null;
   unitCost: number | null;
   currency: string;
   leadTimeDays: number | null;
   isPrimary: boolean;
   notes: string | null;
+}
+
+interface VendorSearchResult {
+  id: string;
+  name: string;
 }
 
 // --- Constants ---
@@ -128,11 +137,18 @@ export default function PartsPage() {
   });
   const [saving, setSaving] = useState(false);
 
-  // Add vendor
+  // Add vendor — vendorName has been replaced with a vendor picker
+  // (`vendorId` + display label). The picker can also create a brand-new
+  // vendor inline if no match is found.
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [vendorForm, setVendorForm] = useState({
-    vendorName: "", vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "",
+    vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "",
   });
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  const [selectedVendorName, setSelectedVendorName] = useState("");
+  const [vendorSearch, setVendorSearch] = useState("");
+  const [vendorResults, setVendorResults] = useState<VendorSearchResult[]>([]);
+  const [vendorSearching, setVendorSearching] = useState(false);
 
   // Link file
   const [showLinkFile, setShowLinkFile] = useState(false);
@@ -158,16 +174,27 @@ export default function PartsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadParts(); }, [loadParts]);
+  const loadPartDetail = useCallback(async (partId: string) => {
+    setSelectedPartId(partId);
+    setLoadingDetail(true);
+    const res = await fetch(`/api/parts/${partId}`);
+    const data = await res.json();
+    setDetail(data);
+    setLoadingDetail(false);
+  }, []);
 
-  // Auto-select part from URL query param
+  useEffect(() => {
+    void (async () => { await loadParts(); })();
+  }, [loadParts]);
+
+  // Auto-select part from URL query param. Declared after loadPartDetail
+  // so the effect can reference it without violating hook ordering rules.
   useEffect(() => {
     const partId = searchParams.get("partId");
-    if (partId && parts.length > 0 && !selectedPartId) {
-      const exists = parts.some((p) => p.id === partId);
-      if (exists) loadPartDetail(partId);
-    }
-  }, [parts, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!partId || parts.length === 0 || selectedPartId) return;
+    if (!parts.some((p) => p.id === partId)) return;
+    void (async () => { await loadPartDetail(partId); })();
+  }, [parts, searchParams, selectedPartId, loadPartDetail]);
 
   const debouncedSearch = useDebounce((q: string) => {
     loadParts(q, categoryFilter, stateFilter);
@@ -182,15 +209,6 @@ export default function PartsPage() {
     setCategoryFilter(cat);
     setStateFilter(st);
     loadParts(searchQuery, cat, st);
-  }
-
-  async function loadPartDetail(partId: string) {
-    setSelectedPartId(partId);
-    setLoadingDetail(true);
-    const res = await fetch(`/api/parts/${partId}`);
-    const data = await res.json();
-    setDetail(data);
-    setLoadingDetail(false);
   }
 
   // --- File search for linking ---
@@ -298,31 +316,89 @@ export default function PartsPage() {
     loadParts(searchQuery, categoryFilter, stateFilter);
   }
 
-  // --- Vendor CRUD ---
+  // --- Vendor picker + CRUD ---
+
+  // Reset all add-vendor state when the dialog closes (or after a successful add)
+  function resetVendorForm() {
+    setVendorForm({ vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "" });
+    setSelectedVendorId(null);
+    setSelectedVendorName("");
+    setVendorSearch("");
+    setVendorResults([]);
+  }
+
+  const doVendorSearch = useCallback(async (q: string) => {
+    if (q.length < 1) { setVendorResults([]); setVendorSearching(false); return; }
+    setVendorSearching(true);
+    try {
+      const res = await fetch(`/api/vendors?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setVendorResults(Array.isArray(data) ? data.slice(0, 8) : []);
+    } catch { setVendorResults([]); }
+    setVendorSearching(false);
+  }, []);
+
+  const debouncedVendorSearch = useDebounce(doVendorSearch, 250);
+
+  function handleVendorSearchInput(q: string) {
+    setVendorSearch(q);
+    setSelectedVendorId(null);  // typing invalidates an earlier selection
+    debouncedVendorSearch(q);
+  }
+
+  function selectVendor(v: VendorSearchResult) {
+    setSelectedVendorId(v.id);
+    setSelectedVendorName(v.name);
+    setVendorSearch(v.name);
+    setVendorResults([]);
+  }
+
+  // "Create new vendor" inline. The vendors POST endpoint is idempotent on
+  // canonical name, so this is also a safe race-free way to recover if
+  // someone else just created the same vendor.
+  async function handleCreateInlineVendor() {
+    const name = vendorSearch.trim();
+    if (!name) return;
+    const res = await fetch(`/api/vendors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    const created = await res.json();
+    selectVendor({ id: created.id, name: created.name });
+    toast.success(`Created vendor "${created.name}"`);
+  }
 
   async function handleAddVendor(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedPartId) return;
+    if (!selectedPartId || !selectedVendorId) return;
     const res = await fetch(`/api/parts/${selectedPartId}/vendors`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...vendorForm,
+        vendorId: selectedVendorId,
+        vendorPartNumber: vendorForm.vendorPartNumber,
         unitCost: vendorForm.unitCost ? parseFloat(vendorForm.unitCost) : null,
         leadTimeDays: vendorForm.leadTimeDays ? parseInt(vendorForm.leadTimeDays) : null,
+        isPrimary: vendorForm.isPrimary,
+        notes: vendorForm.notes,
       }),
     });
     if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
     toast.success("Vendor added");
     setShowAddVendor(false);
-    setVendorForm({ vendorName: "", vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "" });
+    resetVendorForm();
     loadPartDetail(selectedPartId);
   }
 
-  async function handleDeleteVendor(vendorId: string) {
+  // `linkId` is the part_vendors row id (the join row), not a vendor id.
+  // The API still accepts the legacy `vendorId` field name in the body for
+  // now to avoid a breaking change there.
+  async function handleDeleteVendorLink(linkId: string) {
     if (!selectedPartId) return;
     await fetch(`/api/parts/${selectedPartId}/vendors`, {
-      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendorId }),
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendorId: linkId }),
     });
     toast.success("Vendor removed");
     loadPartDetail(selectedPartId);
@@ -626,7 +702,7 @@ export default function PartsPage() {
                           <div key={v.id} className="text-sm border rounded-md p-2 group relative">
                             <div className="flex items-center gap-1.5">
                               <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                              <span className="font-medium">{v.vendorName}</span>
+                              <span className="font-medium">{v.vendor?.name ?? "(unknown vendor)"}</span>
                               {v.isPrimary && <Badge variant="info" className="text-[9px] px-1 py-0">Primary</Badge>}
                             </div>
                             {v.vendorPartNumber && <p className="text-xs text-muted-foreground mt-0.5 ml-5">PN: {v.vendorPartNumber}</p>}
@@ -635,7 +711,7 @@ export default function PartsPage() {
                               {v.leadTimeDays != null && <span>{v.leadTimeDays}d lead</span>}
                             </div>
                             <button
-                              onClick={() => handleDeleteVendor(v.id)}
+                              onClick={() => handleDeleteVendorLink(v.id)}
                               className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
                             >
                               <X className="w-3 h-3" />
@@ -792,23 +868,69 @@ export default function PartsPage() {
       </Dialog>
 
       {/* Add Vendor Dialog */}
-      <Dialog open={showAddVendor} onOpenChange={setShowAddVendor}>
+      <Dialog open={showAddVendor} onOpenChange={(open) => { if (!open) { setShowAddVendor(false); resetVendorForm(); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Vendor</DialogTitle>
-            <DialogDescription>Add an approved vendor for this part.</DialogDescription>
+            <DialogDescription>Link an approved vendor to this part. Pick from existing or create new.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddVendor}>
             <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Vendor Name</Label>
-                  <Input value={vendorForm.vendorName} onChange={(e) => setVendorForm({ ...vendorForm, vendorName: e.target.value })} placeholder="McMaster-Carr" className="h-8 text-sm" required />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Vendor Part #</Label>
-                  <Input value={vendorForm.vendorPartNumber} onChange={(e) => setVendorForm({ ...vendorForm, vendorPartNumber: e.target.value })} placeholder="91290A197" className="h-8 text-sm" />
-                </div>
+              {/* Vendor picker — search-as-you-type with inline create */}
+              <div className="space-y-1">
+                <Label className="text-xs">Vendor</Label>
+                {selectedVendorId ? (
+                  <div className="flex items-center gap-2 border rounded-md px-2 py-1.5 text-sm bg-muted/30">
+                    <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="flex-1 truncate">{selectedVendorName}</span>
+                    <button type="button" onClick={() => { setSelectedVendorId(null); setSelectedVendorName(""); setVendorSearch(""); }} className="text-muted-foreground hover:text-destructive">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      value={vendorSearch}
+                      onChange={(e) => handleVendorSearchInput(e.target.value)}
+                      placeholder="Search vendors..."
+                      className="h-8 text-sm"
+                      autoComplete="off"
+                    />
+                    {vendorSearching && (
+                      <Loader2 className="absolute right-2 top-2 w-4 h-4 animate-spin text-muted-foreground" />
+                    )}
+                    {vendorResults.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full border rounded-md bg-popover shadow-md max-h-48 overflow-y-auto">
+                        {vendorResults.map((v) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => selectVendor(v)}
+                            className="w-full text-left px-2 py-1.5 text-sm hover:bg-muted flex items-center gap-2"
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <span className="truncate">{v.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {/* "Create new" affordance — only when there's a query and
+                        no exact match in the current results */}
+                    {vendorSearch.trim().length > 0 && !vendorSearching && !vendorResults.some((v) => v.name.toLowerCase() === vendorSearch.trim().toLowerCase()) && (
+                      <button
+                        type="button"
+                        onClick={handleCreateInlineVendor}
+                        className="mt-1 text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> Create &ldquo;{vendorSearch.trim()}&rdquo; as new vendor
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vendor Part #</Label>
+                <Input value={vendorForm.vendorPartNumber} onChange={(e) => setVendorForm({ ...vendorForm, vendorPartNumber: e.target.value })} placeholder="91290A197" className="h-8 text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -820,14 +942,24 @@ export default function PartsPage() {
                   <Input type="number" value={vendorForm.leadTimeDays} onChange={(e) => setVendorForm({ ...vendorForm, leadTimeDays: e.target.value })} placeholder="14" className="h-8 text-sm" min="0" />
                 </div>
               </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isPrimaryVendor"
+                  checked={vendorForm.isPrimary}
+                  onChange={(e) => setVendorForm({ ...vendorForm, isPrimary: e.target.checked })}
+                  className="h-3.5 w-3.5"
+                />
+                <Label htmlFor="isPrimaryVendor" className="text-xs cursor-pointer">Primary vendor (used for BOM cost rollup)</Label>
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">Notes</Label>
                 <Input value={vendorForm.notes} onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })} placeholder="Optional notes..." className="h-8 text-sm" />
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowAddVendor(false)}>Cancel</Button>
-              <Button type="submit" disabled={!vendorForm.vendorName.trim()}>Add Vendor</Button>
+              <Button type="button" variant="outline" onClick={() => { setShowAddVendor(false); resetVendorForm(); }}>Cancel</Button>
+              <Button type="submit" disabled={!selectedVendorId}>Add Vendor</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -928,14 +1060,27 @@ function FilePreviewInline({ fileId }: { fileId: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`/api/files/${fileId}/preview`)
+    const controller = new AbortController();
+    let cancelled = false;
+    fetch(`/api/files/${fileId}/preview`, { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`Preview failed: ${r.status}`);
         return r.json();
       })
-      .then((d) => { setPreview(d); setLoading(false); })
-      .catch(() => { setPreview(null); setLoading(false); });
+      .then((d) => {
+        if (cancelled) return;
+        setPreview(d);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled || err?.name === "AbortError") return;
+        setPreview(null);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [fileId]);
 
   if (loading) return <p className="text-sm text-muted-foreground text-center py-8">Loading preview...</p>;

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const MoveSchema = z.object({ folderId: nonEmptyString });
 
 export async function PUT(
   request: NextRequest,
@@ -17,12 +20,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const db = getServiceClient();
-    const { folderId } = await request.json();
+    const parsed = await parseBody(request, MoveSchema);
+    if (!parsed.ok) return parsed.response;
+    const { folderId } = parsed.data;
 
-    if (!folderId) {
-      return NextResponse.json({ error: "Target folder is required" }, { status: 400 });
-    }
+    const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
@@ -52,7 +54,8 @@ export async function PUT(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to move file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to move file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

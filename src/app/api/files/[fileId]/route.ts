@@ -26,31 +26,23 @@ export async function GET(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    const [{ data: versions }, { data: metadata }, { data: references }, { data: referencedBy }] =
-      await Promise.all([
-        db.from("file_versions")
-          .select("*, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)")
-          .eq("fileId", fileId)
-          .order("version", { ascending: false }),
-        db.from("metadata_values")
-          .select("*, field:metadata_fields!metadata_values_fieldId_fkey(*)")
-          .eq("fileId", fileId),
-        db.from("file_references")
-          .select("*, targetFile:files!file_references_targetFileId_fkey(id, name, partNumber)")
-          .eq("sourceFileId", fileId),
-        db.from("file_references")
-          .select("*, sourceFile:files!file_references_sourceFileId_fkey(id, name, partNumber)")
-          .eq("targetFileId", fileId),
-      ]);
+    const [{ data: versions }, { data: metadata }] = await Promise.all([
+      db.from("file_versions")
+        .select("*, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)")
+        .eq("fileId", fileId)
+        .order("version", { ascending: false }),
+      db.from("metadata_values")
+        .select("*, field:metadata_fields!metadata_values_fieldId_fkey(*)")
+        .eq("fileId", fileId),
+    ]);
 
     return NextResponse.json({
       ...file,
       versions: versions || [],
       metadata: metadata || [],
-      references: references || [],
-      referencedBy: referencedBy || [],
     });
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

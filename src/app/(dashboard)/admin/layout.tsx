@@ -1,16 +1,9 @@
-import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getCurrentTenantUser } from "@/lib/auth";
 import { ShieldAlert } from "lucide-react";
 
-/** Permission required by each admin sub-route */
-const ADMIN_ROUTE_PERMISSIONS: Record<string, string> = {
-  users: PERMISSIONS.ADMIN_USERS,
-  roles: PERMISSIONS.ADMIN_ROLES,
-  workflows: PERMISSIONS.ADMIN_SETTINGS,
-  "approval-groups": PERMISSIONS.ADMIN_SETTINGS,
-  lifecycle: PERMISSIONS.ADMIN_LIFECYCLE,
-  metadata: PERMISSIONS.ADMIN_METADATA,
-  settings: PERMISSIONS.ADMIN_SETTINGS,
-};
+// Note: per-route permission gating is enforced server-side in each
+// individual admin API route, not here. This layout only checks that the
+// user has *some* admin permission so they can see the admin sidebar at all.
 
 export default async function AdminLayout({
   children,

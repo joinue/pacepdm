@@ -3,6 +3,12 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateFolderSchema = z.object({
+  name: nonEmptyString,
+  parentId: z.string().nullable().optional(),
+});
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,8 +48,9 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json(foldersWithCounts);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch folders" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch folders";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -57,11 +64,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, parentId } = await request.json();
-
-    if (!name || !name.trim()) {
-      return NextResponse.json({ error: "Folder name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateFolderSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, parentId } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -79,14 +84,14 @@ export async function POST(request: NextRequest) {
       parentPath = parent.path === "/" ? "/" : parent.path + "/";
     }
 
-    const path = parentPath + name.trim();
+    const path = parentPath + name;
 
     const { data: folder, error } = await db
       .from("folders")
       .insert({
         id: uuid(),
         tenantId: tenantUser.tenantId,
-        name: name.trim(),
+        name,
         parentId: parentId || null,
         path,
         createdAt: now,
@@ -112,7 +117,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(folder);
-  } catch {
-    return NextResponse.json({ error: "Failed to create folder" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create folder";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

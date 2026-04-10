@@ -2,19 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { notify } from "@/lib/notifications";
+import { notify, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
+import { ECO_STATUS_FLOW as VALID_TRANSITIONS } from "@/lib/status-flows";
+import { z, parseBody, optionalString } from "@/lib/validation";
 
-// Valid status transitions
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ["SUBMITTED"],
-  SUBMITTED: ["IN_REVIEW", "REJECTED"],
-  IN_REVIEW: ["APPROVED", "REJECTED"],
-  APPROVED: ["IMPLEMENTED"],
-  REJECTED: ["DRAFT"],
-  IMPLEMENTED: ["CLOSED"],
-  CLOSED: [],
-};
+// Update body: status transitions and field updates can be combined.
+// Field updates are only allowed in DRAFT (enforced after parse). The
+// state-transition rule is also enforced after parse against ECO_STATUS_FLOW.
+const UpdateEcoSchema = z.object({
+  status: z.string().optional(),
+  title: z.string().trim().min(1).optional(),
+  description: optionalString,
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  reason: optionalString,
+  changeType: optionalString,
+  costImpact: optionalString,
+  disposition: optionalString,
+  effectivity: optionalString,
+}).refine(
+  (v) => Object.keys(v).length > 0,
+  { message: "No changes specified" }
+);
 
 export async function GET(
   _request: NextRequest,
@@ -36,8 +45,9 @@ export async function GET(
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
 
     return NextResponse.json(eco);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch ECO" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch ECO";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -55,9 +65,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdateEcoSchema);
+    if (!parsed.ok) return parsed.response;
+    const { status, title, description, priority, reason, changeType, costImpact, disposition, effectivity } = parsed.data;
+
     const db = getServiceClient();
-    const body = await request.json();
-    const { status, title, description, priority, reason, changeType, costImpact, disposition, effectivity } = body;
 
     const { data: eco } = await db.from("ecos").select("*").eq("id", ecoId).single();
     if (!eco || eco.tenantId !== tenantUser.tenantId) {
@@ -66,22 +78,23 @@ export async function PUT(
 
     const now = new Date().toISOString();
 
-    // Field updates (only in DRAFT)
-    const hasFieldUpdate = [title, description, priority, reason, changeType, costImpact, disposition, effectivity].some(v => v !== undefined);
+    // Field updates are only legal in DRAFT — once submitted, the content is frozen.
+    const hasFieldUpdate = [title, description, priority, reason, changeType, costImpact, disposition, effectivity]
+      .some((v) => v !== undefined);
     if (hasFieldUpdate) {
       if (eco.status !== "DRAFT") {
         return NextResponse.json({ error: "Can only edit fields when ECO is in DRAFT" }, { status: 400 });
       }
 
       const updates: Record<string, unknown> = { updatedAt: now };
-      if (title !== undefined) updates.title = title.trim();
-      if (description !== undefined) updates.description = description?.trim() || null;
+      if (title !== undefined) updates.title = title;
+      if (description !== undefined) updates.description = description;
       if (priority !== undefined) updates.priority = priority;
-      if (reason !== undefined) updates.reason = reason || null;
-      if (changeType !== undefined) updates.changeType = changeType || null;
-      if (costImpact !== undefined) updates.costImpact = costImpact || null;
-      if (disposition !== undefined) updates.disposition = disposition || null;
-      if (effectivity !== undefined) updates.effectivity = effectivity?.trim() || null;
+      if (reason !== undefined) updates.reason = reason;
+      if (changeType !== undefined) updates.changeType = changeType;
+      if (costImpact !== undefined) updates.costImpact = costImpact;
+      if (disposition !== undefined) updates.disposition = disposition;
+      if (effectivity !== undefined) updates.effectivity = effectivity;
 
       if (!status) {
         const { data: updated, error } = await db.from("ecos").update(updates).eq("id", ecoId)
@@ -133,14 +146,17 @@ export async function PUT(
 
           // Notify ECO creator if someone else triggered the transition
           if (eco.createdById && eco.createdById !== tenantUser.id) {
-            await notify({
-              tenantId: tenantUser.tenantId,
-              userIds: [eco.createdById],
-              title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
-              message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
-              type: "eco",
-              link: `/ecos`,
-            }).catch(() => {});
+            await sideEffect(
+              notify({
+                tenantId: tenantUser.tenantId,
+                userIds: [eco.createdById],
+                title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
+                message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
+                type: "eco",
+                link: `/ecos`,
+              }),
+              `notify ECO ${eco.ecoNumber} status change`
+            );
           }
 
           const { data: updated } = await db.from("ecos")
@@ -175,22 +191,26 @@ export async function PUT(
 
       // Notify ECO creator if someone else changed the status
       if (eco.createdById && eco.createdById !== tenantUser.id) {
-        await notify({
-          tenantId: tenantUser.tenantId,
-          userIds: [eco.createdById],
-          title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
-          message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
-          type: "eco",
-          link: `/ecos`,
-        }).catch(() => {});
+        await sideEffect(
+          notify({
+            tenantId: tenantUser.tenantId,
+            userIds: [eco.createdById],
+            title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
+            message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
+            type: "eco",
+            link: `/ecos`,
+          }),
+          `notify ECO ${eco.ecoNumber} status change`
+        );
       }
 
       return NextResponse.json(updated);
     }
 
     return NextResponse.json({ error: "No changes specified" }, { status: 400 });
-  } catch {
-    return NextResponse.json({ error: "Failed to update ECO" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update ECO";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -234,7 +254,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete ECO" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete ECO";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

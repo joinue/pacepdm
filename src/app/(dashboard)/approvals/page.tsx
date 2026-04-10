@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import {
   CheckCircle, XCircle, Clock, Shield, Loader2, RotateCcw,
-  ChevronDown, ChevronRight, MessageSquare, Undo2,
+  ChevronRight, MessageSquare, Undo2,
 } from "lucide-react";
 import { FormattedDate } from "@/components/ui/formatted-date";
+import { EmptyState } from "@/components/ui/empty-state";
+import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { toast } from "sonner";
 
 // --- Types ---
@@ -119,27 +121,48 @@ export default function ApprovalsPage() {
   const [viewRequest, setViewRequest] = useState<RequestDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const loadPending = useCallback(async () => {
-    const res = await fetch("/api/approvals");
-    const data = await res.json();
-    setPending(Array.isArray(data) ? data : []);
-    setLoading(false);
+  // Fetch helpers — declared as plain functions so they can be reused for
+  // explicit refresh after mutations. They accept an optional AbortSignal.
+  const fetchPending = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const data = await fetchJson<PendingDecision[]>("/api/approvals", { signal });
+      setPending(Array.isArray(data) ? data : []);
+    } catch (err) {
+      if (!isAbortError(err)) toast.error(errorMessage(err) || "Failed to load approvals");
+    }
   }, []);
 
-  const loadMyRequests = useCallback(async () => {
-    const res = await fetch("/api/approvals/requests");
-    const data = await res.json();
-    setMyRequests(Array.isArray(data) ? data : []);
+  const fetchMyRequests = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const data = await fetchJson<MyRequest[]>("/api/approvals/requests", { signal });
+      setMyRequests(Array.isArray(data) ? data : []);
+    } catch (err) {
+      if (!isAbortError(err)) toast.error(errorMessage(err) || "Failed to load requests");
+    }
   }, []);
 
-  useEffect(() => { loadPending(); loadMyRequests(); }, [loadPending, loadMyRequests]);
+  // Initial load — abort on unmount to avoid setting state on a dead component
+  useEffect(() => {
+    const controller = new AbortController();
+    Promise.all([
+      fetchPending(controller.signal),
+      fetchMyRequests(controller.signal),
+    ]).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
+  }, [fetchPending, fetchMyRequests]);
 
   async function loadRequestDetail(requestId: string) {
     setLoadingDetail(true);
-    const res = await fetch(`/api/approvals/requests?requestId=${requestId}`);
-    const data = await res.json();
-    setViewRequest(data);
-    setLoadingDetail(false);
+    try {
+      const data = await fetchJson<RequestDetail>(`/api/approvals/requests?requestId=${requestId}`);
+      setViewRequest(data);
+    } catch (err) {
+      toast.error(errorMessage(err) || "Failed to load request details");
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   async function handleDecision() {
@@ -170,32 +193,36 @@ export default function ApprovalsPage() {
     setActionTarget(null);
     setComment("");
     setSubmitting(false);
-    loadPending();
-    loadMyRequests();
+    fetchPending();
+    fetchMyRequests();
   }
 
   async function handleRecall(requestId: string) {
-    const res = await fetch("/api/approvals/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, action: "recall" }),
-    });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
-    toast.success("Request recalled");
-    loadMyRequests();
-    loadPending();
+    try {
+      await fetchJson("/api/approvals/requests", {
+        method: "POST",
+        body: { requestId, action: "recall" },
+      });
+      toast.success("Request recalled");
+      fetchMyRequests();
+      fetchPending();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleResubmit(requestId: string) {
-    const res = await fetch("/api/approvals/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, action: "resubmit" }),
-    });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
-    toast.success("Resubmitted for approval");
-    loadMyRequests();
-    loadPending();
+    try {
+      await fetchJson("/api/approvals/requests", {
+        method: "POST",
+        body: { requestId, action: "resubmit" },
+      });
+      toast.success("Resubmitted for approval");
+      fetchMyRequests();
+      fetchPending();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   return (
@@ -230,9 +257,12 @@ export default function ApprovalsPage() {
         /* ---- PENDING APPROVALS ---- */
         pending.length === 0 ? (
           <Card>
-            <CardContent className="py-12 text-center">
-              <CheckCircle className="w-10 h-10 mx-auto mb-3 text-green-500 opacity-50" />
-              <p className="text-muted-foreground">No pending approvals. You&apos;re all caught up.</p>
+            <CardContent className="py-0">
+              <EmptyState
+                icon={CheckCircle}
+                title="All caught up"
+                description="No pending approvals require your attention."
+              />
             </CardContent>
           </Card>
         ) : (
@@ -321,9 +351,12 @@ export default function ApprovalsPage() {
         /* ---- MY REQUESTS ---- */
         myRequests.length === 0 ? (
           <Card>
-            <CardContent className="py-12 text-center">
-              <Clock className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-              <p className="text-muted-foreground">You haven&apos;t submitted any approval requests yet.</p>
+            <CardContent className="py-0">
+              <EmptyState
+                icon={Clock}
+                title="No requests yet"
+                description="You haven't submitted any approval requests."
+              />
             </CardContent>
           </Card>
         ) : (

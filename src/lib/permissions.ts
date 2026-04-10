@@ -19,6 +19,11 @@ export const PERMISSIONS = {
   ADMIN_SETTINGS: "admin.settings",
   ADMIN_LIFECYCLE: "admin.lifecycle",
   ADMIN_METADATA: "admin.metadata",
+  // Audit log access. Tenant-wide audit data is sensitive (privacy +
+  // compliance — 21 CFR Part 11, ISO 9001, SOC 2 all expect controlled
+  // access). Granted to Admin via "*"; can be granted explicitly to a
+  // future Compliance/Quality role without conferring other admin powers.
+  AUDIT_VIEW: "audit.view",
 } as const;
 
 export function hasPermission(

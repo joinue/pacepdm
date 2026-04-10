@@ -3,6 +3,24 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+
+const CreatePartSchema = z.object({
+  partNumber: nonEmptyString,
+  name: nonEmptyString,
+  description: optionalString,
+  category: z.string().optional(),
+  revision: z.string().optional(),
+  lifecycleState: z.string().optional(),
+  material: optionalString,
+  weight: z.number().nullable().optional(),
+  weightUnit: z.string().optional(),
+  unitCost: z.number().nullable().optional(),
+  currency: z.string().optional(),
+  unit: z.string().optional(),
+  thumbnailUrl: z.string().nullable().optional(),
+  notes: optionalString,
+});
 
 export async function GET(request: NextRequest) {
   try {
@@ -33,8 +51,9 @@ export async function GET(request: NextRequest) {
 
     const { data } = await query.limit(200);
     return NextResponse.json(data || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch parts" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch parts";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -47,10 +66,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = await request.json();
-    if (!body.partNumber?.trim() || !body.name?.trim()) {
-      return NextResponse.json({ error: "Part number and name are required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreatePartSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -58,20 +76,20 @@ export async function POST(request: NextRequest) {
     const { data: part, error } = await db.from("parts").insert({
       id: uuid(),
       tenantId: tenantUser.tenantId,
-      partNumber: body.partNumber.trim(),
-      name: body.name.trim(),
-      description: body.description?.trim() || null,
+      partNumber: body.partNumber,
+      name: body.name,
+      description: body.description ?? null,
       category: body.category || "MANUFACTURED",
       revision: body.revision || "A",
       lifecycleState: body.lifecycleState || "WIP",
-      material: body.material?.trim() || null,
-      weight: body.weight || null,
+      material: body.material ?? null,
+      weight: body.weight ?? null,
       weightUnit: body.weightUnit || "kg",
-      unitCost: body.unitCost || null,
+      unitCost: body.unitCost ?? null,
       currency: body.currency || "USD",
       unit: body.unit || "EA",
-      thumbnailUrl: body.thumbnailUrl || null,
-      notes: body.notes?.trim() || null,
+      thumbnailUrl: body.thumbnailUrl ?? null,
+      notes: body.notes ?? null,
       createdById: tenantUser.id,
       createdAt: now,
       updatedAt: now,
@@ -91,7 +109,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(part);
-  } catch {
-    return NextResponse.json({ error: "Failed to create part" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create part";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

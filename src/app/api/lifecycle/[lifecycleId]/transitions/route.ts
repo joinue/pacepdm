@@ -3,6 +3,16 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateTransitionSchema = z.object({
+  fromStateId: nonEmptyString,
+  toStateId: nonEmptyString,
+  name: nonEmptyString,
+  requiresApproval: z.boolean().optional(),
+});
+
+const DeleteTransitionSchema = z.object({ transitionId: nonEmptyString });
 
 export async function GET(
   request: NextRequest,
@@ -39,8 +49,9 @@ export async function GET(
       .eq("fromStateId", stateRow.id);
 
     return NextResponse.json(transitions || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch transitions" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch transitions";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -56,16 +67,11 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, CreateTransitionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { fromStateId, toStateId, name, requiresApproval } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { fromStateId, toStateId, name, requiresApproval } = await request.json();
-
-    if (!fromStateId || !toStateId || !name?.trim()) {
-      return NextResponse.json(
-        { error: "fromStateId, toStateId, and name are required" },
-        { status: 400 }
-      );
-    }
-
     const db = getServiceClient();
 
     // Verify lifecycle belongs to tenant
@@ -101,7 +107,7 @@ export async function POST(
         lifecycleId,
         fromStateId,
         toStateId,
-        name: name.trim(),
+        name,
         requiresApproval: !!requiresApproval,
         approvalRoles: [],
       })
@@ -110,11 +116,16 @@ export async function POST(
 
     if (error) throw error;
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_transition.create", entityType: "lifecycle_transition", entityId: transition.id, details: { name: name.trim(), lifecycleId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "lifecycle_transition.create", entityType: "lifecycle_transition",
+      entityId: transition.id, details: { name, lifecycleId },
+    });
 
     return NextResponse.json(transition);
-  } catch {
-    return NextResponse.json({ error: "Failed to create transition" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create transition";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -130,13 +141,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, DeleteTransitionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { transitionId } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { transitionId } = await request.json();
-
-    if (!transitionId) {
-      return NextResponse.json({ error: "transitionId is required" }, { status: 400 });
-    }
-
     const db = getServiceClient();
 
     // Verify lifecycle belongs to tenant
@@ -160,7 +169,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_transition.delete", entityType: "lifecycle_transition", entityId: transitionId, details: { lifecycleId } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete transition" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete transition";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

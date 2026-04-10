@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody } from "@/lib/validation";
+
+const UpdateUserSchema = z.object({
+  isActive: z.boolean(),
+});
 
 export async function PATCH(
   request: NextRequest,
@@ -16,12 +21,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { userId } = await params;
-    const body = await request.json();
+    const parsed = await parseBody(request, UpdateUserSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
-    if (typeof body.isActive !== "boolean") {
-      return NextResponse.json({ error: "isActive (boolean) is required" }, { status: 400 });
-    }
+    const { userId } = await params;
 
     // Prevent self-deactivation
     if (userId === tenantUser.id && !body.isActive) {
@@ -59,8 +63,8 @@ export async function PATCH(
     });
 
     return NextResponse.json({ success: true, isActive: body.isActive });
-  } catch (error) {
-    console.error("User update error:", error);
-    return NextResponse.json({ error: "Failed to update user" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update user";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

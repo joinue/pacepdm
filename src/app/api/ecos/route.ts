@@ -2,8 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { notify } from "@/lib/notifications";
+import { notify, sideEffect } from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+
+const CreateEcoSchema = z.object({
+  title: nonEmptyString,
+  description: optionalString,
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+  reason: optionalString,
+  changeType: optionalString,
+});
 
 export async function GET() {
   try {
@@ -18,8 +27,9 @@ export async function GET() {
       .order("createdAt", { ascending: false });
 
     return NextResponse.json(ecos || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch ECOs" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch ECOs";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -33,16 +43,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { title, description, priority, reason, changeType } = await request.json();
-
-    if (!title?.trim()) {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateEcoSchema);
+    if (!parsed.ok) return parsed.response;
+    const { title, description, priority, reason, changeType } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
 
-    // Generate ECO number
+    // Generate ECO number based on total count for this tenant
     const { count } = await db
       .from("ecos")
       .select("*", { count: "exact", head: true })
@@ -56,12 +64,12 @@ export async function POST(request: NextRequest) {
         id: uuid(),
         tenantId: tenantUser.tenantId,
         ecoNumber,
-        title: title.trim(),
-        description: description || null,
+        title,
+        description: description ?? null,
         status: "DRAFT",
         priority: priority || "MEDIUM",
-        reason: reason || null,
-        changeType: changeType || null,
+        reason: reason ?? null,
+        changeType: changeType ?? null,
         costImpact: null,
         disposition: null,
         effectivity: null,
@@ -80,10 +88,10 @@ export async function POST(request: NextRequest) {
       action: "eco.create",
       entityType: "eco",
       entityId: eco.id,
-      details: { ecoNumber, title: title.trim() },
+      details: { ecoNumber, title },
     });
 
-    // Notify admins about new ECO
+    // Notify users with eco.approve permission about the new ECO
     const { data: admins } = await db
       .from("tenant_users")
       .select("id, role:roles!inner(permissions)")
@@ -99,18 +107,22 @@ export async function POST(request: NextRequest) {
       .map((u) => u.id);
 
     if (adminIds.length > 0) {
-      await notify({
-        tenantId: tenantUser.tenantId,
-        userIds: adminIds,
-        title: "New ECO created",
-        message: `${tenantUser.fullName} created ${ecoNumber}: ${title.trim()}`,
-        type: "eco",
-        link: `/ecos`,
-      }).catch(() => {});
+      await sideEffect(
+        notify({
+          tenantId: tenantUser.tenantId,
+          userIds: adminIds,
+          title: "New ECO created",
+          message: `${tenantUser.fullName} created ${ecoNumber}: ${title}`,
+          type: "eco",
+          link: `/ecos`,
+        }),
+        `notify approvers about new ECO ${ecoNumber}`
+      );
     }
 
     return NextResponse.json(eco);
-  } catch {
-    return NextResponse.json({ error: "Failed to create ECO" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create ECO";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Bell, CheckCheck, Clock } from "lucide-react";
 import { FormattedDate } from "@/components/ui/formatted-date";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { toast } from "sonner";
 
 interface Notification {
@@ -20,37 +23,38 @@ interface Notification {
 }
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
   const router = useRouter();
-
-  useEffect(() => {
-    fetch("/api/notifications")
-      .then((r) => r.json())
-      .then((d) => { setNotifications(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+  const { data, loading, setData } = useFetch<Notification[]>("/api/notifications");
+  const notifications = data || [];
 
   async function markAllRead() {
-    await fetch("/api/notifications", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ markAllRead: true }),
-    });
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    toast.success("All marked as read");
+    try {
+      await fetchJson("/api/notifications", {
+        method: "PUT",
+        body: { markAllRead: true },
+      });
+      // Optimistic local update — server is the source of truth on next refetch
+      setData((prev) => (prev || []).map((n) => ({ ...n, isRead: true })));
+      toast.success("All marked as read");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleClick(notif: Notification) {
     if (!notif.isRead) {
-      await fetch("/api/notifications", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notificationId: notif.id }),
-      });
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
-      );
+      try {
+        await fetchJson("/api/notifications", {
+          method: "PUT",
+          body: { notificationId: notif.id },
+        });
+        setData((prev) =>
+          (prev || []).map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
+        );
+      } catch (err) {
+        toast.error(errorMessage(err));
+        return;
+      }
     }
     if (notif.link) router.push(notif.link);
   }
@@ -73,12 +77,19 @@ export default function NotificationsPage() {
       </div>
 
       {loading ? (
-        <p className="text-center py-8 text-muted-foreground">Loading...</p>
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+          ))}
+        </div>
       ) : notifications.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <Bell className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="text-muted-foreground">No notifications yet.</p>
+          <CardContent className="py-0">
+            <EmptyState
+              icon={Bell}
+              title="No notifications yet"
+              description="When something happens that needs your attention, it'll show up here."
+            />
           </CardContent>
         </Card>
       ) : (

@@ -3,6 +3,12 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateLifecycleSchema = z.object({
+  name: nonEmptyString,
+  isDefault: z.boolean().optional(),
+});
 
 export async function GET() {
   try {
@@ -36,8 +42,9 @@ export async function GET() {
     );
 
     return NextResponse.json(enriched);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch lifecycles" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch lifecycles";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -50,15 +57,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, isDefault } = await request.json();
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateLifecycleSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, isDefault } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
 
-    // If marking as default, unset other defaults first
+    // If marking as default, unset other defaults first — only one default
+    // lifecycle per tenant.
     if (isDefault) {
       await db
         .from("lifecycles")
@@ -72,7 +79,7 @@ export async function POST(request: NextRequest) {
       .insert({
         id: uuid(),
         tenantId: tenantUser.tenantId,
-        name: name.trim(),
+        name,
         isDefault: !!isDefault,
         createdAt: now,
         updatedAt: now,
@@ -86,10 +93,15 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle.create", entityType: "lifecycle", entityId: lifecycle.id, details: { name: name.trim(), isDefault: !!isDefault } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "lifecycle.create", entityType: "lifecycle",
+      entityId: lifecycle.id, details: { name, isDefault: !!isDefault },
+    });
 
     return NextResponse.json(lifecycle);
-  } catch {
-    return NextResponse.json({ error: "Failed to create lifecycle" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create lifecycle";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

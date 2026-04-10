@@ -3,6 +3,25 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateStateSchema = z.object({
+  name: nonEmptyString,
+  color: z.string().optional(),
+  isInitial: z.boolean().optional(),
+  isFinal: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+
+const UpdateStateSchema = z.object({
+  stateId: nonEmptyString,
+  name: z.string().trim().min(1).optional(),
+  color: z.string().optional(),
+  isInitial: z.boolean().optional(),
+  isFinal: z.boolean().optional(),
+});
+
+const DeleteStateSchema = z.object({ stateId: nonEmptyString });
 
 export async function POST(
   request: NextRequest,
@@ -16,13 +35,11 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, CreateStateSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, color, isInitial, isFinal, sortOrder } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { name, color, isInitial, isFinal, sortOrder } = await request.json();
-
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
-
     const db = getServiceClient();
 
     // Verify lifecycle belongs to tenant
@@ -64,7 +81,7 @@ export async function POST(
       .insert({
         id: uuid(),
         lifecycleId,
-        name: name.trim(),
+        name,
         color: color || "#6b7280",
         isInitial: !!isInitial,
         isFinal: !!isFinal,
@@ -75,11 +92,16 @@ export async function POST(
 
     if (error) throw error;
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_state.create", entityType: "lifecycle_state", entityId: state.id, details: { name: name.trim(), lifecycleId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "lifecycle_state.create", entityType: "lifecycle_state",
+      entityId: state.id, details: { name, lifecycleId },
+    });
 
     return NextResponse.json(state);
-  } catch {
-    return NextResponse.json({ error: "Failed to create state" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create state";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -95,13 +117,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdateStateSchema);
+    if (!parsed.ok) return parsed.response;
+    const { stateId, name, color, isInitial, isFinal } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { stateId, name, color, isInitial, isFinal } = await request.json();
-
-    if (!stateId) {
-      return NextResponse.json({ error: "stateId is required" }, { status: 400 });
-    }
-
     const db = getServiceClient();
 
     // Verify lifecycle belongs to tenant
@@ -127,7 +147,7 @@ export async function PUT(
     }
 
     const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name.trim();
+    if (name !== undefined) updates.name = name;
     if (color !== undefined) updates.color = color;
     if (isInitial !== undefined) updates.isInitial = isInitial;
     if (isFinal !== undefined) updates.isFinal = isFinal;
@@ -145,8 +165,9 @@ export async function PUT(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_state.update", entityType: "lifecycle_state", entityId: stateId, details: { name: state?.name, lifecycleId } });
 
     return NextResponse.json(state);
-  } catch {
-    return NextResponse.json({ error: "Failed to update state" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update state";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -162,13 +183,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, DeleteStateSchema);
+    if (!parsed.ok) return parsed.response;
+    const { stateId } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { stateId } = await request.json();
-
-    if (!stateId) {
-      return NextResponse.json({ error: "stateId is required" }, { status: 400 });
-    }
-
     const db = getServiceClient();
 
     // Verify lifecycle belongs to tenant
@@ -215,7 +234,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_state.delete", entityType: "lifecycle_state", entityId: stateId, details: { lifecycleId } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete state" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete state";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

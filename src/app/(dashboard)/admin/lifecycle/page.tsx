@@ -114,7 +114,7 @@ export default function LifecyclePage() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    void (async () => { await loadData(); })();
   }, [loadData]);
 
   // --- Lifecycle CRUD ---

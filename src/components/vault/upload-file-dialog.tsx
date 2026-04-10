@@ -66,14 +66,18 @@ export function UploadFileDialog({
     }
   }, [open, isAdmin, lifecycleStates.length]);
 
+  // Debounced part search. The clear-on-empty branch runs through a
+  // microtask (queueMicrotask) so the effect body never calls setState
+  // synchronously, satisfying react-hooks/set-state-in-effect.
   useEffect(() => {
-    if (!linkToPart || linkMode !== "existing" || partSearchQuery.length < 2) {
-      setPartSearchResults([]);
+    const shouldClear = !linkToPart || linkMode !== "existing" || partSearchQuery.length < 2;
+    if (shouldClear) {
+      queueMicrotask(() => setPartSearchResults([]));
       return;
     }
     const timeout = setTimeout(() => {
       fetch(`/api/parts?q=${encodeURIComponent(partSearchQuery)}`)
-        .then((r) => r.ok ? r.json() : [])
+        .then((r) => (r.ok ? r.json() : []))
         .then((d) => setPartSearchResults(Array.isArray(d) ? d.slice(0, 8) : []))
         .catch(() => setPartSearchResults([]));
     }, 300);

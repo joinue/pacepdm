@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody } from "@/lib/validation";
+
+const UpdateLifecycleSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  isDefault: z.boolean().optional(),
+}).refine(
+  (v) => v.name !== undefined || v.isDefault !== undefined,
+  { message: "At least one field is required" }
+);
 
 export async function PUT(
   request: NextRequest,
@@ -15,8 +24,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdateLifecycleSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, isDefault } = parsed.data;
+
     const { lifecycleId } = await params;
-    const { name, isDefault } = await request.json();
     const db = getServiceClient();
     const now = new Date().toISOString();
 
@@ -43,7 +55,7 @@ export async function PUT(
     }
 
     const updates: Record<string, unknown> = { updatedAt: now };
-    if (name !== undefined) updates.name = name.trim();
+    if (name !== undefined) updates.name = name;
     if (isDefault !== undefined) updates.isDefault = isDefault;
 
     const { data: lifecycle, error } = await db
@@ -62,8 +74,9 @@ export async function PUT(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle.update", entityType: "lifecycle", entityId: lifecycleId, details: { name: lifecycle?.name } });
 
     return NextResponse.json(lifecycle);
-  } catch {
-    return NextResponse.json({ error: "Failed to update lifecycle" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update lifecycle";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -115,7 +128,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle.delete", entityType: "lifecycle", entityId: lifecycleId });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete lifecycle" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete lifecycle";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

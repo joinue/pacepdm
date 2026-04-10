@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/command";
 import {
   FileText,
-  Package,
   Layers,
   Search,
   ArrowRight,
@@ -116,17 +115,18 @@ export function GlobalSearch() {
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
-  // Reset on close
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setFiles([]);
-      setEcos([]);
-      setParts([]);
-      setBoms([]);
-      setFolders([]);
-    }
-  }, [open]);
+  // Closes the dialog and clears all transient state in one shot.
+  // Centralizing this avoids the previous useEffect-on-open pattern, which
+  // tripped the react-hooks rule against setState in effects.
+  const closeAndReset = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+    setFiles([]);
+    setEcos([]);
+    setParts([]);
+    setBoms([]);
+    setFolders([]);
+  }, []);
 
   const search = useCallback(
     async (q: string) => {
@@ -166,32 +166,32 @@ export function GlobalSearch() {
   }
 
   function selectFile(file: FileResult) {
-    setOpen(false);
+    closeAndReset();
     router.push(`/vault?folderId=${file.folderId}&fileId=${file.id}`);
   }
 
   function selectEco(eco: ECOResult) {
-    setOpen(false);
+    closeAndReset();
     router.push(`/ecos?ecoId=${eco.id}`);
   }
 
   function selectPart(part: PartResult) {
-    setOpen(false);
+    closeAndReset();
     router.push(`/parts?partId=${part.id}`);
   }
 
   function selectBom(bom: BomResult) {
-    setOpen(false);
+    closeAndReset();
     router.push(`/boms?bomId=${bom.id}`);
   }
 
   function selectFolder(folder: FolderResult) {
-    setOpen(false);
+    closeAndReset();
     router.push(`/vault?folderId=${folder.id}`);
   }
 
   function goToFullSearch() {
-    setOpen(false);
+    closeAndReset();
     router.push(`/search?q=${encodeURIComponent(query)}`);
   }
 
@@ -229,7 +229,7 @@ export function GlobalSearch() {
       {/* Command palette dialog */}
       <CommandDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => (next ? setOpen(true) : closeAndReset())}
         title="Search"
         description="Search for files, folders, ECOs, parts, and BOMs"
         className="sm:max-w-lg"

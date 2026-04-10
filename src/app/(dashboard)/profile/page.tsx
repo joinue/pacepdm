@@ -13,7 +13,6 @@ import { toast } from "sonner";
 export default function ProfilePage() {
   const user = useTenantUser();
   const supabase = createClient();
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
@@ -40,7 +39,6 @@ export default function ProfilePage() {
       toast.error(error.message);
     } else {
       toast.success("Password updated successfully");
-      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     }

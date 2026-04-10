@@ -3,6 +3,11 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
+import { z, parseBody } from "@/lib/validation";
+
+const RestoreSchema = z.object({
+  version: z.number().int().positive(),
+});
 
 export async function POST(
   request: NextRequest,
@@ -31,10 +36,12 @@ export async function POST(
       return NextResponse.json({ error: "Cannot restore a frozen file. Use Change State first." }, { status: 409 });
     }
 
-    const body = await request.json();
-    const targetVersion = body.version as number;
-    if (!targetVersion || targetVersion >= file.currentVersion) {
-      return NextResponse.json({ error: "Invalid version" }, { status: 400 });
+    const parsed = await parseBody(request, RestoreSchema);
+    if (!parsed.ok) return parsed.response;
+    const targetVersion = parsed.data.version;
+
+    if (targetVersion >= file.currentVersion) {
+      return NextResponse.json({ error: "Cannot restore current or future version" }, { status: 400 });
     }
 
     // Fetch the version to restore
@@ -81,7 +88,8 @@ export async function POST(
     });
 
     return NextResponse.json({ success: true, newVersion });
-  } catch {
-    return NextResponse.json({ error: "Failed to restore version" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to restore version";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

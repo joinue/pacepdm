@@ -3,6 +3,12 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+
+const CreateGroupSchema = z.object({
+  name: nonEmptyString,
+  description: optionalString,
+});
 
 export async function GET() {
   try {
@@ -28,8 +34,9 @@ export async function GET() {
     );
 
     return NextResponse.json(enriched);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch groups" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch groups";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -42,10 +49,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, description } = await request.json();
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateGroupSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, description } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -55,8 +61,8 @@ export async function POST(request: NextRequest) {
       .insert({
         id: uuid(),
         tenantId: tenantUser.tenantId,
-        name: name.trim(),
-        description: description || null,
+        name,
+        description: description ?? null,
         createdAt: now,
         updatedAt: now,
       })
@@ -70,10 +76,15 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "approval_group.create", entityType: "approval_group", entityId: group.id, details: { name: name.trim() } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "approval_group.create", entityType: "approval_group",
+      entityId: group.id, details: { name },
+    });
 
     return NextResponse.json({ ...group, members: [] });
-  } catch {
-    return NextResponse.json({ error: "Failed to create group" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create group";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -3,6 +3,11 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateBomSchema = z.object({
+  name: nonEmptyString,
+});
 
 export async function GET() {
   try {
@@ -16,8 +21,9 @@ export async function GET() {
       .eq("tenantId", tenantUser.tenantId)
       .order("createdAt", { ascending: false });
     return NextResponse.json(data || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch BOMs" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch BOMs";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -30,10 +36,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name } = await request.json();
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateBomSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -41,7 +46,7 @@ export async function POST(request: NextRequest) {
     const { data: bom, error } = await db.from("boms").insert({
       id: uuid(),
       tenantId: tenantUser.tenantId,
-      name: name.trim(),
+      name,
       revision: "A",
       status: "DRAFT",
       createdById: tenantUser.id,
@@ -54,11 +59,12 @@ export async function POST(request: NextRequest) {
     await logAudit({
       tenantId: tenantUser.tenantId, userId: tenantUser.id,
       action: "bom.create", entityType: "bom", entityId: bom.id,
-      details: { name: name.trim() },
+      details: { name },
     });
 
     return NextResponse.json(bom);
-  } catch {
-    return NextResponse.json({ error: "Failed to create BOM" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create BOM";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

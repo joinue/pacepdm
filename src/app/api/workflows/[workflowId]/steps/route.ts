@@ -3,6 +3,17 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const AddStepSchema = z.object({
+  groupId: nonEmptyString,
+  stepOrder: z.number().int().positive().optional(),
+  approvalMode: z.enum(["ANY", "ALL", "MAJORITY"]).optional(),
+  signatureLabel: z.string().optional(),
+  deadlineHours: z.number().positive().nullable().optional(),
+});
+
+const RemoveStepSchema = z.object({ stepId: nonEmptyString });
 
 export async function POST(
   request: NextRequest,
@@ -16,13 +27,12 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { workflowId } = await params;
-    const body = await request.json();
-    const db = getServiceClient();
+    const parsed = await parseBody(request, AddStepSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
-    if (!body.groupId) {
-      return NextResponse.json({ error: "Approval group is required" }, { status: 400 });
-    }
+    const { workflowId } = await params;
+    const db = getServiceClient();
 
     // Get next step order
     const { data: existing } = await db.from("approval_workflow_steps")
@@ -37,17 +47,22 @@ export async function POST(
       stepOrder: body.stepOrder ?? nextOrder,
       approvalMode: body.approvalMode || "ANY",
       signatureLabel: body.signatureLabel?.trim() || "Approved",
-      deadlineHours: body.deadlineHours || null,
+      deadlineHours: body.deadlineHours ?? null,
       createdAt: new Date().toISOString(),
     }).select("*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)").single();
 
     if (error) throw error;
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow_step.create", entityType: "workflow_step", entityId: step.id, details: { workflowId, groupId: body.groupId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "workflow_step.create", entityType: "workflow_step",
+      entityId: step.id, details: { workflowId, groupId: body.groupId },
+    });
 
     return NextResponse.json(step);
-  } catch {
-    return NextResponse.json({ error: "Failed to add step" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to add step";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -63,8 +78,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, RemoveStepSchema);
+    if (!parsed.ok) return parsed.response;
+    const { stepId } = parsed.data;
+
     const { workflowId } = await params;
-    const { stepId } = await request.json();
     const db = getServiceClient();
 
     await db.from("approval_workflow_steps").delete().eq("id", stepId).eq("workflowId", workflowId);
@@ -82,7 +100,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow_step.delete", entityType: "workflow_step", entityId: stepId, details: { workflowId } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to remove step" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to remove step";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

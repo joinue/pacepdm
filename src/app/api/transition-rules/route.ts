@@ -3,6 +3,12 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateRuleSchema = z.object({
+  transitionId: nonEmptyString,
+  groupId: nonEmptyString,
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +19,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { transitionId, groupId } = await request.json();
+    const parsed = await parseBody(request, CreateRuleSchema);
+    if (!parsed.ok) return parsed.response;
+    const { transitionId, groupId } = parsed.data;
+
     const db = getServiceClient();
 
     const { data: rule, error } = await db.from("transition_approval_rules").insert({
@@ -32,7 +41,8 @@ export async function POST(request: NextRequest) {
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "transition_rule.create", entityType: "transition_rule", entityId: rule.id, details: { transitionId, groupId } });
 
     return NextResponse.json(rule);
-  } catch {
-    return NextResponse.json({ error: "Failed to create rule" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create rule";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

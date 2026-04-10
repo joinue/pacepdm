@@ -244,12 +244,16 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
     }
   }, [sortField]);
 
-  function SortIcon({ field }: { field: SortField }) {
+  // Inline helper that returns the appropriate sort indicator for a column.
+  // Defined as a plain function (not a component) to satisfy
+  // react-hooks/component-stable-identity, which forbids declaring components
+  // inside another component's render body.
+  const sortIcon = (field: SortField) => {
     if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-40" />;
     return sortDir === "asc"
       ? <ArrowUp className="w-3 h-3 ml-1" />
       : <ArrowDown className="w-3 h-3 ml-1" />;
-  }
+  };
 
   function exportCsv() {
     const escCsv = (v: string) => `"${v.replace(/"/g, '""')}"`;
@@ -444,22 +448,22 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
             <TableRow>
               <TableHead>
                 <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("createdAt")}>
-                  Timestamp<SortIcon field="createdAt" />
+                  Timestamp{sortIcon("createdAt")}
                 </button>
               </TableHead>
               <TableHead>
                 <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("user")}>
-                  User<SortIcon field="user" />
+                  User{sortIcon("user")}
                 </button>
               </TableHead>
               <TableHead>
                 <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("action")}>
-                  Action<SortIcon field="action" />
+                  Action{sortIcon("action")}
                 </button>
               </TableHead>
               <TableHead>
                 <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("entityType")}>
-                  Entity<SortIcon field="entityType" />
+                  Entity{sortIcon("entityType")}
                 </button>
               </TableHead>
               <TableHead>Details</TableHead>

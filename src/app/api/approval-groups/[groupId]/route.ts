@@ -30,7 +30,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "approval_group.delete", entityType: "approval_group", entityId: groupId });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete group" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete group";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

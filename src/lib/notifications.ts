@@ -1,5 +1,25 @@
 import { getServiceClient } from "@/lib/db";
 
+/**
+ * Wrap a promise that represents a non-critical side effect
+ * (notifications, mention processing, etc.) so failures are *logged*
+ * rather than silently swallowed. The main flow always continues.
+ *
+ * Use instead of `.catch(() => {})`:
+ *   await sideEffect(notify({...}), "notify ECO submitter");
+ */
+export async function sideEffect<T>(
+  promise: Promise<T>,
+  context: string
+): Promise<T | undefined> {
+  try {
+    return await promise;
+  } catch (err) {
+    console.error(`[side-effect failed] ${context}:`, err);
+    return undefined;
+  }
+}
+
 // In-app notification system. Email can be added later via Resend/SES.
 // For now, we store notifications in the database and show them in the UI.
 

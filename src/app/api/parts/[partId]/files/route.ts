@@ -3,6 +3,15 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const LinkFileSchema = z.object({
+  fileId: nonEmptyString,
+  role: z.string().optional(),
+  isPrimary: z.boolean().optional(),
+});
+
+const UnlinkFileSchema = z.object({ fileId: nonEmptyString });
 
 export async function POST(
   request: NextRequest,
@@ -16,13 +25,12 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { partId } = await params;
-    const body = await request.json();
-    const db = getServiceClient();
+    const parsed = await parseBody(request, LinkFileSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
-    if (!body.fileId) {
-      return NextResponse.json({ error: "fileId is required" }, { status: 400 });
-    }
+    const { partId } = await params;
+    const db = getServiceClient();
 
     // If setting as primary, unset others
     if (body.isPrimary) {
@@ -47,8 +55,9 @@ export async function POST(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.file_link", entityType: "part", entityId: partId, details: { fileId: body.fileId, role: body.role || "DRAWING" } });
 
     return NextResponse.json(pf);
-  } catch {
-    return NextResponse.json({ error: "Failed to link file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to link file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -64,8 +73,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UnlinkFileSchema);
+    if (!parsed.ok) return parsed.response;
+    const { fileId } = parsed.data;
+
     const { partId } = await params;
-    const { fileId } = await request.json();
     const db = getServiceClient();
 
     await db.from("part_files").delete().eq("partId", partId).eq("fileId", fileId);
@@ -73,7 +85,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.file_unlink", entityType: "part", entityId: partId, details: { fileId } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to unlink file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to unlink file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
+import { z, parseBody } from "@/lib/validation";
+
+const UpdateNotificationSchema = z.object({
+  notificationId: z.string().optional(),
+  markAllRead: z.boolean().optional(),
+}).refine(
+  (v) => v.notificationId || v.markAllRead,
+  { message: "Must specify notificationId or markAllRead" }
+);
 
 export async function GET() {
   try {
@@ -16,8 +25,9 @@ export async function GET() {
       .limit(50);
 
     return NextResponse.json(notifications || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch notifications" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch notifications";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -25,7 +35,11 @@ export async function PUT(request: NextRequest) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { notificationId, markAllRead } = await request.json();
+
+    const parsed = await parseBody(request, UpdateNotificationSchema);
+    if (!parsed.ok) return parsed.response;
+    const { notificationId, markAllRead } = parsed.data;
+
     const db = getServiceClient();
 
     if (markAllRead) {
@@ -41,7 +55,8 @@ export async function PUT(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to update notifications" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update notifications";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, optionalString } from "@/lib/validation";
+
+const UpdateRoleSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  description: optionalString,
+  permissions: z.array(z.string()).optional(),
+});
 
 export async function PUT(
   request: NextRequest,
@@ -15,8 +22,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdateRoleSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, description, permissions } = parsed.data;
+
     const { roleId } = await params;
-    const { name, description, permissions } = await request.json();
     const db = getServiceClient();
 
     const { data: role } = await db.from("roles").select("*").eq("id", roleId).single();
@@ -31,11 +41,16 @@ export async function PUT(
       updatedAt: new Date().toISOString(),
     }).eq("id", roleId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "role.update", entityType: "role", entityId: roleId, details: { name: name ?? role.name } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "role.update", entityType: "role",
+      entityId: roleId, details: { name: name ?? role.name },
+    });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to update role" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update role";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -73,7 +88,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "role.delete", entityType: "role", entityId: roleId, details: { name: role.name } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete role" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete role";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

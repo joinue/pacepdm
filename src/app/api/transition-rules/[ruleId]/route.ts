@@ -22,7 +22,8 @@ export async function DELETE(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "transition_rule.delete", entityType: "transition_rule", entityId: ruleId });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete rule" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete rule";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

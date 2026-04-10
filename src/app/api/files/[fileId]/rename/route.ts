@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const RenameSchema = z.object({ name: nonEmptyString });
 
 export async function PUT(
   request: NextRequest,
@@ -17,12 +20,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const db = getServiceClient();
-    const { name } = await request.json();
+    const parsed = await parseBody(request, RenameSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name } = parsed.data;
 
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
@@ -31,7 +33,7 @@ export async function PUT(
 
     const oldName = file.name;
     const { error } = await db.from("files")
-      .update({ name: name.trim(), updatedAt: new Date().toISOString() })
+      .update({ name, updatedAt: new Date().toISOString() })
       .eq("id", fileId);
 
     if (error) {
@@ -44,11 +46,12 @@ export async function PUT(
     await logAudit({
       tenantId: tenantUser.tenantId, userId: tenantUser.id,
       action: "file.rename", entityType: "file", entityId: fileId,
-      details: { oldName, newName: name.trim() },
+      details: { oldName, newName: name },
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to rename file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to rename file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

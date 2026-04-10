@@ -12,9 +12,10 @@ import {
 import {
   Search, Lock, Download, SearchX, FileText, ClipboardList, Cpu, Package,
   X, SlidersHorizontal, Bookmark, BookmarkPlus, ArrowUpDown, Clock,
-  SortAsc, Trash2, Users, FolderOpen, Hash, Tag, ChevronRight,
+  SortAsc, Users, FolderOpen, Hash, Tag, ChevronRight,
 } from "lucide-react";
 import { FormattedDate } from "@/components/ui/formatted-date";
+import { EmptyState } from "@/components/ui/empty-state";
 
 // --- Types ---
 
@@ -101,11 +102,6 @@ const bomStatusVariants: Record<string, "muted" | "info" | "warning" | "success"
 };
 
 const categoryLabels: Record<string, string> = {
-  PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing",
-  DOCUMENT: "Document", PURCHASED: "Purchased", OTHER: "Other",
-};
-
-const categoryIcons: Record<string, string> = {
   PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing",
   DOCUMENT: "Document", PURCHASED: "Purchased", OTHER: "Other",
 };
@@ -558,25 +554,23 @@ export default function SearchPage() {
 
       {/* No results state */}
       {searched && totalResults === 0 && !loading && (
-        <div className="text-center py-16">
-          <SearchX className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="font-medium text-sm text-muted-foreground">No results found</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {hasActiveFilters
-              ? "Try removing some filters or broadening your search."
-              : "Try different keywords or use filters to narrow by category or state."}
-          </p>
-          {hasActiveFilters && (
+        <EmptyState
+          icon={SearchX}
+          title="No results found"
+          description={hasActiveFilters
+            ? "Try removing some filters or broadening your search."
+            : "Try different keywords or use filters to narrow by category or state."}
+          action={hasActiveFilters && (
             <Button
               variant="outline"
               size="sm"
-              className="mt-3 text-xs"
+              className="text-xs"
               onClick={() => handleFilterChange("", "")}
             >
               Clear all filters
             </Button>
           )}
-        </div>
+        />
       )}
 
       {/* Tabbed results */}

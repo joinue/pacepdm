@@ -4,6 +4,13 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { createClient } from "@supabase/supabase-js";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const InviteSchema = z.object({
+  email: z.string().email("Must be a valid email"),
+  fullName: nonEmptyString,
+  roleId: nonEmptyString,
+});
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,11 +22,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { email, fullName, roleId } = await request.json();
-
-    if (!email || !fullName || !roleId) {
-      return NextResponse.json({ error: "Email, name, and role are required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, InviteSchema);
+    if (!parsed.ok) return parsed.response;
+    const { email, fullName, roleId } = parsed.data;
 
     const db = getServiceClient();
 
@@ -135,8 +140,9 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ user: newUser, tempPassword });
-  } catch (error) {
-    console.error("Invite error:", error);
-    return NextResponse.json({ error: "Failed to invite user" }, { status: 500 });
+  } catch (err) {
+    console.error("Invite error:", err);
+    const message = err instanceof Error ? err.message : "Failed to invite user";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

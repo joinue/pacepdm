@@ -3,6 +3,17 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, optionalString } from "@/lib/validation";
+
+const MetadataSchema = z.object({
+  partNumber: optionalString,
+  description: optionalString,
+  category: z.string().optional(),
+  metadata: z.array(z.object({
+    fieldId: z.string(),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+  })).optional(),
+});
 
 export async function PUT(
   request: NextRequest,
@@ -18,14 +29,16 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, MetadataSchema);
+    if (!parsed.ok) return parsed.response;
+    const { metadata, partNumber, description, category } = parsed.data;
+
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
-
-    const { metadata, partNumber, description, category } = await request.json();
 
     // Frozen files can only be edited by admins
     if (file.isFrozen && !permissions.includes("*")) {
@@ -71,7 +84,8 @@ export async function PUT(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to update metadata" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update metadata";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

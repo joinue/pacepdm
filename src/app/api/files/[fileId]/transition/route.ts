@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { notify, notifyApprovalGroupMembers } from "@/lib/notifications";
+import { notify, notifyApprovalGroupMembers, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { v4 as uuid } from "uuid";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const TransitionSchema = z.object({ transitionId: nonEmptyString });
 
 export async function POST(
   request: NextRequest,
@@ -20,8 +23,11 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, TransitionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { transitionId } = parsed.data;
+
     const db = getServiceClient();
-    const { transitionId } = await request.json();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
     if (!file || file.tenantId !== tenantUser.tenantId) {
@@ -166,19 +172,23 @@ export async function POST(
 
       const userIds = (tenantUsers || []).map((u) => u.id);
       if (userIds.length > 0) {
-        await notify({
-          tenantId: tenantUser.tenantId,
-          userIds,
-          title: `File ${toStateName.toLowerCase()}`,
-          message: `${tenantUser.fullName} moved "${file.name}" to ${toStateName}`,
-          type: "transition",
-          link: `/vault?file=${fileId}`,
-        }).catch(() => {});
+        await sideEffect(
+          notify({
+            tenantId: tenantUser.tenantId,
+            userIds,
+            title: `File ${toStateName.toLowerCase()}`,
+            message: `${tenantUser.fullName} moved "${file.name}" to ${toStateName}`,
+            type: "transition",
+            link: `/vault?file=${fileId}`,
+          }),
+          `notify tenant about transition of file ${fileId} to ${toStateName}`
+        );
       }
     }
 
     return NextResponse.json({ success: true, newState: transition.toState.name });
-  } catch {
-    return NextResponse.json({ error: "Failed to transition file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to transition file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

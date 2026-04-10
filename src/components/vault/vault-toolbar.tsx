@@ -13,12 +13,19 @@ import {
   FolderPlus, Upload, Download, Trash2, Search,
 } from "lucide-react";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
+import { usePermissions } from "@/hooks/use-permissions";
+import { PERMISSIONS } from "@/lib/permissions";
 
 interface VaultToolbarProps {
   vault: VaultBrowserState;
 }
 
 export function VaultToolbar({ vault }: VaultToolbarProps) {
+  const { can } = usePermissions();
+  const canUpload = can(PERMISSIONS.FILE_UPLOAD);
+  const canCreateFolder = can(PERMISSIONS.FOLDER_CREATE);
+  const canDelete = can(PERMISSIONS.FILE_DELETE);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -36,20 +43,26 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
                   {vault.bulkDownloading ? "Zipping..." : `Download (${vault.selectedFiles.size})`}
                 </span>
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => vault.setShowBulkDeleteConfirm(true)}>
-                <Trash2 className="w-4 h-4 sm:mr-1" />
-                <span className="hidden sm:inline">Delete ({vault.selectedFiles.size})</span>
-              </Button>
+              {canDelete && (
+                <Button variant="destructive" size="sm" onClick={() => vault.setShowBulkDeleteConfirm(true)}>
+                  <Trash2 className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Delete ({vault.selectedFiles.size})</span>
+                </Button>
+              )}
             </>
           )}
-          <Button variant="outline" size="sm" onClick={() => vault.setShowCreateFolder(true)}>
-            <FolderPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">New Folder</span>
-          </Button>
-          <Button size="sm" onClick={() => vault.setShowUpload(true)}>
-            <Upload className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Upload</span>
-          </Button>
+          {canCreateFolder && (
+            <Button variant="outline" size="sm" onClick={() => vault.setShowCreateFolder(true)}>
+              <FolderPlus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Folder</span>
+            </Button>
+          )}
+          {canUpload && (
+            <Button size="sm" onClick={() => vault.setShowUpload(true)}>
+              <Upload className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Upload</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -85,24 +98,48 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
 }
 
 function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
+  // On narrow screens with deep nesting, collapse middle entries to ".." so the
+  // breadcrumb stays on one line. Always show root + last 2 levels at minimum.
+  const items = vault.breadcrumbs;
+  const collapsed = items.length > 4;
+  const visible = collapsed
+    ? [
+        { ...items[0], _index: 0 },
+        { id: "ellipsis", name: "…", _index: -1 },
+        { ...items[items.length - 2], _index: items.length - 2 },
+        { ...items[items.length - 1], _index: items.length - 1 },
+      ]
+    : items.map((e, i) => ({ ...e, _index: i }));
+
   return (
-    <Breadcrumb className="mt-1">
-      <BreadcrumbList>
-        {vault.breadcrumbs.map((entry, i) => (
-          <React.Fragment key={entry.id}>
-            {i > 0 && <BreadcrumbSeparator />}
-            <BreadcrumbItem
-              onDragOver={(e) => { if (entry.id !== vault.currentFolderId) vault.handleDragOver(e, entry.id); }}
-              onDragLeave={vault.handleDragLeave}
-              onDrop={(e) => { if (entry.id !== vault.currentFolderId) vault.handleDrop(e, entry.id); }}
-              className={vault.dropTargetId === entry.id ? "ring-2 ring-primary rounded px-1" : ""}
-            >
-              <BreadcrumbLink onClick={() => vault.navigateToBreadcrumb(i)} className="cursor-pointer text-xs sm:text-sm">
-                {entry.name}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-          </React.Fragment>
-        ))}
+    <Breadcrumb className="mt-1 min-w-0">
+      <BreadcrumbList className="flex-nowrap overflow-hidden">
+        {visible.map((entry, i) => {
+          const isEllipsis = entry.id === "ellipsis";
+          return (
+            <React.Fragment key={`${entry.id}-${i}`}>
+              {i > 0 && <BreadcrumbSeparator className="shrink-0" />}
+              <BreadcrumbItem
+                onDragOver={(e) => { if (!isEllipsis && entry.id !== vault.currentFolderId) vault.handleDragOver(e, entry.id); }}
+                onDragLeave={vault.handleDragLeave}
+                onDrop={(e) => { if (!isEllipsis && entry.id !== vault.currentFolderId) vault.handleDrop(e, entry.id); }}
+                className={`${vault.dropTargetId === entry.id ? "ring-2 ring-primary rounded px-1" : ""} min-w-0`}
+              >
+                {isEllipsis ? (
+                  <span className="text-xs sm:text-sm text-muted-foreground px-1">…</span>
+                ) : (
+                  <BreadcrumbLink
+                    onClick={() => vault.navigateToBreadcrumb(entry._index)}
+                    className="cursor-pointer text-xs sm:text-sm truncate block max-w-32 sm:max-w-48"
+                    title={entry.name}
+                  >
+                    {entry.name}
+                  </BreadcrumbLink>
+                )}
+              </BreadcrumbItem>
+            </React.Fragment>
+          );
+        })}
       </BreadcrumbList>
     </Breadcrumb>
   );

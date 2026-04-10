@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { BOM_STATUS_FLOW } from "@/lib/status-flows";
+import { z, parseBody } from "@/lib/validation";
 
-const BOM_STATUS_FLOW: Record<string, string[]> = {
-  DRAFT: ["IN_REVIEW"],
-  IN_REVIEW: ["APPROVED", "DRAFT"],
-  APPROVED: ["RELEASED", "DRAFT"],
-  RELEASED: ["OBSOLETE"],
-  OBSOLETE: [],
-};
+// Partial-update shape: any of name/status/revision can be supplied. The
+// state-transition rule (only valid next-states allowed) is enforced after
+// parse against the shared BOM_STATUS_FLOW map.
+const UpdateBomSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  status: z.string().optional(),
+  revision: z.string().optional(),
+}).refine(
+  (v) => v.name !== undefined || v.status !== undefined || v.revision !== undefined,
+  { message: "At least one field is required" }
+);
 
 export async function GET(
   _request: NextRequest,
@@ -33,8 +39,9 @@ export async function GET(
     }
 
     return NextResponse.json(bom);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch BOM" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch BOM";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -50,8 +57,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const parsed = await parseBody(request, UpdateBomSchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
+
     const { bomId } = await params;
-    const body = await request.json();
     const db = getServiceClient();
 
     // Verify ownership
@@ -72,12 +82,12 @@ export async function PUT(
     const changes: Record<string, string | null> = {};
 
     // Name update
-    if (body.name !== undefined && body.name.trim() !== existing.name) {
-      updates.name = body.name.trim();
-      changes.name = body.name.trim();
+    if (body.name !== undefined && body.name !== existing.name) {
+      updates.name = body.name;
+      changes.name = body.name;
     }
 
-    // Status transition
+    // Status transition — guarded by the shared state machine
     if (body.status && body.status !== existing.status) {
       const allowed = BOM_STATUS_FLOW[existing.status] || [];
       if (!allowed.includes(body.status)) {
@@ -115,8 +125,9 @@ export async function PUT(
     });
 
     return NextResponse.json(bom);
-  } catch {
-    return NextResponse.json({ error: "Failed to update BOM" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update BOM";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -168,7 +179,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete BOM" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete BOM";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

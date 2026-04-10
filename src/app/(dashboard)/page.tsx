@@ -10,6 +10,7 @@ import {
 import { FolderOpen, FileText, ClipboardList, History, CheckCircle, Inbox } from "lucide-react";
 import Link from "next/link";
 import { FormattedDate } from "@/components/ui/formatted-date";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function DashboardPage() {
   const tenantUser = await getCurrentTenantUser();
@@ -82,15 +83,17 @@ export default async function DashboardPage() {
           </Card>
         </Link>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">My Checked-Out</CardTitle>
-            <History className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{checkedOutByMe ?? 0}</div>
-          </CardContent>
-        </Card>
+        <Link href="/vault?checkedOutByMe=1">
+          <Card className="hover:shadow-md transition-shadow cursor-pointer">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">My Checked-Out</CardTitle>
+              <History className="w-4 h-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{checkedOutByMe ?? 0}</div>
+            </CardContent>
+          </Card>
+        </Link>
 
         <Link href="/approvals">
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
@@ -112,12 +115,11 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           {!recentActivity || recentActivity.length === 0 ? (
-            <div className="py-8 text-center">
-              <Inbox className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground">
-                No activity yet. Start by uploading files to the vault.
-              </p>
-            </div>
+            <EmptyState
+              icon={Inbox}
+              title="No activity yet"
+              description="Start by uploading files to the vault."
+            />
           ) : (
             <div className="space-y-3">
               {recentActivity.map((log) => (

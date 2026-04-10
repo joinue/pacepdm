@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { notify } from "@/lib/notifications";
+import { notify, sideEffect } from "@/lib/notifications";
 import { processMentions } from "@/lib/mentions";
 import { v4 as uuid } from "uuid";
 import { isSolidWorksFile, extractSolidWorksThumbnail } from "@/lib/thumbnail";
@@ -111,33 +111,40 @@ export async function POST(
 
     // Process @mentions in check-in comment
     if (comment?.trim()) {
-      await processMentions({
-        tenantId: tenantUser.tenantId,
-        mentionedById: tenantUser.id,
-        mentionedByName: tenantUser.fullName,
-        entityType: "file_version",
-        entityId: fileId,
-        comment: comment.trim(),
-        link: `/vault?file=${fileId}`,
-      }).catch(() => {});
+      await sideEffect(
+        processMentions({
+          tenantId: tenantUser.tenantId,
+          mentionedById: tenantUser.id,
+          mentionedByName: tenantUser.fullName,
+          entityType: "file_version",
+          entityId: fileId,
+          comment: comment.trim(),
+          link: `/vault?file=${fileId}`,
+        }),
+        `process mentions for file checkin ${fileId}`
+      );
     }
 
     // If an admin checked in someone else's file, notify the original checker
     if (file.checkedOutById && file.checkedOutById !== tenantUser.id) {
-      await notify({
-        tenantId: tenantUser.tenantId,
-        userIds: [file.checkedOutById],
-        title: newFile ? "File checked in by admin" : "Checkout cancelled by admin",
-        message: newFile
-          ? `"${file.name}" was checked in by ${tenantUser.fullName}`
-          : `Your checkout of "${file.name}" was cancelled by ${tenantUser.fullName}`,
-        type: "checkout",
-        link: `/vault?file=${fileId}`,
-      }).catch(() => {});
+      await sideEffect(
+        notify({
+          tenantId: tenantUser.tenantId,
+          userIds: [file.checkedOutById],
+          title: newFile ? "File checked in by admin" : "Checkout cancelled by admin",
+          message: newFile
+            ? `"${file.name}" was checked in by ${tenantUser.fullName}`
+            : `Your checkout of "${file.name}" was cancelled by ${tenantUser.fullName}`,
+          type: "checkout",
+          link: `/vault?file=${fileId}`,
+        }),
+        `notify checkout owner about admin checkin of ${fileId}`
+      );
     }
 
     return NextResponse.json({ success: true, version: newFile ? newVersion : file.currentVersion });
-  } catch {
-    return NextResponse.json({ error: "Failed to check in file" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to check in file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

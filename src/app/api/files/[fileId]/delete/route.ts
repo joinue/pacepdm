@@ -32,11 +32,9 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot delete a released file. Mark it as obsolete first." }, { status: 409 });
     }
 
-    // Delete metadata values, file versions, references, then the file
+    // Delete metadata values and file versions, then the file
     await db.from("metadata_values").delete().eq("fileId", fileId);
     await db.from("file_versions").delete().eq("fileId", fileId);
-    await db.from("file_references").delete().eq("sourceFileId", fileId);
-    await db.from("file_references").delete().eq("targetFileId", fileId);
     await db.from("files").delete().eq("id", fileId);
 
     await logAudit({

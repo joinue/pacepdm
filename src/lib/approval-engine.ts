@@ -281,13 +281,11 @@ export async function processDecision({
     const nextStep = nextStepDecisions[0];
     const nextStepData = nextStep.step as unknown as { stepOrder: number };
 
-    // Activate next step's decisions
+    // Activate next step's decisions. The deadline is already set on the
+    // decision row when the workflow was started, so we only need to flip
+    // the status from BLOCKED to PENDING.
     for (const nd of nextStepDecisions) {
-      const deadlineHours = nd.deadlineAt ? null : undefined; // Already calculated or not
-      await db.from("approval_decisions").update({
-        status: "PENDING",
-        ...(nd.deadlineAt ? {} : {}),
-      }).eq("id", nd.id);
+      await db.from("approval_decisions").update({ status: "PENDING" }).eq("id", nd.id);
     }
 
     // Look up the step's deadline

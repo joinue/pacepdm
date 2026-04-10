@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const RenameFolderSchema = z.object({ name: nonEmptyString });
 
 // Get folder with ancestor chain (for deep-linking breadcrumbs)
 export async function GET(
@@ -40,8 +43,9 @@ export async function GET(
     ancestors.push({ id: folder.id, name: folder.name });
 
     return NextResponse.json({ ...folder, ancestors });
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch folder" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch folder";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -60,12 +64,11 @@ export async function PUT(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const db = getServiceClient();
-    const { name } = await request.json();
+    const parsed = await parseBody(request, RenameFolderSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name } = parsed.data;
 
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const db = getServiceClient();
 
     const { data: folder } = await db.from("folders").select("*").eq("id", folderId).single();
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
@@ -78,10 +81,10 @@ export async function PUT(
 
     // Build new path
     const parentPath = folder.path.substring(0, folder.path.lastIndexOf(folder.name));
-    const newPath = parentPath + name.trim();
+    const newPath = parentPath + name;
 
     const { error } = await db.from("folders")
-      .update({ name: name.trim(), path: newPath, updatedAt: new Date().toISOString() })
+      .update({ name, path: newPath, updatedAt: new Date().toISOString() })
       .eq("id", folderId);
 
     if (error) {
@@ -94,12 +97,13 @@ export async function PUT(
     await logAudit({
       tenantId: tenantUser.tenantId, userId: tenantUser.id,
       action: "folder.rename", entityType: "folder", entityId: folderId,
-      details: { oldName: folder.name, newName: name.trim() },
+      details: { oldName: folder.name, newName: name },
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to rename folder" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to rename folder";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -146,7 +150,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete folder" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete folder";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

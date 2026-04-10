@@ -3,6 +3,16 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const CreateFieldSchema = z.object({
+  name: nonEmptyString,
+  fieldType: z.enum(["TEXT", "NUMBER", "DATE", "BOOLEAN", "SELECT", "URL"]).optional(),
+  options: z.array(z.string()).nullable().optional(),
+  isRequired: z.boolean().optional(),
+});
+
+const DeleteFieldSchema = z.object({ fieldId: nonEmptyString });
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,11 +24,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, fieldType, options, isRequired } = await request.json();
-
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, CreateFieldSchema);
+    if (!parsed.ok) return parsed.response;
+    const { name, fieldType, options, isRequired } = parsed.data;
 
     const db = getServiceClient();
     const now = new Date().toISOString();
@@ -38,9 +46,9 @@ export async function POST(request: NextRequest) {
       .insert({
         id: uuid(),
         tenantId: tenantUser.tenantId,
-        name: name.trim(),
+        name,
         fieldType: fieldType || "TEXT",
-        options: options || null,
+        options: options ?? null,
         isRequired: isRequired || false,
         isSystem: false,
         sortOrder: nextSort,
@@ -58,11 +66,16 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "metadata_field.create", entityType: "metadata_field", entityId: field.id, details: { name: name.trim(), fieldType: fieldType || "TEXT" } });
+    await logAudit({
+      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      action: "metadata_field.create", entityType: "metadata_field",
+      entityId: field.id, details: { name, fieldType: fieldType || "TEXT" },
+    });
 
     return NextResponse.json(field);
-  } catch {
-    return NextResponse.json({ error: "Failed to create field" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create field";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -76,7 +89,10 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { fieldId } = await request.json();
+    const parsed = await parseBody(request, DeleteFieldSchema);
+    if (!parsed.ok) return parsed.response;
+    const { fieldId } = parsed.data;
+
     const db = getServiceClient();
 
     const { data: field } = await db.from("metadata_fields").select("*").eq("id", fieldId).single();
@@ -93,7 +109,8 @@ export async function DELETE(request: NextRequest) {
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "metadata_field.delete", entityType: "metadata_field", entityId: fieldId, details: { name: field.name } });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete field" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to delete field";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

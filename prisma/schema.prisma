@@ -47,7 +47,7 @@ model TenantUser {
   updatedAt  DateTime @updatedAt
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  role         Role          @relation(fields: [roleId], references: [id])
+  role         Role          @relation(fields: [roleId], references: [id], onDelete: Restrict)
   fileVersions FileVersion[]
   checkOuts    File[]        @relation("CheckedOutBy")
   approvals    Approval[]
@@ -129,8 +129,6 @@ model File {
   checkedOutBy TenantUser?     @relation("CheckedOutBy", fields: [checkedOutById], references: [id])
   versions     FileVersion[]
   metadata     MetadataValue[]
-  references   FileReference[] @relation("SourceFile")
-  referencedBy FileReference[] @relation("TargetFile")
   ecoItems     ECOItem[]
 
   @@unique([tenantId, folderId, name])
@@ -162,19 +160,6 @@ model FileVersion {
 
   @@unique([fileId, version])
   @@map("file_versions")
-}
-
-model FileReference {
-  id            String @id @default(uuid())
-  sourceFileId  String
-  targetFileId  String
-  referenceType String @default("contains")
-
-  sourceFile File @relation("SourceFile", fields: [sourceFileId], references: [id], onDelete: Cascade)
-  targetFile File @relation("TargetFile", fields: [targetFileId], references: [id], onDelete: Cascade)
-
-  @@unique([sourceFileId, targetFileId, referenceType])
-  @@map("file_references")
 }
 
 // ============================================================
@@ -220,6 +205,7 @@ model MetadataValue {
   field MetadataField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 
   @@unique([fileId, fieldId])
+  @@index([fileId])
   @@map("metadata_values")
 }
 
@@ -419,6 +405,7 @@ model ApprovalGroupMember {
   group ApprovalGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, userId])
+  @@index([userId])
   @@map("approval_group_members")
 }
 
@@ -528,6 +515,7 @@ model ApprovalWorkflowAssignment {
 
   @@index([tenantId])
   @@index([transitionId])
+  @@index([tenantId, transitionId])
   @@map("approval_workflow_assignments")
 }
 

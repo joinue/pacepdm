@@ -2,19 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const BulkDownloadSchema = z.object({
+  fileIds: z.array(nonEmptyString)
+    .min(1, "No files specified")
+    .max(50, "Maximum 50 files per download"),
+});
 
 export async function POST(request: NextRequest) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { fileIds } = await request.json();
-    if (!Array.isArray(fileIds) || fileIds.length === 0) {
-      return NextResponse.json({ error: "No files specified" }, { status: 400 });
-    }
-    if (fileIds.length > 50) {
-      return NextResponse.json({ error: "Maximum 50 files per download" }, { status: 400 });
-    }
+    const parsed = await parseBody(request, BulkDownloadSchema);
+    if (!parsed.ok) return parsed.response;
+    const { fileIds } = parsed.data;
 
     const db = getServiceClient();
 
@@ -60,7 +63,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ files: results });
-  } catch {
-    return NextResponse.json({ error: "Failed to prepare download" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to prepare download";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

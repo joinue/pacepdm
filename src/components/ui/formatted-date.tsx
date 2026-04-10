@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useHasMounted } from "@/hooks/use-has-mounted";
 
 interface FormattedDateProps {
   date: string | Date;
@@ -19,13 +19,18 @@ function parseAsUTC(date: string | Date): Date {
   return new Date(date);
 }
 
+/**
+ * Renders a date string formatted with the *user's* locale.
+ *
+ * Returns an empty span on the server (where the locale is unknown) and
+ * the formatted value once mounted on the client. The pattern avoids the
+ * SSR/CSR mismatch you'd get from calling `toLocaleString()` directly.
+ */
 export function FormattedDate({ date, variant = "datetime", className }: FormattedDateProps) {
-  const [formatted, setFormatted] = useState<string>("");
+  const mounted = useHasMounted();
+  if (!mounted) return <span className={className} />;
 
-  useEffect(() => {
-    const d = parseAsUTC(date);
-    setFormatted(variant === "date" ? d.toLocaleDateString() : d.toLocaleString());
-  }, [date, variant]);
-
+  const d = parseAsUTC(date);
+  const formatted = variant === "date" ? d.toLocaleDateString() : d.toLocaleString();
   return <span className={className}>{formatted}</span>;
 }

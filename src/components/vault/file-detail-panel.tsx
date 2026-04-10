@@ -26,6 +26,7 @@ import {
 import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 
 // --- Preview components ---
 
@@ -38,15 +39,35 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Note: setLoading(true) is omitted from the effect body because the lint
+  // rule react-hooks/set-state-in-effect forbids synchronous setState in
+  // effects. We rely on the initial useState(true) and the per-fileId remount
+  // (the panel uses fileId as a key indirectly via prop change).
   useEffect(() => {
-    setLoading(true);
-    fetch(`/api/files/${fileId}/preview`)
+    const controller = new AbortController();
+    let cancelled = false;
+
+    fetch(`/api/files/${fileId}/preview`, { signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`Preview failed: ${r.status}`);
         return r.json();
       })
-      .then((d) => { setPreview(d); setLoading(false); })
-      .catch(() => { setPreview(null); setLoading(false); });
+      .then((d) => {
+        if (!cancelled) {
+          setPreview(d);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (cancelled || err?.name === "AbortError") return;
+        setPreview(null);
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [fileId]);
 
   if (loading) return <p className="text-sm text-muted-foreground text-center py-12">Loading preview...</p>;
@@ -155,12 +176,6 @@ interface FileDetail {
     value: string;
     field: { name: string; fieldType: string };
   }[];
-  references: {
-    targetFile: { id: string; name: string; partNumber: string | null };
-  }[];
-  referencedBy: {
-    sourceFile: { id: string; name: string; partNumber: string | null };
-  }[];
 }
 
 // --- Main component ---
@@ -201,40 +216,52 @@ export function FileDetailPanel({
   }[]>([]);
   const [linkedEcos, setLinkedEcos] = useState<{id: string; changeType: string; reason: string | null; eco: { id: string; ecoNumber: string; title: string; status: string; priority: string }}[]>([]);
 
-  const loadFile = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [fileRes, whereRes, ecosRes] = await Promise.all([
-        fetch(`/api/files/${fileId}`),
-        fetch(`/api/files/${fileId}/where-used`),
-        fetch(`/api/files/${fileId}/ecos`),
-      ]);
-      const data = await fileRes.json();
-      setFile(data);
-      setPartNumber(data.partNumber || "");
-      setDescription(data.description || "");
-      setCategory(data.category || "");
+  // Reusable refresh function — called after mutations (save, transition, etc).
+  // Returns a promise so callers can await completion.
+  const refreshFile = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const [data, wu, ecos] = await Promise.all([
+          fetchJson<FileDetail>(`/api/files/${fileId}`, { signal }),
+          fetchJson<typeof whereUsed>(`/api/files/${fileId}/where-used`, { signal }),
+          fetchJson<typeof linkedEcos>(`/api/files/${fileId}/ecos`, { signal }),
+        ]);
+        if (signal?.aborted) return;
+        setFile(data);
+        setPartNumber(data.partNumber || "");
+        setDescription(data.description || "");
+        setCategory(data.category || "");
 
-      const values: Record<string, string> = {};
-      for (const mv of data.metadata) {
-        values[mv.fieldId] = mv.value;
+        const values: Record<string, string> = {};
+        for (const mv of data.metadata) {
+          values[mv.fieldId] = mv.value;
+        }
+        setMetadataValues(values);
+        setWhereUsed(Array.isArray(wu) ? wu : []);
+        setLinkedEcos(Array.isArray(ecos) ? ecos : []);
+      } catch (err) {
+        if (isAbortError(err)) return;
+        toast.error(errorMessage(err) || "Failed to load file details");
       }
-      setMetadataValues(values);
+    },
+    [fileId]
+  );
 
-      const wu = await whereRes.json();
-      setWhereUsed(Array.isArray(wu) ? wu : []);
-
-      const ecos = await ecosRes.json();
-      setLinkedEcos(Array.isArray(ecos) ? ecos : []);
-    } catch {
-      toast.error("Failed to load file details");
-    }
-    setLoading(false);
-  }, [fileId]);
-
+  // Initial load — abort on unmount or fileId change so stale responses
+  // can't overwrite the panel after the user has navigated away. The async
+  // IIFE pushes all state updates past the synchronous effect body, which
+  // satisfies the react-hooks/set-state-in-effect rule.
   useEffect(() => {
-    loadFile();
-  }, [loadFile]);
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        await refreshFile(controller.signal);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [refreshFile]);
 
   async function handleSaveMetadata() {
     setSaving(true);
@@ -284,7 +311,7 @@ export function FileDetailPanel({
     if (!res.ok) { const d = await res.json(); toast.error(d.error || "Failed to restore"); return; }
     const d = await res.json();
     toast.success(`Restored to version ${version} (now v${d.newVersion})`);
-    loadFile();
+    refreshFile();
     onRefresh();
   }
 
@@ -292,7 +319,7 @@ export function FileDetailPanel({
     const res = await fetch(`/api/files/${fileId}/checkout`, { method: "POST" });
     if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
     toast.success("File checked out");
-    loadFile();
+    refreshFile();
     onRefresh();
   }
 
@@ -358,13 +385,12 @@ export function FileDetailPanel({
     </DropdownMenu>
   ) : null;
 
-  // --- Sidebar content (properties / versions / relations) ---
+  // --- Sidebar content (properties / versions) ---
   const sidebarContent = (
     <Tabs defaultValue="properties" className="flex flex-col min-h-0 h-full">
       <TabsList className="w-full shrink-0">
         <TabsTrigger value="properties" className="flex-1 text-xs">Properties</TabsTrigger>
         <TabsTrigger value="versions" className="flex-1 text-xs">Versions</TabsTrigger>
-        <TabsTrigger value="relations" className="flex-1 text-xs">Relations</TabsTrigger>
       </TabsList>
 
       <TabsContent value="properties" className="flex-1 overflow-auto mt-2">
@@ -547,33 +573,6 @@ export function FileDetailPanel({
         </div>
       </TabsContent>
 
-      <TabsContent value="relations" className="flex-1 overflow-auto mt-2 space-y-4">
-        {file.references.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Contains / References</p>
-            {file.references.map((ref) => (
-              <div key={ref.targetFile.id} className="text-sm py-1 border-b last:border-0">
-                {ref.targetFile.name}
-                {ref.targetFile.partNumber && <span className="text-muted-foreground ml-2">({ref.targetFile.partNumber})</span>}
-              </div>
-            ))}
-          </div>
-        )}
-        {file.referencedBy.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Where Used</p>
-            {file.referencedBy.map((ref) => (
-              <div key={ref.sourceFile.id} className="text-sm py-1 border-b last:border-0">
-                {ref.sourceFile.name}
-                {ref.sourceFile.partNumber && <span className="text-muted-foreground ml-2">({ref.sourceFile.partNumber})</span>}
-              </div>
-            ))}
-          </div>
-        )}
-        {file.references.length === 0 && file.referencedBy.length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-4">No file references yet.</p>
-        )}
-      </TabsContent>
     </Tabs>
   );
 

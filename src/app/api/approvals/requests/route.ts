@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { recallRequest, resubmitAfterRework, getRequestTimeline } from "@/lib/approval-engine";
+import { z, parseBody, nonEmptyString } from "@/lib/validation";
+
+const RequestActionSchema = z.object({
+  requestId: nonEmptyString,
+  action: z.enum(["recall", "resubmit"]),
+});
 
 // Get my approval requests (as requester) + timeline for a specific request
 export async function GET(request: NextRequest) {
@@ -48,8 +54,9 @@ export async function GET(request: NextRequest) {
       .limit(50);
 
     return NextResponse.json(myRequests || []);
-  } catch {
-    return NextResponse.json({ error: "Failed to fetch requests" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to fetch requests";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -58,7 +65,10 @@ export async function POST(request: NextRequest) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { requestId, action } = await request.json();
+
+    const parsed = await parseBody(request, RequestActionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { requestId, action } = parsed.data;
 
     if (action === "recall") {
       const result = await recallRequest({
@@ -71,19 +81,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result);
     }
 
-    if (action === "resubmit") {
-      const result = await resubmitAfterRework({
-        requestId,
-        tenantId: tenantUser.tenantId,
-        userId: tenantUser.id,
-        userFullName: tenantUser.fullName,
-      });
-      if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 });
-      return NextResponse.json(result);
-    }
-
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-  } catch {
-    return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
+    // resubmit (the only other allowed value via the enum)
+    const result = await resubmitAfterRework({
+      requestId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      userFullName: tenantUser.fullName,
+    });
+    if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to process request";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

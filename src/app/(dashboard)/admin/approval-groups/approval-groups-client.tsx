@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -82,7 +81,9 @@ export function ApprovalGroupsClient({
   }, []);
 
   useEffect(() => {
-    loadGroups();
+    // Async IIFE keeps the effect body free of synchronous setState calls
+    // (the callback transitively updates state). See src/lib/README.md.
+    void (async () => { await loadGroups(); })();
   }, [loadGroups]);
 
   async function handleCreate(e: React.FormEvent) {
