@@ -33,7 +33,9 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Redirect unauthenticated users to login (except for auth pages)
+  // Redirect unauthenticated users to login (except for auth pages and API
+  // routes — API routes handle their own auth and a redirect would turn a
+  // POST into a 405 on /login).
   if (
     !user &&
     !request.nextUrl.pathname.startsWith("/login") &&
@@ -41,7 +43,8 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/forgot-password") &&
     !request.nextUrl.pathname.startsWith("/reset-password") &&
     !request.nextUrl.pathname.startsWith("/accept-invite") &&
-    !request.nextUrl.pathname.startsWith("/auth")
+    !request.nextUrl.pathname.startsWith("/auth") &&
+    !request.nextUrl.pathname.startsWith("/api")
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
