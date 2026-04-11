@@ -89,7 +89,14 @@ export function VaultDialogs({ vault }: VaultDialogsProps) {
           <div className="py-4">
             <Label>Destination folder</Label>
             <Select value={vault.moveDestination} onValueChange={(v) => vault.setMoveDestination(v ?? "")}>
-              <SelectTrigger className="mt-2"><SelectValue placeholder="Select folder..." /></SelectTrigger>
+              <SelectTrigger className="mt-2">
+                <SelectValue placeholder="Select folder...">
+                  {(v) => {
+                    const f = vault.moveFolders.find((x) => x.id === v);
+                    return f ? (f.path || f.name) : "Select folder...";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 {vault.moveFolders.map((f) => (
                   <SelectItem key={f.id} value={f.id}>{f.path || f.name}</SelectItem>

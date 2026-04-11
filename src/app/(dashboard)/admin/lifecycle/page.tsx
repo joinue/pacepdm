@@ -666,7 +666,9 @@ export default function LifecyclePage() {
                   onValueChange={(v) => setTransFromStateId(v ?? "")}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select source state..." />
+                    <SelectValue placeholder="Select source state...">
+                      {(v) => (addTransitionTo && getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ?? "Select source state..."}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {addTransitionTo &&
@@ -685,7 +687,9 @@ export default function LifecyclePage() {
                   onValueChange={(v) => setTransToStateId(v ?? "")}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select target state..." />
+                    <SelectValue placeholder="Select target state...">
+                      {(v) => (addTransitionTo && getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ?? "Select target state..."}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {addTransitionTo &&

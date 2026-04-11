@@ -210,7 +210,11 @@ export function UploadFileDialog({
             <div className="space-y-2">
               <Label>Category</Label>
               <Select value={category} onValueChange={(v) => setCategory(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Auto-detect from extension" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Auto-detect from extension">
+                    {(v) => ({ PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing", DOCUMENT: "Document", OTHER: "Other" } as Record<string, string>)[v as string] ?? "Auto-detect from extension"}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="PART">Part</SelectItem>
                   <SelectItem value="ASSEMBLY">Assembly</SelectItem>
@@ -363,7 +367,9 @@ export function UploadFileDialog({
                   <div className="space-y-1">
                     <Label>File Role</Label>
                     <Select value={fileRole} onValueChange={(v) => setFileRole(v ?? "DRAWING")}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue>{(v) => ({ DRAWING: "Drawing", MODEL_3D: "3D Model", SPEC_SHEET: "Spec Sheet", DATASHEET: "Datasheet", OTHER: "Other" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                      </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="DRAWING">Drawing</SelectItem>
                         <SelectItem value="MODEL_3D">3D Model</SelectItem>

@@ -94,7 +94,11 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
             <div className="space-y-2">
               <Label>Reason for Change</Label>
               <Select value={form.reason} onValueChange={(v) => setField("reason", v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select reason..." /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reason...">
+                    {(v) => reasonLabels[v as keyof typeof reasonLabels] ?? "Select reason..."}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(reasonLabels).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
@@ -106,7 +110,11 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
               <div className="space-y-2">
                 <Label>Change Type</Label>
                 <Select value={form.changeType} onValueChange={(v) => setField("changeType", v ?? "")}>
-                  <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type...">
+                      {(v) => changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ?? "Select type..."}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {Object.entries(changeTypeLabelsEco).map(([k, v]) => (
                       <SelectItem key={k} value={k}>{v}</SelectItem>
@@ -117,7 +125,9 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
               <div className="space-y-2">
                 <Label>Priority</Label>
                 <Select value={form.priority} onValueChange={(v) => setField("priority", v ?? "MEDIUM")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue>{(v) => ({ LOW: "Low", MEDIUM: "Medium", HIGH: "High", CRITICAL: "Critical" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="LOW">Low</SelectItem>
                     <SelectItem value="MEDIUM">Medium</SelectItem>

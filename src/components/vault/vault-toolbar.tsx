@@ -132,7 +132,9 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
           {vault.lifecycleStates.length > 1 && (
             <Select value={vault.filterState} onValueChange={(v) => vault.setFilterState(v ?? "all")}>
               <SelectTrigger className="w-full sm:w-40 h-9">
-                <SelectValue placeholder="All states" />
+                <SelectValue placeholder="All states">
+                  {(v) => v === "all" ? "All states" : (v as string)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All states</SelectItem>

@@ -188,7 +188,9 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
                   <Label>Role</Label>
                   <Select value={roleId} onValueChange={(v) => setRoleId(v ?? "")}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select role..." />
+                      <SelectValue placeholder="Select role...">
+                        {(value) => roles.find((r) => r.id === value)?.name ?? "Select role..."}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {roles.map((role) => (

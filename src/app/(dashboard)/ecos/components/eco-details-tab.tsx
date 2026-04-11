@@ -105,7 +105,9 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <div className="space-y-2">
               <Label>Priority</Label>
               <Select value={priority} onValueChange={(v) => setPriority(v ?? priority)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{(v) => ({ LOW: "Low", MEDIUM: "Medium", HIGH: "High", CRITICAL: "Critical" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="LOW">Low</SelectItem>
                   <SelectItem value="MEDIUM">Medium</SelectItem>
@@ -117,7 +119,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <div className="space-y-2">
               <Label>Reason for Change</Label>
               <Select value={reason} onValueChange={(v) => setReason(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select reason..." /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select reason...">
+                    {(v) => reasonLabels[v as keyof typeof reasonLabels] ?? "Select reason..."}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(reasonLabels).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
@@ -130,7 +136,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <div className="space-y-2">
               <Label>Change Type</Label>
               <Select value={changeType} onValueChange={(v) => setChangeType(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type...">
+                    {(v) => changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ?? "Select type..."}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(changeTypeLabelsEco).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
@@ -141,7 +151,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <div className="space-y-2">
               <Label>Cost Impact</Label>
               <Select value={costImpact} onValueChange={(v) => setCostImpact(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select impact..." /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select impact...">
+                    {(v) => costImpactLabels[v as keyof typeof costImpactLabels] ?? "Select impact..."}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(costImpactLabels).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>
@@ -154,7 +168,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <div className="space-y-2">
               <Label>Disposition</Label>
               <Select value={disposition} onValueChange={(v) => setDisposition(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select disposition..." /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select disposition...">
+                    {(v) => dispositionLabels[v as keyof typeof dispositionLabels] ?? "Select disposition..."}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {Object.entries(dispositionLabels).map(([k, v]) => (
                     <SelectItem key={k} value={k}>{v}</SelectItem>

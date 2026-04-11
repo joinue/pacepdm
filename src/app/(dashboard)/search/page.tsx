@@ -433,7 +433,9 @@ export default function SearchPage() {
                 onValueChange={(v) => handleFilterChange(!v || v === "all" ? "" : v, stateFilter)}
               >
                 <SelectTrigger className="w-36 h-7 text-xs">
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder="Category">
+                    {(v) => v === "all" ? "All categories" : (categoryLabels[v as keyof typeof categoryLabels] ?? "Category")}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All categories</SelectItem>
@@ -450,7 +452,9 @@ export default function SearchPage() {
                 onValueChange={(v) => handleFilterChange(categoryFilter, !v || v === "all" ? "" : v)}
               >
                 <SelectTrigger className="w-36 h-7 text-xs">
-                  <SelectValue placeholder="State" />
+                  <SelectValue placeholder="State">
+                    {(v) => v === "all" ? "All states" : (v as string)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All states</SelectItem>
@@ -508,7 +512,7 @@ export default function SearchPage() {
           <Select value={sortBy} onValueChange={(v) => v && setSortBy(v as SortOption)}>
             <SelectTrigger className="w-36 h-7 text-xs gap-1.5">
               {(() => { const Icon = sortIcons[sortBy]; return <Icon className="w-3 h-3" />; })()}
-              <SelectValue />
+              <SelectValue>{(v) => sortLabels[v as keyof typeof sortLabels] ?? ""}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {Object.entries(sortLabels).map(([key, label]) => (

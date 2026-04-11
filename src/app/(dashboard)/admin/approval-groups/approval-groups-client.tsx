@@ -308,7 +308,14 @@ export function ApprovalGroupsClient({
           </DialogHeader>
           <div className="py-4">
             <Select value={selectedUser} onValueChange={(v) => setSelectedUser(v ?? "")}>
-              <SelectTrigger><SelectValue placeholder="Select user..." /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select user...">
+                  {(v) => {
+                    const u = users.find((x) => x.id === v);
+                    return u ? `${u.fullName} (${u.email})` : "Select user...";
+                  }}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 {users.map((u) => (
                   <SelectItem key={u.id} value={u.id}>{u.fullName} ({u.email})</SelectItem>

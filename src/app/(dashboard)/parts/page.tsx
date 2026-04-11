@@ -98,6 +98,14 @@ const CATEGORIES = [
   { value: "SUB_ASSEMBLY", label: "Sub-Assembly" },
 ];
 
+const FILE_ROLE_LABELS: Record<string, string> = {
+  DRAWING: "Drawing",
+  MODEL_3D: "3D Model",
+  SPEC_SHEET: "Spec Sheet",
+  DATASHEET: "Datasheet",
+  OTHER: "Other",
+};
+
 const categoryVariants: Record<string, "info" | "success" | "muted" | "warning" | "purple"> = {
   MANUFACTURED: "info",
   PURCHASED: "success",
@@ -617,7 +625,9 @@ export default function PartsPage() {
         </div>
         <Select value={categoryFilter} onValueChange={(v) => handleFilterChange(v ?? "all", stateFilter)}>
           <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="Category" />
+            <SelectValue placeholder="Category">
+              {(v) => v === "all" ? "All Categories" : (CATEGORIES.find((c) => c.value === v)?.label ?? "Category")}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
@@ -626,7 +636,9 @@ export default function PartsPage() {
         </Select>
         <Select value={stateFilter} onValueChange={(v) => handleFilterChange(categoryFilter, v ?? "all")}>
           <SelectTrigger className="w-full sm:w-36">
-            <SelectValue placeholder="State" />
+            <SelectValue placeholder="State">
+              {(v) => v === "all" ? "All States" : v}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All States</SelectItem>
@@ -1010,7 +1022,9 @@ export default function PartsPage() {
                 <div className="space-y-1">
                   <Label className="text-xs">Category</Label>
                   <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v ?? "MANUFACTURED" })}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue>{(v) => CATEGORIES.find((c) => c.value === v)?.label ?? ""}</SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                     </SelectContent>
@@ -1057,7 +1071,9 @@ export default function PartsPage() {
                           <p className="text-xs text-muted-foreground">{(attachFile.size / 1048576).toFixed(2)} MB</p>
                         </div>
                         <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
-                          <SelectTrigger className="h-7 text-xs w-28"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="h-7 text-xs w-28">
+                            <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                          </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="DRAWING">Drawing</SelectItem>
                             <SelectItem value="MODEL_3D">3D Model</SelectItem>
@@ -1211,7 +1227,9 @@ export default function PartsPage() {
             <div className="space-y-1">
               <Label className="text-xs">File Role</Label>
               <Select value={fileRole} onValueChange={(v) => setFileRole(v ?? "DRAWING")}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="DRAWING">Drawing</SelectItem>
                   <SelectItem value="MODEL_3D">3D Model</SelectItem>

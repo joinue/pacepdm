@@ -416,7 +416,11 @@ export default function WorkflowsPage() {
               <div className="space-y-2">
                 <Label>Approval Group</Label>
                 <Select value={stepGroupId} onValueChange={(v) => setStepGroupId(v ?? "")}>
-                  <SelectTrigger><SelectValue placeholder="Select group..." /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select group...">
+                      {(v) => groups.find((g) => g.id === v)?.name ?? "Select group..."}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {groups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
                   </SelectContent>
@@ -425,7 +429,9 @@ export default function WorkflowsPage() {
               <div className="space-y-2">
                 <Label>Approval Mode</Label>
                 <Select value={stepMode} onValueChange={(v) => setStepMode(v ?? "ANY")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue>{(v) => MODES.find((m) => m.value === v)?.label ?? ""}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {MODES.map((m) => (
                       <SelectItem key={m.value} value={m.value}>
@@ -497,7 +503,14 @@ export default function WorkflowsPage() {
                 <div className="space-y-2">
                   <Label>Lifecycle Transition</Label>
                   <Select value={assignTransitionId} onValueChange={(v) => setAssignTransitionId(v ?? "")}>
-                    <SelectTrigger><SelectValue placeholder="Select transition..." /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select transition...">
+                        {(v) => {
+                          const t = transitions.find((x) => x.id === v);
+                          return t ? `${t.fromState} → ${t.toState} (${t.lifecycleName})` : "Select transition...";
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       {transitions.map((t) => (
                         <SelectItem key={t.id} value={t.id}>
@@ -515,7 +528,11 @@ export default function WorkflowsPage() {
                 <div className="space-y-2">
                   <Label>ECO Trigger</Label>
                   <Select value={assignEcoTrigger} onValueChange={(v) => setAssignEcoTrigger(v ?? "")}>
-                    <SelectTrigger><SelectValue placeholder="Select trigger..." /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select trigger...">
+                        {(v) => ECO_TRIGGERS.find((t) => t.value === v)?.label ?? "Select trigger..."}
+                      </SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       {ECO_TRIGGERS.map((t) => (
                         <SelectItem key={t.value} value={t.value}>

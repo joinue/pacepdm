@@ -30,6 +30,14 @@ import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 
+const FILE_CATEGORY_LABELS: Record<string, string> = {
+  PART: "Part",
+  ASSEMBLY: "Assembly",
+  DRAWING: "Drawing",
+  DOCUMENT: "Document",
+  OTHER: "Other",
+};
+
 // --- Preview components ---
 
 function FilePreview({ fileId, className }: { fileId: string; className?: string }) {
@@ -585,7 +593,9 @@ export function FileDetailPanel({
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
               <Select value={category} onValueChange={(v) => setCategory(v ?? "")} disabled={file.isFrozen}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue>{(v) => FILE_CATEGORY_LABELS[v as string] ?? ""}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="PART">Part</SelectItem>
                   <SelectItem value="ASSEMBLY">Assembly</SelectItem>

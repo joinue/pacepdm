@@ -219,7 +219,9 @@ export function FolderAccessDialog({
                 value={principalType}
                 onValueChange={(v) => { setPrincipalType(v as "USER" | "ROLE"); setPrincipalId(""); }}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{(v) => v === "USER" ? "User" : "Role"}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ROLE">Role</SelectItem>
                   <SelectItem value="USER">User</SelectItem>
@@ -229,7 +231,11 @@ export function FolderAccessDialog({
             <div>
               <Label className="text-xs">{principalType === "USER" ? "User" : "Role"}</Label>
               <Select value={principalId} onValueChange={(v) => setPrincipalId(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select…">
+                    {(v) => principalOptions.find((o) => o.id === v)?.label ?? "Select…"}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {principalOptions.map((o) => (
                     <SelectItem key={o.id} value={o.id}>
@@ -243,7 +249,9 @@ export function FolderAccessDialog({
             <div>
               <Label className="text-xs">Level</Label>
               <Select value={level} onValueChange={(v) => setLevel(v as "VIEW" | "EDIT" | "ADMIN")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{(v) => ({ VIEW: "View", EDIT: "Edit", ADMIN: "Admin" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="VIEW">View</SelectItem>
                   <SelectItem value="EDIT">Edit</SelectItem>
@@ -254,7 +262,9 @@ export function FolderAccessDialog({
             <div>
               <Label className="text-xs">Effect</Label>
               <Select value={effect} onValueChange={(v) => setEffect(v as "ALLOW" | "DENY")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{(v) => v === "DENY" ? "Deny" : "Allow"}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALLOW">Allow</SelectItem>
                   <SelectItem value="DENY">Deny</SelectItem>
