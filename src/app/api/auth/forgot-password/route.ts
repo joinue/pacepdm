@@ -20,7 +20,10 @@ export async function POST(request: NextRequest) {
     { auth: { autoRefreshToken: false, persistSession: false, flowType: "implicit" } }
   );
 
-  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email);
+  const origin = new URL(request.url).origin;
+  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+    redirectTo: `${origin}/auth/confirm?next=/reset-password`,
+  });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
