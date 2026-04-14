@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, KeyRound } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -23,6 +24,37 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    // SSO probe: if the email domain is registered for SSO in this
+    // workspace, skip password auth and hand off to the IdP. Users who
+    // don't know their workspace has SSO still land in the right place.
+    try {
+      const probe = await fetch("/api/auth/sso/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (probe.ok) {
+        const data = (await probe.json()) as { useSso: boolean; domain?: string };
+        if (data.useSso && data.domain) {
+          const { data: sso, error: ssoErr } = await supabase.auth.signInWithSSO({
+            domain: data.domain,
+          });
+          if (ssoErr) {
+            setError(ssoErr.message);
+            setLoading(false);
+            return;
+          }
+          if (sso?.url) {
+            window.location.href = sso.url;
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[login] SSO probe failed", err);
+      // Fall through to password flow — SSO is best-effort, not a hard gate.
+    }
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -37,6 +69,43 @@ export default function LoginPage() {
 
     router.push("/");
     router.refresh();
+  }
+
+  async function handleSsoOnly() {
+    if (!email) {
+      setError("Enter your work email first");
+      return;
+    }
+    setSsoLoading(true);
+    setError("");
+    try {
+      const probe = await fetch("/api/auth/sso/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!probe.ok) throw new Error("Failed to check SSO for this email");
+      const data = (await probe.json()) as { useSso: boolean; domain?: string };
+      if (!data.useSso || !data.domain) {
+        setError("Single sign-on is not enabled for this domain");
+        setSsoLoading(false);
+        return;
+      }
+      const { data: sso, error: ssoErr } = await supabase.auth.signInWithSSO({
+        domain: data.domain,
+      });
+      if (ssoErr) {
+        setError(ssoErr.message);
+        setSsoLoading(false);
+        return;
+      }
+      if (sso?.url) {
+        window.location.href = sso.url;
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "SSO sign-in failed");
+      setSsoLoading(false);
+    }
   }
 
   return (
@@ -104,8 +173,25 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading || ssoLoading}>
               {loading ? "Signing in..." : "Sign In"}
+            </Button>
+
+            <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-muted-foreground/60">
+              <span className="flex-1 h-px bg-border" />
+              or
+              <span className="flex-1 h-px bg-border" />
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg"
+              onClick={handleSsoOnly}
+              disabled={loading || ssoLoading}
+            >
+              <KeyRound className="h-4 w-4 mr-2" />
+              {ssoLoading ? "Redirecting…" : "Sign in with SSO"}
             </Button>
           </div>
 

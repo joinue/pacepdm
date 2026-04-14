@@ -59,6 +59,13 @@ function ageLabel(days: number | null): string | null {
   return `${days} days`;
 }
 
+function oldestAgeSubtitle(days: number | null): string | null {
+  if (days === null) return null;
+  if (days === 0) return "Oldest: today";
+  if (days === 1) return "Oldest: 1 day ago";
+  return `Oldest: ${days} days ago`;
+}
+
 export default async function DashboardPage() {
   const tenantUser = await getCurrentTenantUser();
   const tenantId = tenantUser.tenantId;
@@ -158,8 +165,8 @@ export default async function DashboardPage() {
           count={pendingApprovalsCount}
           emptyLabel="All caught up"
           subtitle={
-            pendingApprovalsCount > 0 && oldestPendingApprovalAge !== null
-              ? `Oldest: ${ageLabel(oldestPendingApprovalAge)} ago`
+            pendingApprovalsCount > 0
+              ? oldestAgeSubtitle(oldestPendingApprovalAge)
               : null
           }
           highlight={pendingApprovalsCount > 0}

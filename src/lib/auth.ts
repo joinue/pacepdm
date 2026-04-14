@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getServiceClient } from "@/lib/db";
 import { redirect } from "next/navigation";
+import { jitProvisionSsoUser } from "@/lib/sso-jit";
 
 // Re-export shared constants so existing imports from "@/lib/auth" still work
 export { PERMISSIONS, hasPermission, DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/permissions";
@@ -20,8 +21,10 @@ export async function requireAuth() {
 }
 
 export async function getCurrentTenantUser() {
-  const user = await requireAuth();
-  const tenantUser = await findTenantUser(user.id);
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const tenantUser = await resolveTenantUser(user.id, user.email || null, user.user_metadata);
   if (!tenantUser) redirect("/onboarding");
   return tenantUser;
 }
@@ -34,7 +37,34 @@ export async function getApiTenantUser() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  return findTenantUser(user.id);
+  return resolveTenantUser(user.id, user.email || null, user.user_metadata);
+}
+
+/**
+ * Find the tenant_users row for the currently authenticated Supabase user.
+ * If none exists and the user's email domain matches a tenant_sso_domains
+ * entry, JIT-provision a row in that tenant. An existing row always wins
+ * (block semantics: we do not migrate users across tenants).
+ */
+async function resolveTenantUser(
+  authUserId: string,
+  email: string | null,
+  metadata: Record<string, unknown> | undefined
+) {
+  const existing = await findTenantUser(authUserId);
+  if (existing) return existing;
+
+  if (!email) return null;
+
+  // No row yet — try JIT provisioning via SSO domain mapping.
+  const provisioned = await jitProvisionSsoUser({
+    authUserId,
+    email,
+    metadata,
+  });
+  if (!provisioned) return null;
+
+  return findTenantUser(authUserId);
 }
 
 async function findTenantUser(authUserId: string) {

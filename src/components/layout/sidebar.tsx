@@ -61,6 +61,7 @@ const navGroups: NavGroup[] = [
       { name: "Roles", href: "/admin/roles", icon: KeyRound },
       { name: "Workflows", href: "/admin/workflows", icon: Workflow },
       { name: "Approval Groups", href: "/admin/approval-groups", icon: ShieldCheck },
+      { name: "SSO", href: "/admin/sso", icon: KeyRound },
       { name: "Lifecycle", href: "/admin/lifecycle", icon: Tag },
       { name: "Metadata", href: "/admin/metadata", icon: FileText },
       { name: "Audit Log", href: "/audit-log", icon: History, permission: PERMISSIONS.AUDIT_VIEW },
