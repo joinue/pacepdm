@@ -228,15 +228,15 @@ export function AddItemDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-xl flex flex-col max-h-[85vh] h-155">
         <DialogHeader>
           <DialogTitle>Add Item</DialogTitle>
           <DialogDescription>
             Add from your parts library, enter a new part manually, or link a sub-assembly BOM.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          <div className="space-y-4 py-4 flex-1 overflow-y-auto pr-1">
             {/* Type selector */}
             <div className="flex gap-1 p-1 bg-muted/50 rounded-lg">
               {([

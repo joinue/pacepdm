@@ -14,11 +14,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+type BadgeKind = "approvals" | "vault" | "boms" | "ecos";
+
 type NavItem = {
   name: string;
   href: string;
   icon: LucideIcon;
-  badge?: "approvals";
+  badge?: BadgeKind;
   /** If set, item is only shown when user has this permission. */
   permission?: string;
 };
@@ -38,16 +40,16 @@ const navGroups: NavGroup[] = [
   {
     label: "Library",
     items: [
-      { name: "Vault", href: "/vault", icon: FolderOpen },
+      { name: "Vault", href: "/vault", icon: FolderOpen, badge: "vault" },
       { name: "Parts", href: "/parts", icon: Cpu },
       { name: "Vendors", href: "/vendors", icon: Building2 },
-      { name: "BOMs", href: "/boms", icon: Package },
+      { name: "BOMs", href: "/boms", icon: Package, badge: "boms" },
     ],
   },
   {
     label: "Change",
     items: [
-      { name: "ECOs", href: "/ecos", icon: ClipboardList },
+      { name: "ECOs", href: "/ecos", icon: ClipboardList, badge: "ecos" },
       { name: "Approvals", href: "/approvals", icon: CheckCircle, badge: "approvals" },
     ],
   },
@@ -81,7 +83,20 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const user = useTenantUser();
-  const { pendingApprovalCount } = useNotifications();
+  const { pendingApprovalCount, counts } = useNotifications();
+
+  // Map a nav item's badge kind to its live count. Approvals is a
+  // task count (pending approval_decisions assigned to me), everything
+  // else is an unread-notification count scoped by link prefix.
+  function badgeCountFor(kind: BadgeKind | undefined): number {
+    if (!kind) return 0;
+    if (kind === "approvals") return pendingApprovalCount;
+    return counts.byCategory[kind] ?? 0;
+  }
+  function badgeLabelFor(kind: BadgeKind, n: number): string {
+    if (kind === "approvals") return `${n} pending approval${n === 1 ? "" : "s"}`;
+    return `${n} unread notification${n === 1 ? "" : "s"}`;
+  }
   const isAdmin =
     user.permissions.includes("*") ||
     user.permissions.some((p) => p.startsWith("admin."));
@@ -149,7 +164,9 @@ export function Sidebar({
                 )}
                 {group.items.map((item) => {
                   const active = isItemActive(pathname, item.href);
-                  const showBadge = item.badge === "approvals" && pendingApprovalCount > 0;
+                  const badgeCount = badgeCountFor(item.badge);
+                  const showBadge = !!item.badge && badgeCount > 0;
+                  const badgeLabel = item.badge ? badgeLabelFor(item.badge, badgeCount) : "";
 
                   const link = (
                     <Link
@@ -171,15 +188,15 @@ export function Sidebar({
                       {!collapsed && <span className="truncate">{item.name}</span>}
                       {showBadge && !collapsed && (
                         <span
-                          aria-label={`${pendingApprovalCount} pending approvals`}
+                          aria-label={badgeLabel}
                           className="ml-auto bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-4.5 h-4.5 flex items-center justify-center px-1"
                         >
-                          {pendingApprovalCount > 9 ? "9+" : pendingApprovalCount}
+                          {badgeCount > 9 ? "9+" : badgeCount}
                         </span>
                       )}
                       {showBadge && collapsed && (
                         <span
-                          aria-label={`${pendingApprovalCount} pending approvals`}
+                          aria-label={badgeLabel}
                           className="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary ring-2 ring-background"
                         />
                       )}
@@ -191,7 +208,7 @@ export function Sidebar({
                       <TooltipTrigger render={link} />
                       <TooltipContent side="right" sideOffset={8}>
                         {item.name}
-                        {showBadge ? ` (${pendingApprovalCount})` : ""}
+                        {showBadge ? ` (${badgeCount})` : ""}
                       </TooltipContent>
                     </Tooltip>
                   ) : (

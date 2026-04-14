@@ -236,18 +236,38 @@ export function Header({
               <Button
                 variant="ghost"
                 size="sm"
+                aria-label={
+                  unreadCount > 0
+                    ? `Notifications, ${unreadCount} unread`
+                    : "Notifications"
+                }
+                aria-haspopup="dialog"
+                aria-expanded={notifOpen}
                 className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground relative"
               >
-                <Bell className="w-3.5 h-3.5" />
+                <Bell className="w-3.5 h-3.5" aria-hidden="true" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary text-primary-foreground text-[9px] font-bold rounded-full flex items-center justify-center">
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary text-primary-foreground text-[9px] font-bold rounded-full flex items-center justify-center"
+                  >
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
+                {/* Screen-reader live region so assistive tech hears the
+                    count change without having to re-enter the button. */}
+                <span className="sr-only" aria-live="polite">
+                  {unreadCount > 0 ? `${unreadCount} unread notifications` : "No unread notifications"}
+                </span>
               </Button>
             }
           />
-          <PopoverContent align="end" sideOffset={8} className="w-95 p-0 gap-0">
+          <PopoverContent
+            align="end"
+            sideOffset={8}
+            aria-label="Notifications"
+            className="w-[min(22rem,calc(100vw-1.5rem))] p-0 gap-0"
+          >
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2.5">
               <span className="text-sm font-semibold">Notifications</span>
@@ -275,7 +295,7 @@ export function Header({
                   No notifications
                 </div>
               ) : (
-                <div className="flex flex-col">
+                <div className="flex flex-col" role="list">
                   {notifications.map((notif) => {
                     const actorInitials = notif.actor?.fullName
                       ? notif.actor.fullName
@@ -288,11 +308,13 @@ export function Header({
                     return (
                       <button
                         key={notif.id}
-                        className="flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors w-full border-b border-border/50 last:border-b-0"
+                        role="listitem"
+                        aria-label={`${notif.isRead ? "" : "Unread: "}${notif.title}. ${notif.message}`}
+                        className="flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none transition-colors w-full border-b border-border/50 last:border-b-0"
                         onClick={() => handleClickNotification(notif)}
                       >
-                        {/* Unread dot */}
-                        <div className="mt-1.5 shrink-0">
+                        {/* Unread dot (hidden from AT — state is in the aria-label) */}
+                        <div className="mt-1.5 shrink-0" aria-hidden="true">
                           {!notif.isRead ? (
                             <span className="block w-2 h-2 rounded-full bg-primary" />
                           ) : (
