@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW } from "@/lib/status-flows";
+import { captureBomSnapshot } from "@/lib/bom-snapshot";
 import { z, parseBody } from "@/lib/validation";
 
 // Partial-update shape: any of name/status/revision can be supplied. The
@@ -115,6 +116,31 @@ export async function PUT(
       .single();
 
     if (error) throw error;
+
+    // Auto-capture a baseline when the BOM transitions to RELEASED.
+    // This is the "immutable record of what we shipped" that the ECO
+    // trail deliberately doesn't carry — ECOs track files, not BOMs, so
+    // without this snapshot a later revision of the BOM would silently
+    // overwrite the picture. Failures are logged but non-fatal: a missed
+    // baseline is a documentation gap, not a correctness problem, and
+    // we don't want to block the release on it.
+    if (updates.status === "RELEASED") {
+      try {
+        const result = await captureBomSnapshot({
+          db,
+          tenantId: tenantUser.tenantId,
+          bomId,
+          userId: tenantUser.id,
+          trigger: "RELEASE",
+        });
+        console.info(
+          `[boms/${bomId}] auto-baseline captured ${result.snapshotId} ` +
+            `(${result.itemCount} items, $${result.flatTotalCost.toFixed(2)})`
+        );
+      } catch (err) {
+        console.error(`[boms/${bomId}] baseline capture failed:`, err);
+      }
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

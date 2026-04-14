@@ -26,6 +26,7 @@ import { CompareBomDialog } from "./components/compare-bom-dialog";
 import { AddItemDialog } from "./components/add-item-dialog";
 import { BomItemsTable } from "./components/bom-items-table";
 import { BomRollupPanel } from "./components/bom-rollup-panel";
+import { BomBaselinesPanel } from "./components/bom-baselines-panel";
 
 /**
  * BOMs view — list + optional detail. The currently-selected BOM lives in
@@ -474,6 +475,12 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
               {items.length > 0 && (
                 <BomRollupPanel bomId={selectedBomId} refreshKey={items.length} />
               )}
+
+              {/* Baselines panel — immutable snapshots captured on release
+                  or manually. Rendered for every BOM (even empty ones) so
+                  the user can see the "no baselines yet" hint and trigger
+                  a manual snapshot before the first release. */}
+              <BomBaselinesPanel bomId={selectedBomId} canCapture={canEdit} />
             </div>
           )}
         </div>

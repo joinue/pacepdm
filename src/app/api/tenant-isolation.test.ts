@@ -51,6 +51,10 @@ const { mockTenantUser, supabaseResponses, mockSupabaseFrom } = vi.hoisted(() =>
     }
 
     chain.single = () => Promise.resolve(resolveFor(table, filters));
+    // Supabase's maybeSingle() is equivalent to single() for our mock —
+    // both call sites in the tests register a single row or a null, so
+    // the only difference (error-vs-null on zero rows) doesn't matter.
+    chain.maybeSingle = () => Promise.resolve(resolveFor(table, filters));
 
     // For chains awaited directly (no .single()), default to an empty list
     // unless the test registered a list-shaped response.
