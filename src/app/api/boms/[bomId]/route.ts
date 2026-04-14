@@ -3,7 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
-import { BOM_STATUS_FLOW } from "@/lib/status-flows";
+import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
 import { captureBomSnapshot } from "@/lib/bom-snapshot";
 import { z, parseBody } from "@/lib/validation";
 
@@ -155,12 +155,13 @@ export async function PUT(
     // status actually changed (not on bare name/revision edits) — those
     // are noisy and the audit log already covers them.
     if (updates.status && existing.createdById) {
+      const friendlyStatus = BOM_STATUS_LABELS[body.status!] || body.status!;
       await sideEffect(
         notify({
           tenantId: tenantUser.tenantId,
           userIds: [existing.createdById],
-          title: `BOM ${body.status!.toLowerCase()}`,
-          message: `${tenantUser.fullName} moved "${existing.name}" to ${body.status}`,
+          title: `BOM moved to ${friendlyStatus}`,
+          message: `${tenantUser.fullName} moved "${existing.name}" to ${friendlyStatus}`,
           type: "transition",
           link: `/boms/${bomId}`,
           refId: bomId,

@@ -14,7 +14,8 @@ export function createMockQueryBuilder(overrides?: {
   const builder: Record<string, unknown> = {};
   const chainMethods = [
     "from", "select", "insert", "update", "delete",
-    "eq", "in", "neq", "is", "order", "limit", "single",
+    "eq", "in", "neq", "is", "not", "lt", "gt", "gte", "lte", "like", "ilike",
+    "order", "limit", "single", "maybeSingle",
     "upsert", "match",
   ];
 
@@ -24,6 +25,7 @@ export function createMockQueryBuilder(overrides?: {
 
   // Terminal methods that resolve the query
   builder.single = vi.fn().mockResolvedValue(result);
+  builder.maybeSingle = vi.fn().mockResolvedValue(result);
   // Make the builder itself thenable so `await db.from(...).select(...).eq(...)` works
   builder.then = (resolve: (v: unknown) => void) => resolve(result);
 

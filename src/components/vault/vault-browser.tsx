@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { useNotifications } from "@/components/providers/notification-provider";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -28,6 +30,13 @@ export function VaultBrowser({
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const vault = useVaultBrowser({ rootFolderId, userId: user.id });
   const { can } = usePermissions();
+  const { clearRef } = useNotifications();
+
+  // When a file is opened in the detail panel, auto-clear its unread
+  // notifications — consistent with BOM and ECO detail views.
+  useEffect(() => {
+    if (vault.selectedFile) void clearRef(vault.selectedFile);
+  }, [vault.selectedFile, clearRef]);
 
   // Live updates: whenever any file or folder in this tenant is touched
   // — uploaded, renamed, checked out, transitioned, deleted — refresh

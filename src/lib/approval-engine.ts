@@ -67,6 +67,33 @@ export async function startWorkflow(params: StartWorkflowParams) {
     }
   }
 
+  // Entity-level guard: a given (entity, transition) can only have one
+  // PENDING request at a time. Without this, a user who double-clicks
+  // the Transition button creates two approval_requests and the group
+  // gets "Approval Required" twice. The clientRequestKey guard above
+  // only kicks in when the client sends a key — not all callers do.
+  {
+    let q = db
+      .from("approval_requests")
+      .select("id")
+      .eq("tenantId", params.tenantId)
+      .eq("entityType", params.entityType)
+      .eq("entityId", params.entityId)
+      .eq("status", "PENDING");
+    q = params.transitionId
+      ? q.eq("transitionId", params.transitionId)
+      : q.is("transitionId", null);
+    const { data: existing } = await q.maybeSingle();
+    if (existing) {
+      return {
+        success: true,
+        requestId: existing.id,
+        pendingApproval: true,
+        message: "Approval workflow already started",
+      };
+    }
+  }
+
   // Get workflow steps
   const { data: steps } = await db
     .from("approval_workflow_steps")

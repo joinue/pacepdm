@@ -18,6 +18,7 @@ import { fetchJson, errorMessage } from "@/lib/api-client";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { useNotifications } from "@/components/providers/notification-provider";
 import { PERMISSIONS } from "@/lib/permissions";
 
 import type { ECO, ECOItem, ApprovalData } from "./types";
@@ -50,6 +51,11 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   const { can } = usePermissions();
   const canCreate = can(PERMISSIONS.ECO_CREATE);
   const user = useTenantUser();
+  const { clearRef } = useNotifications();
+
+  useEffect(() => {
+    if (selectedEcoId) void clearRef(selectedEcoId);
+  }, [selectedEcoId, clearRef]);
 
   const [ecos, setEcos] = useState<ECO[]>([]);
   const [loading, setLoading] = useState(true);

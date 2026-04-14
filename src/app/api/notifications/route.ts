@@ -6,9 +6,11 @@ import { z, parseBody } from "@/lib/validation";
 const UpdateNotificationSchema = z.object({
   notificationId: z.string().optional(),
   markAllRead: z.boolean().optional(),
+  /** Mark every unread notification referencing this entity id as read. */
+  clearRef: z.string().optional(),
 }).refine(
-  (v) => v.notificationId || v.markAllRead,
-  { message: "Must specify notificationId or markAllRead" }
+  (v) => v.notificationId || v.markAllRead || v.clearRef,
+  { message: "Must specify notificationId, markAllRead, or clearRef" }
 );
 
 const DEFAULT_LIMIT = 50;
@@ -64,7 +66,7 @@ export async function PUT(request: NextRequest) {
 
     const parsed = await parseBody(request, UpdateNotificationSchema);
     if (!parsed.ok) return parsed.response;
-    const { notificationId, markAllRead } = parsed.data;
+    const { notificationId, markAllRead, clearRef } = parsed.data;
 
     const db = getServiceClient();
 
@@ -73,6 +75,16 @@ export async function PUT(request: NextRequest) {
         .update({ isRead: true })
         .eq("tenantId", tenantUser.tenantId)
         .eq("userId", tenantUser.id)
+        .eq("isRead", false);
+      if (error) throw error;
+    } else if (clearRef) {
+      // Auto-clear on entity navigation: when a user opens a BOM/ECO/file,
+      // any unread notifications that reference it should stop nagging.
+      const { error } = await db.from("notifications")
+        .update({ isRead: true })
+        .eq("tenantId", tenantUser.tenantId)
+        .eq("userId", tenantUser.id)
+        .eq("refId", clearRef)
         .eq("isRead", false);
       if (error) throw error;
     } else if (notificationId) {

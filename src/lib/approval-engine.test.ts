@@ -23,6 +23,7 @@ const { tableResults, insertCalls, updateCalls, mockFrom } = vi.hoisted(() => {
     }
 
     chain.single = () => resolvable();
+    chain.maybeSingle = () => resolvable();
 
     chain.insert = (data: unknown) => {
       insertCalls.push({ table, data });

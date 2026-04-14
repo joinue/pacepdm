@@ -49,6 +49,8 @@ interface NotificationContextValue {
   refresh: () => void;
   markRead: (notificationId: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  /** Mark every unread notification referencing the given entity id as read. */
+  clearRef: (refId: string) => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -250,6 +252,24 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, [notifications]);
 
+  const clearRef = useCallback(async (refId: string) => {
+    try {
+      const r = await fetch("/api/notifications", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clearRef: refId }),
+      });
+      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+      // Refetch counts + list rather than trying to patch optimistically —
+      // we don't know how many rows the server updated, and getting the
+      // per-category bucket math wrong would leave a stale badge.
+      fetchCounts();
+      fetchNotifications();
+    } catch (err) {
+      console.error("[notifications] clearRef failed", err);
+    }
+  }, [fetchCounts, fetchNotifications]);
+
   const markAllRead = useCallback(async () => {
     try {
       const r = await fetch("/api/notifications", {
@@ -278,6 +298,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         refresh,
         markRead,
         markAllRead,
+        clearRef,
       }}
     >
       {children}

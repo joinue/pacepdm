@@ -18,6 +18,7 @@ import { BOM_STATUS_FLOW } from "@/lib/status-flows";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { usePermissions } from "@/hooks/use-permissions";
 import { PERMISSIONS } from "@/lib/permissions";
+import { useNotifications } from "@/components/providers/notification-provider";
 
 import type { BOM, BOMItem } from "./types";
 import { statusVariants, statusLabels } from "./constants";
@@ -45,6 +46,35 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   const router = useRouter();
   const { can } = usePermissions();
   const canEdit = can(PERMISSIONS.FILE_EDIT);
+  const { clearRef, counts: notificationCounts } = useNotifications();
+
+  // When the user opens a specific BOM, auto-clear any unread notifications
+  // that referenced it. Keeps the sidebar badge honest: navigating *into*
+  // the entity is just as valid a "I saw it" signal as clicking the bell.
+  useEffect(() => {
+    if (selectedBomId) void clearRef(selectedBomId);
+  }, [selectedBomId, clearRef]);
+
+  // Per-BOM unread counts so each list row can show its own badge. Refetched
+  // whenever the top-level counts change (sidebar badge delta is our signal
+  // that *something* in /boms became or stopped being unread).
+  const [bomUnread, setBomUnread] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/notifications/counts-by-ref?prefix=/boms/");
+        if (!r.ok) return;
+        const data = (await r.json()) as { counts: Record<string, number> };
+        if (!cancelled) setBomUnread(data.counts || {});
+      } catch (err) {
+        console.error("[boms] per-bom notif counts failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [notificationCounts.byCategory.boms]);
 
   const [boms, setBoms] = useState<BOM[]>([]);
   const [items, setItems] = useState<BOMItem[]>([]);
@@ -292,25 +322,38 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         <div className="flex gap-4 flex-col lg:flex-row">
           {/* BOM list sidebar */}
           <div className="lg:w-56 shrink-0 space-y-1">
-            {boms.map((bom) => (
-              <button
-                key={bom.id}
-                className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-150 ${
-                  selectedBomId === bom.id
-                    ? "bg-foreground/12 text-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground hover:bg-foreground/6"
-                }`}
-                onClick={() => selectBom(bom.id)}
-              >
-                <p className="text-sm truncate">{bom.name}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <Badge variant={statusVariants[bom.status] || "secondary"} className="text-[9px] px-1.5 py-0">
-                    {statusLabels[bom.status] || bom.status}
-                  </Badge>
-                  <span className="text-[10px] text-muted-foreground">Rev {bom.revision}</span>
-                </div>
-              </button>
-            ))}
+            {boms.map((bom) => {
+              const unread = bomUnread[bom.id] || 0;
+              return (
+                <button
+                  key={bom.id}
+                  className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-150 ${
+                    selectedBomId === bom.id
+                      ? "bg-foreground/12 text-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/6"
+                  }`}
+                  onClick={() => selectBom(bom.id)}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="text-sm truncate flex-1">{bom.name}</p>
+                    {unread > 0 && (
+                      <span
+                        aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
+                        className="bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
+                      >
+                        {unread > 9 ? "9+" : unread}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <Badge variant={statusVariants[bom.status] || "secondary"} className="text-[9px] px-1.5 py-0">
+                      {statusLabels[bom.status] || bom.status}
+                    </Badge>
+                    <span className="text-[10px] text-muted-foreground">Rev {bom.revision}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           {/* Selection points at a BOM that no longer exists */}

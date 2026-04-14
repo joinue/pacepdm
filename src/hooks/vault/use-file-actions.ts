@@ -104,11 +104,24 @@ export function useFileActions({
   const handleTransition = useCallback(async (transitionId: string) => {
     if (!transitionTarget) return;
     try {
-      const d = await fetchJson<{ newState: string }>(
+      // Two possible response shapes: an immediate state change
+      // ({ newState }) or a gated approval request ({ pendingApproval }).
+      // Pick the toast accordingly so we never render "undefined".
+      const d = await fetchJson<{
+        newState?: string;
+        pendingApproval?: boolean;
+        message?: string;
+      }>(
         `/api/files/${transitionTarget.fileId}/transition`,
         { method: "POST", body: { transitionId } }
       );
-      toast.success(`State changed to ${d.newState}`);
+      if (d.pendingApproval) {
+        toast.success(d.message || "Approval requested — waiting for reviewers");
+      } else if (d.newState) {
+        toast.success(`State changed to ${d.newState}`);
+      } else {
+        toast.success("Transition submitted");
+      }
       setTransitionTarget(null);
       refresh();
     } catch (err) {
