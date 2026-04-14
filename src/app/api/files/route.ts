@@ -13,9 +13,21 @@ import { getFolderAccessScope, canViewFolder, canEditFolder } from "@/lib/folder
 const BACKFILLABLE_EXTS = new Set(["pdf", "png", "jpg", "jpeg", "webp", "gif", "bmp", "sldprt", "sldasm", "slddrw"]);
 
 const CATEGORY_MAP: Record<string, string> = {
+  // SolidWorks native
   sldprt: "PART",
   sldasm: "ASSEMBLY",
-  slddrw: "DRAWING",
+  slddrw: "DRAWING_2D",
+  // 2D drawings
+  dxf: "DRAWING_2D",
+  dwg: "DRAWING_2D",
+  // 3D models / neutral exchange formats
+  step: "MODEL_3D",
+  stp: "MODEL_3D",
+  iges: "MODEL_3D",
+  igs: "MODEL_3D",
+  stl: "MODEL_3D",
+  obj: "MODEL_3D",
+  // Documents
   pdf: "DOCUMENT",
   doc: "DOCUMENT",
   docx: "DOCUMENT",

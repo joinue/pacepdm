@@ -156,6 +156,13 @@ export default function PartsPage() {
   const [attachFile, setAttachFile] = useState<File | null>(null);
   const [attachFileRole, setAttachFileRole] = useState("DRAWING");
   const attachFileRef = useRef<HTMLInputElement>(null);
+  // "link" mode: pick an already-uploaded vault file instead of uploading
+  const [attachMode, setAttachMode] = useState<"upload" | "link">("upload");
+  const [attachLinkFileId, setAttachLinkFileId] = useState<string | null>(null);
+  const [attachLinkFileName, setAttachLinkFileName] = useState<string>("");
+  const [attachLinkSearch, setAttachLinkSearch] = useState("");
+  const [attachLinkResults, setAttachLinkResults] = useState<{ id: string; name: string; partNumber: string | null }[]>([]);
+  const [attachLinkSearching, setAttachLinkSearching] = useState(false);
   const [formData, setFormData] = useState({
     partNumber: "", name: "", description: "", category: "MANUFACTURED",
     material: "", unitCost: "", unit: "EA", notes: "",
@@ -310,6 +317,20 @@ export default function PartsPage() {
 
   const debouncedFileSearch = useDebounce(doFileSearch, 300);
 
+  const doAttachLinkSearch = useCallback(async (q: string) => {
+    if (q.length < 2) { setAttachLinkResults([]); setAttachLinkSearching(false); return; }
+    setAttachLinkSearching(true);
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const files = Array.isArray(data) ? data : (data.files ?? []);
+      setAttachLinkResults(files.slice(0, 8));
+    } catch { setAttachLinkResults([]); }
+    setAttachLinkSearching(false);
+  }, []);
+
+  const debouncedAttachLinkSearch = useDebounce(doAttachLinkSearch, 300);
+
   // --- Part CRUD ---
 
   function openCreateDialog() {
@@ -317,6 +338,11 @@ export default function PartsPage() {
     setFormData({ partNumber: "", name: "", description: "", category: "MANUFACTURED", material: "", unitCost: "", unit: "EA", notes: "" });
     setAttachFile(null);
     setAttachFileRole("DRAWING");
+    setAttachMode("upload");
+    setAttachLinkFileId(null);
+    setAttachLinkFileName("");
+    setAttachLinkSearch("");
+    setAttachLinkResults([]);
     resetDialogThumbnail();
     setShowCreate(true);
   }
@@ -421,6 +447,17 @@ export default function PartsPage() {
       } catch {
         toast.success("Part created, but file attachment failed");
       }
+    } else if (!editingPart && attachLinkFileId) {
+      try {
+        const res = await fetch(`/api/parts/${partData.id}/files`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: attachLinkFileId, role: attachFileRole, isPrimary: true }),
+        });
+        toast.success(res.ok ? "Part created with file linked" : "Part created, but file linking failed");
+      } catch {
+        toast.success("Part created, but file linking failed");
+      }
     } else {
       toast.success(editingPart ? "Part updated" : "Part created");
     }
@@ -428,6 +465,11 @@ export default function PartsPage() {
     setShowCreate(false);
     setAttachFile(null);
     setAttachFileRole("DRAWING");
+    setAttachMode("upload");
+    setAttachLinkFileId(null);
+    setAttachLinkFileName("");
+    setAttachLinkSearch("");
+    setAttachLinkResults([]);
     resetDialogThumbnail();
     setSaving(false);
     loadParts(searchQuery, categoryFilter, stateFilter);
@@ -1062,41 +1104,122 @@ export default function PartsPage() {
                 <>
                   <Separator />
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase">Attach File (optional)</Label>
-                    {attachFile ? (
-                      <div className="flex items-center gap-2 border rounded-lg p-2.5">
-                        <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium truncate">{attachFile.name}</p>
-                          <p className="text-xs text-muted-foreground">{(attachFile.size / 1048576).toFixed(2)} MB</p>
-                        </div>
-                        <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
-                          <SelectTrigger className="h-7 text-xs w-28">
-                            <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="DRAWING">Drawing</SelectItem>
-                            <SelectItem value="MODEL_3D">3D Model</SelectItem>
-                            <SelectItem value="SPEC_SHEET">Spec Sheet</SelectItem>
-                            <SelectItem value="DATASHEET">Datasheet</SelectItem>
-                            <SelectItem value="OTHER">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setAttachFile(null)}>
-                          <X className="w-3.5 h-3.5" />
-                        </Button>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-muted-foreground uppercase">Attach File (optional)</Label>
+                      <div className="flex rounded-md border overflow-hidden text-xs">
+                        <button
+                          type="button"
+                          onClick={() => { setAttachMode("upload"); setAttachLinkFileId(null); setAttachLinkFileName(""); setAttachLinkSearch(""); setAttachLinkResults([]); }}
+                          className={`px-2 py-1 transition-colors ${attachMode === "upload" ? "bg-primary text-primary-foreground" : "hover:bg-muted/50"}`}
+                        >
+                          Upload
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setAttachMode("link"); setAttachFile(null); }}
+                          className={`px-2 py-1 transition-colors ${attachMode === "link" ? "bg-primary text-primary-foreground" : "hover:bg-muted/50"}`}
+                        >
+                          Link from Vault
+                        </button>
                       </div>
+                    </div>
+
+                    {attachMode === "upload" ? (
+                      <>
+                        {attachFile ? (
+                          <div className="flex items-center gap-2 border rounded-lg p-2.5">
+                            <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{attachFile.name}</p>
+                              <p className="text-xs text-muted-foreground">{(attachFile.size / 1048576).toFixed(2)} MB</p>
+                            </div>
+                            <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
+                              <SelectTrigger className="h-7 text-xs w-28">
+                                <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="DRAWING">Drawing</SelectItem>
+                                <SelectItem value="MODEL_3D">3D Model</SelectItem>
+                                <SelectItem value="SPEC_SHEET">Spec Sheet</SelectItem>
+                                <SelectItem value="DATASHEET">Datasheet</SelectItem>
+                                <SelectItem value="OTHER">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setAttachFile(null)}>
+                              <X className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div
+                            className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                            onClick={() => attachFileRef.current?.click()}
+                          >
+                            <Upload className="w-5 h-5 mx-auto text-muted-foreground mb-1" />
+                            <p className="text-xs text-muted-foreground">Click to attach a file from your computer</p>
+                            <p className="text-[10px] text-muted-foreground/60 mt-0.5">Uploads to vault root and links to this part</p>
+                          </div>
+                        )}
+                        <input ref={attachFileRef} type="file" className="hidden" onChange={(e) => setAttachFile(e.target.files?.[0] || null)} />
+                      </>
                     ) : (
-                      <div
-                        className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
-                        onClick={() => attachFileRef.current?.click()}
-                      >
-                        <Upload className="w-5 h-5 mx-auto text-muted-foreground mb-1" />
-                        <p className="text-xs text-muted-foreground">Click to attach a file from your computer</p>
-                        <p className="text-[10px] text-muted-foreground/60 mt-0.5">Uploads to vault root and links to this part</p>
+                      <div>
+                        {attachLinkFileId ? (
+                          <div className="flex items-center gap-2 border rounded-lg p-2.5">
+                            <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                            <p className="text-sm font-medium truncate flex-1">{attachLinkFileName}</p>
+                            <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
+                              <SelectTrigger className="h-7 text-xs w-28">
+                                <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="DRAWING">Drawing</SelectItem>
+                                <SelectItem value="MODEL_3D">3D Model</SelectItem>
+                                <SelectItem value="SPEC_SHEET">Spec Sheet</SelectItem>
+                                <SelectItem value="DATASHEET">Datasheet</SelectItem>
+                                <SelectItem value="OTHER">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => { setAttachLinkFileId(null); setAttachLinkFileName(""); }}>
+                              <X className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                            <Input
+                              value={attachLinkSearch}
+                              onChange={(e) => { setAttachLinkSearch(e.target.value); debouncedAttachLinkSearch(e.target.value); }}
+                              placeholder="Search vault files..."
+                              className="pl-8 h-8 text-sm"
+                            />
+                            {attachLinkSearching && (
+                              <div className="absolute top-full left-0 right-0 mt-1 flex items-center justify-center py-3 border rounded-lg bg-popover shadow-md z-10">
+                                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                              </div>
+                            )}
+                            {!attachLinkFileId && attachLinkResults.length > 0 && (
+                              <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg max-h-36 overflow-y-auto bg-popover shadow-md z-10">
+                                {attachLinkResults.map((f) => (
+                                  <button
+                                    key={f.id}
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors flex items-center gap-2"
+                                    onClick={() => { setAttachLinkFileId(f.id); setAttachLinkFileName(f.name); setAttachLinkSearch(""); setAttachLinkResults([]); }}
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                    <span className="truncate">{f.name}</span>
+                                    {f.partNumber && <span className="text-xs text-muted-foreground shrink-0">{f.partNumber}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            {attachLinkSearch.length >= 2 && !attachLinkSearching && attachLinkResults.length === 0 && (
+                              <p className="absolute top-full left-0 right-0 mt-1 text-xs text-muted-foreground text-center py-2">No files found</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
-                    <input ref={attachFileRef} type="file" className="hidden" onChange={(e) => setAttachFile(e.target.files?.[0] || null)} />
                   </div>
                 </>
               )}

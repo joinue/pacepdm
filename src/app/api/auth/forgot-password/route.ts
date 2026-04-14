@@ -26,7 +26,10 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    const message = /rate.limit|too.many/i.test(error.message)
+      ? "Too many reset requests. Please wait a few minutes or check your inbox for an existing reset link."
+      : error.message;
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 
   return NextResponse.json({ ok: true });

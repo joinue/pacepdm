@@ -212,14 +212,20 @@ export function UploadFileDialog({
               <Select value={category} onValueChange={(v) => setCategory(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Auto-detect from extension">
-                    {(v) => ({ PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing", DOCUMENT: "Document", OTHER: "Other" } as Record<string, string>)[v as string] ?? "Auto-detect from extension"}
+                    {(v) => ({ PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing PDF", DRAWING_2D: "2D Drawing", MODEL_3D: "3D Model", DOCUMENT: "Document", SIMULATION: "Simulation", FIRMWARE: "Firmware", SOFTWARE: "Software", PURCHASED: "Purchased Part", OTHER: "Other" } as Record<string, string>)[v as string] ?? "Auto-detect from extension"}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="PART">Part</SelectItem>
                   <SelectItem value="ASSEMBLY">Assembly</SelectItem>
-                  <SelectItem value="DRAWING">Drawing</SelectItem>
+                  <SelectItem value="DRAWING">Drawing PDF</SelectItem>
+                  <SelectItem value="DRAWING_2D">2D Drawing</SelectItem>
+                  <SelectItem value="MODEL_3D">3D Model</SelectItem>
                   <SelectItem value="DOCUMENT">Document</SelectItem>
+                  <SelectItem value="SIMULATION">Simulation</SelectItem>
+                  <SelectItem value="FIRMWARE">Firmware</SelectItem>
+                  <SelectItem value="SOFTWARE">Software</SelectItem>
+                  <SelectItem value="PURCHASED">Purchased Part</SelectItem>
                   <SelectItem value="OTHER">Other</SelectItem>
                 </SelectContent>
               </Select>

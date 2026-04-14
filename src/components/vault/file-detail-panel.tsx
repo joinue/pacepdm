@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus } from "lucide-react";
+import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus, Plus, Search } from "lucide-react";
 import { useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -33,8 +33,14 @@ import { useRealtimeTable } from "@/hooks/use-realtime-table";
 const FILE_CATEGORY_LABELS: Record<string, string> = {
   PART: "Part",
   ASSEMBLY: "Assembly",
-  DRAWING: "Drawing",
+  DRAWING: "Drawing PDF",
+  DRAWING_2D: "2D Drawing",
+  MODEL_3D: "3D Model",
   DOCUMENT: "Document",
+  SIMULATION: "Simulation",
+  FIRMWARE: "Firmware",
+  SOFTWARE: "Software",
+  PURCHASED: "Purchased Part",
   OTHER: "Other",
 };
 
@@ -343,6 +349,13 @@ export function FileDetailPanel({
     itemNumber: string; itemName: string; quantity: number; unit: string;
   }[]>([]);
   const [linkedEcos, setLinkedEcos] = useState<{id: string; changeType: string; reason: string | null; eco: { id: string; ecoNumber: string; title: string; status: string; priority: string }}[]>([]);
+  const [linkedParts, setLinkedParts] = useState<{ id: string; role: string; isPrimary: boolean; part: { id: string; partNumber: string; name: string; lifecycleState: string; category: string } }[]>([]);
+  // Inline "link to part" state inside the panel
+  const [showLinkPart, setShowLinkPart] = useState(false);
+  const [linkPartSearch, setLinkPartSearch] = useState("");
+  const [linkPartResults, setLinkPartResults] = useState<{ id: string; partNumber: string; name: string }[]>([]);
+  const [linkPartSearching, setLinkPartSearching] = useState(false);
+  const [linkPartRole, setLinkPartRole] = useState("DRAWING");
   // Per-version revision history with linked ECO. Lives alongside `file.versions`
   // (which is the lightweight summary embedded in the file fetch) — this one
   // is the richer view rendered in the Versions tab so engineers can see
@@ -364,11 +377,12 @@ export function FileDetailPanel({
   const refreshFile = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const [data, wu, ecos, revs] = await Promise.all([
+        const [data, wu, ecos, revs, parts] = await Promise.all([
           fetchJson<FileDetail>(`/api/files/${fileId}`, { signal }),
           fetchJson<typeof whereUsed>(`/api/files/${fileId}/where-used`, { signal }),
           fetchJson<typeof linkedEcos>(`/api/files/${fileId}/ecos`, { signal }),
           fetchJson<typeof revisions>(`/api/files/${fileId}/revisions`, { signal }),
+          fetchJson<typeof linkedParts>(`/api/files/${fileId}/parts`, { signal }),
         ]);
         if (signal?.aborted) return;
         setFile(data);
@@ -384,6 +398,7 @@ export function FileDetailPanel({
         setWhereUsed(Array.isArray(wu) ? wu : []);
         setLinkedEcos(Array.isArray(ecos) ? ecos : []);
         setRevisions(Array.isArray(revs) ? revs : []);
+        setLinkedParts(Array.isArray(parts) ? parts : []);
       } catch (err) {
         if (isAbortError(err)) return;
         toast.error(errorMessage(err) || "Failed to load file details");
@@ -488,6 +503,42 @@ export function FileDetailPanel({
     toast.success("File checked out");
     refreshFile();
     onRefresh();
+  }
+
+  async function doLinkPartSearch(q: string) {
+    if (q.length < 2) { setLinkPartResults([]); setLinkPartSearching(false); return; }
+    setLinkPartSearching(true);
+    try {
+      const res = await fetch(`/api/parts?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setLinkPartResults((Array.isArray(data) ? data : []).slice(0, 8));
+    } catch { setLinkPartResults([]); }
+    setLinkPartSearching(false);
+  }
+
+  async function handleLinkPart(partId: string) {
+    const res = await fetch(`/api/files/${fileId}/parts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partId, role: linkPartRole }),
+    });
+    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    toast.success("Part linked");
+    setShowLinkPart(false);
+    setLinkPartSearch("");
+    setLinkPartResults([]);
+    void refreshFile();
+  }
+
+  async function handleUnlinkPart(partId: string) {
+    const res = await fetch(`/api/files/${fileId}/parts`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partId }),
+    });
+    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    toast.success("Part unlinked");
+    void refreshFile();
   }
 
   if (loading || !file) {
@@ -599,12 +650,99 @@ export function FileDetailPanel({
                 <SelectContent>
                   <SelectItem value="PART">Part</SelectItem>
                   <SelectItem value="ASSEMBLY">Assembly</SelectItem>
-                  <SelectItem value="DRAWING">Drawing</SelectItem>
+                  <SelectItem value="DRAWING">Drawing PDF</SelectItem>
+                  <SelectItem value="DRAWING_2D">2D Drawing</SelectItem>
+                  <SelectItem value="MODEL_3D">3D Model</SelectItem>
                   <SelectItem value="DOCUMENT">Document</SelectItem>
+                  <SelectItem value="SIMULATION">Simulation</SelectItem>
+                  <SelectItem value="FIRMWARE">Firmware</SelectItem>
+                  <SelectItem value="SOFTWARE">Software</SelectItem>
+                  <SelectItem value="PURCHASED">Purchased Part</SelectItem>
                   <SelectItem value="OTHER">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Linked Parts */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <Label className="text-xs">Linked Parts</Label>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => { setShowLinkPart((v) => !v); setLinkPartSearch(""); setLinkPartResults([]); setLinkPartRole("DRAWING"); }}
+                >
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </div>
+
+              {showLinkPart && (
+                <div className="space-y-1.5 mb-2">
+                  <Select value={linkPartRole} onValueChange={(v) => setLinkPartRole(v ?? "DRAWING")}>
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue>{(v: string) => ({ DRAWING: "Drawing", MODEL_3D: "3D Model", SPEC_SHEET: "Spec Sheet", DATASHEET: "Datasheet", OTHER: "Other" })[v] ?? v}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="DRAWING">Drawing</SelectItem>
+                      <SelectItem value="MODEL_3D">3D Model</SelectItem>
+                      <SelectItem value="SPEC_SHEET">Spec Sheet</SelectItem>
+                      <SelectItem value="DATASHEET">Datasheet</SelectItem>
+                      <SelectItem value="OTHER">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                    <Input
+                      value={linkPartSearch}
+                      onChange={(e) => { setLinkPartSearch(e.target.value); void doLinkPartSearch(e.target.value); }}
+                      placeholder="Search parts..."
+                      className="pl-7 h-7 text-xs"
+                    />
+                  </div>
+                  {linkPartSearching && <div className="flex justify-center py-1"><Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" /></div>}
+                  {linkPartResults.length > 0 && (
+                    <div className="border rounded-lg max-h-36 overflow-y-auto">
+                      {linkPartResults.map((p) => (
+                        <button
+                          key={p.id}
+                          className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-muted/50 transition-colors flex items-center gap-2"
+                          onClick={() => handleLinkPart(p.id)}
+                        >
+                          <Package className="w-3 h-3 text-muted-foreground shrink-0" />
+                          <span className="font-mono shrink-0">{p.partNumber}</span>
+                          <span className="truncate text-muted-foreground">{p.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {linkPartSearch.length >= 2 && !linkPartSearching && linkPartResults.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-1">No parts found</p>
+                  )}
+                </div>
+              )}
+
+              {linkedParts.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No parts linked.</p>
+              ) : (
+                <div className="space-y-1">
+                  {linkedParts.map((lp) => (
+                    <div key={lp.id} className="flex items-center gap-2 text-xs group">
+                      <Package className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <Link href="/parts" className="font-mono hover:underline shrink-0">{lp.part.partNumber}</Link>
+                      <span className="truncate text-muted-foreground flex-1">{lp.part.name}</span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{lp.role}</span>
+                      <button
+                        onClick={() => handleUnlinkPart(lp.part.id)}
+                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1">
               <Label htmlFor="pn" className="text-xs">Part Number</Label>
               <Input id="pn" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} className="h-8 text-sm" disabled={file.isFrozen} />
@@ -704,6 +842,7 @@ export function FileDetailPanel({
               </div>
             </>
           )}
+
         </div>
       </TabsContent>
 

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   FolderOpen, MoreHorizontal, Download, LogIn, LogOut, Eye,
   File as FileIcon, FileText, Pencil, Trash2, FolderInput,
-  ArrowRightLeft, Lock, Clock, XCircle, Shield, ImagePlus, Loader2,
+  ArrowRightLeft, Lock, Clock, XCircle, Shield, ImagePlus, Loader2, ArrowUp,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -87,7 +87,7 @@ function FileThumb({ file, onRefresh }: { file: FileItem; onRefresh: () => void 
   const canUpload = !file.isFrozen;
   return (
     <div className="group relative shrink-0 w-12 h-12 flex items-center justify-center">
-      {file.category === "PART" || file.category === "ASSEMBLY" ? <FileIcon className="w-7 h-7 text-orange-500" /> : file.category === "DRAWING" ? <FileText className="w-7 h-7 text-green-600" /> : <FileText className="w-7 h-7 text-muted-foreground" />}
+      {file.category === "PART" || file.category === "ASSEMBLY" || file.category === "MODEL_3D" ? <FileIcon className="w-7 h-7 text-orange-500" /> : file.category === "DRAWING" || file.category === "DRAWING_2D" ? <FileText className="w-7 h-7 text-green-600" /> : <FileText className="w-7 h-7 text-muted-foreground" />}
       {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500 absolute top-0 right-0" />}
       {canUpload && (
         <>
@@ -193,6 +193,12 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
   const [accessFolder, setAccessFolder] = useState<{ id: string; name: string } | null>(null);
 
   const isFlat = vault.viewMode !== "folder";
+  // When inside a subfolder, expose the parent as a ".." row so users can
+  // navigate up and drag files out by dropping onto it.
+  const parentFolder =
+    !isFlat && vault.breadcrumbs.length > 1
+      ? vault.breadcrumbs[vault.breadcrumbs.length - 2]
+      : null;
   const filtered = vault.searchQuery || vault.filterState !== "all";
   // Empty-state copy varies by context: a flat view with no rows means
   // "you have nothing in this category", which is different from "this
@@ -224,10 +230,31 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
         <div className="md:hidden space-y-1">
           {isInitialLoad ? (
             <p className="text-center py-8 text-muted-foreground text-sm">Loading...</p>
-          ) : folders.length === 0 && filteredFiles.length === 0 ? (
+          ) : !parentFolder && folders.length === 0 && filteredFiles.length === 0 ? (
             <p className="text-center py-8 text-muted-foreground text-sm">{emptyMessage}</p>
           ) : (
             <>
+              {parentFolder && (
+                <div
+                  className={`flex items-center p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-blue-50 dark:hover:bg-blue-950/20 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
+                  onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
+                  onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
+                  onDragLeave={vault.handleDragLeave}
+                  onDrop={(e) => vault.handleDrop(e, parentFolder.id)}
+                >
+                  <div className="relative shrink-0 w-12 h-12 flex items-center justify-center">
+                    <FolderOpen className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-blue-500"}`} />
+                    <ArrowUp className="w-3 h-3 absolute bottom-1 right-1 text-muted-foreground" />
+                  </div>
+                  <div className="ml-3 min-w-0">
+                    <p className="text-sm font-medium text-muted-foreground">..</p>
+                    <p className="text-xs text-muted-foreground truncate">{parentFolder.name}</p>
+                  </div>
+                </div>
+              )}
+              {parentFolder && folders.length === 0 && filteredFiles.length === 0 && (
+                <p className="text-center py-6 text-muted-foreground text-sm">{emptyMessage}</p>
+              )}
               {folders.map((folder) => (
                 <div
                   key={folder.id}
@@ -326,7 +353,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading...</TableCell>
                 </TableRow>
-              ) : folders.length === 0 && filteredFiles.length === 0 ? (
+              ) : folders.length === 0 && filteredFiles.length === 0 && !parentFolder ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                     {emptyMessageDesktop}
@@ -334,6 +361,37 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 </TableRow>
               ) : (
                 <>
+                  {parentFolder && (
+                    <TableRow
+                      className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/20 bg-muted/30 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
+                      onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
+                      onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
+                      onDragLeave={vault.handleDragLeave}
+                      onDrop={(e) => vault.handleDrop(e, parentFolder.id)}
+                    >
+                      <TableCell />
+                      <TableCell>
+                        <div className="relative w-12 h-12 flex items-center justify-center">
+                          <FolderOpen className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-blue-500"}`} />
+                          <ArrowUp className="w-3 h-3 absolute bottom-1 right-1 text-muted-foreground" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          ..
+                          <span className="text-xs font-normal">{parentFolder.name}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell colSpan={6} />
+                    </TableRow>
+                  )}
+                  {parentFolder && folders.length === 0 && filteredFiles.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center py-6 text-muted-foreground">
+                        {emptyMessageDesktop}
+                      </TableCell>
+                    </TableRow>
+                  )}
                   {folders.map((folder) => (
                     <TableRow
                       key={folder.id}
