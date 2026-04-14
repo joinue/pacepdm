@@ -1,4 +1,5 @@
 import { getServiceClient } from "@/lib/db";
+import { sendNotificationEmail } from "@/lib/email/send";
 
 /**
  * Wrap a promise that represents a non-critical side effect
@@ -69,6 +70,24 @@ export async function notify({
 
   if (notifications.length > 0) {
     await db.from("notifications").insert(notifications);
+
+    // Fire-and-forget per-recipient email. sendNotificationEmail enforces
+    // user/tenant opt-out and writes emailSentAt/emailError back to the
+    // notifications row. Failures never block the in-app write.
+    for (const n of notifications) {
+      sideEffect(
+        sendNotificationEmail({
+          notificationId: n.id,
+          tenantId: n.tenantId,
+          userId: n.userId,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          link: n.link,
+        }),
+        `email notification ${n.id}`
+      );
+    }
   }
 }
 
