@@ -21,8 +21,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { statusVariants as ecoStatusVariants } from "../ecos/constants";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { WhereUsedSection } from "@/components/where-used-section";
+import type { PartWhereUsed } from "@/lib/where-used";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import {
   Plus, Search, Loader2, Package, MoreHorizontal, Pencil,
@@ -146,6 +147,7 @@ export default function PartsPage() {
   // Detail panel
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PartDetail | null>(null);
+  const [partWhereUsed, setPartWhereUsed] = useState<PartWhereUsed | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Create/edit part
@@ -221,9 +223,19 @@ export default function PartsPage() {
   const loadPartDetail = useCallback(async (partId: string) => {
     setSelectedPartId(partId);
     setLoadingDetail(true);
-    const res = await fetch(`/api/parts/${partId}`);
-    const data = await res.json();
-    setDetail(data);
+    // Fetch the detail (for files/vendors management UI) and the unified
+    // where-used payload (for the impact section) in parallel — both feed
+    // different parts of the panel and neither blocks the other.
+    const [detailRes, whereUsedRes] = await Promise.all([
+      fetch(`/api/parts/${partId}`),
+      fetch(`/api/parts/${partId}/where-used`),
+    ]);
+    const [detailData, whereUsedData] = await Promise.all([
+      detailRes.json(),
+      whereUsedRes.json(),
+    ]);
+    setDetail(detailData);
+    setPartWhereUsed(whereUsedRes.ok ? whereUsedData : null);
     setLoadingDetail(false);
   }, []);
 
@@ -480,7 +492,7 @@ export default function PartsPage() {
     const res = await fetch(`/api/parts/${partId}`, { method: "DELETE" });
     if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
     toast.success("Part deleted");
-    if (selectedPartId === partId) { setSelectedPartId(null); setDetail(null); }
+    if (selectedPartId === partId) { setSelectedPartId(null); setDetail(null); setPartWhereUsed(null); }
     loadParts(searchQuery, categoryFilter, stateFilter);
   }
 
@@ -818,7 +830,7 @@ export default function PartsPage() {
                         </Badge>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon-xs" onClick={() => { setSelectedPartId(null); setDetail(null); }}>
+                    <Button variant="ghost" size="icon-xs" onClick={() => { setSelectedPartId(null); setDetail(null); setPartWhereUsed(null); }}>
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
@@ -920,61 +932,27 @@ export default function PartsPage() {
 
                   <Separator />
 
-                  {/* Where Used */}
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Used in BOMs</p>
-                    {detail.whereUsed.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Not used in any BOMs.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {detail.whereUsed.map((wu) => (
-                          <button
-                            key={wu.bomId}
-                            className="w-full text-left text-sm p-1.5 rounded hover:bg-muted/50 transition-colors"
-                            onClick={() => router.push("/boms")}
-                          >
-                            <span className="font-medium">{wu.bomName}</span>
-                            <span className="text-xs text-muted-foreground ml-2">
-                              &times;{wu.quantity} {wu.unit} &middot; Rev {wu.bomRevision}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <Separator />
-
-                  {/* ECO History */}
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">ECO History</p>
-                    {detail.ecoHistory.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No ECOs have touched this part yet.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {detail.ecoHistory.map((eh) => (
-                          <button
-                            key={eh.ecoId}
-                            className="w-full text-left text-sm p-1.5 rounded hover:bg-muted/50 transition-colors"
-                            onClick={() => router.push(`/ecos?ecoId=${eh.ecoId}`)}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs">{eh.ecoNumber}</span>
-                              <Badge variant={ecoStatusVariants[eh.status] || "muted"} className="text-[9px] px-1 py-0">
-                                {eh.status}
-                              </Badge>
-                              {eh.fromRevision && eh.toRevision && (
-                                <span className="text-xs font-mono text-muted-foreground">
-                                  {eh.fromRevision} → {eh.toRevision}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">{eh.title}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {/* Unified where-used / impact section. Covers BOMs that
+                      line-item this part, transitive parent assemblies (via
+                      bom→file→part_files walk), and every ECO that has
+                      touched this part. Empty state is the section-level
+                      fallback when there are no references in any category. */}
+                  {partWhereUsed &&
+                  partWhereUsed.boms.length +
+                    partWhereUsed.parentParts.length +
+                    partWhereUsed.ecos.length >
+                    0 ? (
+                    <WhereUsedSection
+                      boms={partWhereUsed.boms}
+                      parentParts={partWhereUsed.parentParts}
+                      ecos={partWhereUsed.ecos}
+                      onNavigateBom={() => router.push("/boms")}
+                      onNavigatePart={(partId) => loadPartDetail(partId)}
+                      onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Not used anywhere yet.</p>
+                  )}
 
                   {detail.notes && (
                     <>

@@ -26,9 +26,12 @@ import {
 import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus, Plus, Search } from "lucide-react";
 import { useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { WhereUsedSection } from "@/components/where-used-section";
+import type { FileWhereUsed } from "@/lib/where-used";
 
 const FILE_CATEGORY_LABELS: Record<string, string> = {
   PART: "Part",
@@ -344,12 +347,9 @@ export function FileDetailPanel({
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [metadataValues, setMetadataValues] = useState<Record<string, string>>({});
-  const [whereUsed, setWhereUsed] = useState<{
-    bomId: string; bomName: string; bomRevision: string; bomStatus: string;
-    itemNumber: string; itemName: string; quantity: number; unit: string;
-  }[]>([]);
-  const [linkedEcos, setLinkedEcos] = useState<{id: string; changeType: string; reason: string | null; eco: { id: string; ecoNumber: string; title: string; status: string; priority: string }}[]>([]);
+  const [whereUsedData, setWhereUsedData] = useState<FileWhereUsed | null>(null);
   const [linkedParts, setLinkedParts] = useState<{ id: string; role: string; isPrimary: boolean; part: { id: string; partNumber: string; name: string; lifecycleState: string; category: string } }[]>([]);
+  const router = useRouter();
   // Inline "link to part" state inside the panel
   const [showLinkPart, setShowLinkPart] = useState(false);
   const [linkPartSearch, setLinkPartSearch] = useState("");
@@ -377,10 +377,9 @@ export function FileDetailPanel({
   const refreshFile = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const [data, wu, ecos, revs, parts] = await Promise.all([
+        const [data, wu, revs, parts] = await Promise.all([
           fetchJson<FileDetail>(`/api/files/${fileId}`, { signal }),
-          fetchJson<typeof whereUsed>(`/api/files/${fileId}/where-used`, { signal }),
-          fetchJson<typeof linkedEcos>(`/api/files/${fileId}/ecos`, { signal }),
+          fetchJson<FileWhereUsed>(`/api/files/${fileId}/where-used`, { signal }),
           fetchJson<typeof revisions>(`/api/files/${fileId}/revisions`, { signal }),
           fetchJson<typeof linkedParts>(`/api/files/${fileId}/parts`, { signal }),
         ]);
@@ -395,8 +394,7 @@ export function FileDetailPanel({
           values[mv.fieldId] = mv.value;
         }
         setMetadataValues(values);
-        setWhereUsed(Array.isArray(wu) ? wu : []);
-        setLinkedEcos(Array.isArray(ecos) ? ecos : []);
+        setWhereUsedData(wu ?? null);
         setRevisions(Array.isArray(revs) ? revs : []);
         setLinkedParts(Array.isArray(parts) ? parts : []);
       } catch (err) {
@@ -548,16 +546,6 @@ export function FileDetailPanel({
       </div>
     );
   }
-
-  const ecoStatusVariants: Record<string, string> = {
-    DRAFT: "muted", SUBMITTED: "info", IN_REVIEW: "warning",
-    APPROVED: "success", REJECTED: "error", IMPLEMENTED: "purple", CLOSED: "muted",
-  };
-  const changeTypeVariants: Record<string, { label: string; variant: string }> = {
-    ADD: { label: "Add", variant: "info" },
-    MODIFY: { label: "Modify", variant: "warning" },
-    REMOVE: { label: "Remove", variant: "error" },
-  };
 
   const showCheckOut = !file.isCheckedOut;
   const showCheckIn = file.isCheckedOut && file.checkedOutById === userId && !!onCheckIn;
@@ -789,59 +777,22 @@ export function FileDetailPanel({
             {saving ? "Saving..." : "Save Properties"}
           </Button>
 
-          {whereUsed.length > 0 && (
+          {whereUsedData && (whereUsedData.boms.length + whereUsedData.representsBoms.length + whereUsedData.ecos.length > 0) && (
             <>
               <Separator />
-              <p className="text-xs font-semibold text-muted-foreground uppercase">Used in BOMs</p>
-              <div className="space-y-1.5">
-                {whereUsed.map((wu) => (
-                  <Link key={wu.bomId} href="/boms" className="flex items-center justify-between text-sm p-2 rounded-md hover:bg-muted/50 transition-colors">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <Package className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                        <span className="font-medium truncate">{wu.bomName}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground ml-5">
-                        Item {wu.itemNumber}: {wu.itemName} &times; {wu.quantity} {wu.unit}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground shrink-0">Rev {wu.bomRevision}</span>
-                  </Link>
-                ))}
-              </div>
+              <WhereUsedSection
+                boms={whereUsedData.boms}
+                representsBoms={whereUsedData.representsBoms}
+                ecos={whereUsedData.ecos}
+                onNavigateBom={() => router.push("/boms")}
+                onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
+              />
             </>
           )}
-
-          {linkedEcos.length > 0 && (
-            <>
-              <Separator />
-              <p className="text-xs font-semibold text-muted-foreground uppercase">Referenced in ECOs</p>
-              <div className="space-y-1.5">
-                {linkedEcos.map((item) => {
-                  const eco = item.eco;
-                  const ct = changeTypeVariants[item.changeType] || { label: item.changeType, variant: "muted" };
-                  return (
-                    <Link key={item.id} href="/ecos" className="flex items-center justify-between text-sm p-2 rounded-md hover:bg-muted/50 transition-colors">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <ClipboardList className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                          <span className="font-medium truncate">{eco.ecoNumber} &mdash; {eco.title}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 ml-5 mt-0.5">
-                          <Badge variant={(ecoStatusVariants[eco.status] || "muted") as "muted" | "info" | "warning" | "success" | "error" | "purple"} className="text-[10px] px-1.5 py-0">
-                            {eco.status}
-                          </Badge>
-                          <Badge variant={ct.variant as "muted" | "info" | "warning" | "error"} className="text-[10px] px-1.5 py-0">
-                            {ct.label}
-                          </Badge>
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          {/* The old scattered "Used in BOMs" and "Referenced in ECOs" blocks
+              were merged into the WhereUsedSection above. The linkedParts
+              section stays separate (higher up in this tab) because it has
+              inline add/unlink management controls, not just display. */}
 
         </div>
       </TabsContent>
