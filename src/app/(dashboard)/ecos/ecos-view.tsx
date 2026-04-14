@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,12 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ECO | null>(null);
+  // Remembers an ECO that was just created so the selection-change effect
+  // below can land on the Affected Items tab (instead of Details) and
+  // immediately pop the add-item dialog. Using a ref so setting it doesn't
+  // trigger its own render — the effect that consumes it is already firing
+  // on the selectedEcoId change that this navigation causes.
+  const justCreatedRef = useRef<string | null>(null);
   // Soft-warning gate: when the user requests a "world-changing" transition
   // (submit, implement) on an ECO that has zero affected items, we hold the
   // intended next status here and prompt "really?" before calling the API.
@@ -116,14 +122,23 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
 
   // Whenever the URL-selected ECO changes, reload its items + approval.
   // Reset the detail tab so we always land on "details" when navigating
-  // between ECOs — feels less jarring than landing mid-tab.
+  // between ECOs — feels less jarring than landing mid-tab. Exception:
+  // when the user just created this ECO we land on "Affected Items" and
+  // auto-open the add-item dialog so there's a direct path from "create"
+  // to "attach a part" without hunting for the right tab.
   useEffect(() => {
     if (!selectedEcoId) {
       setItems([]);
       setApproval(null);
       return;
     }
-    setDetailTab("details");
+    if (justCreatedRef.current === selectedEcoId) {
+      justCreatedRef.current = null;
+      setDetailTab("items");
+      setShowAddItem(true);
+    } else {
+      setDetailTab("details");
+    }
     void loadItems(selectedEcoId);
     void loadApproval(selectedEcoId);
   }, [selectedEcoId, loadItems, loadApproval]);
@@ -184,8 +199,15 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   const canDelete = selectedEco && DELETABLE_STATUSES.includes(selectedEco.status);
 
   // ─── ECO-level mutations ─────────────────────────────────────────────
-  function handleEcoCreated(created: ECO) {
-    loadEcos();
+  // Awaiting loadEcos before navigating is load-bearing. The detail panel
+  // below derives `selectedEco` from the list, so if we route to the new
+  // id before the list has the row, `selectionMissing` flips true for a
+  // frame and the user sees a spurious "this ECO no longer exists". Also
+  // stashes the new id in justCreatedRef so the selection effect lands on
+  // the Affected Items tab and opens the add-item dialog.
+  async function handleEcoCreated(created: ECO) {
+    justCreatedRef.current = created.id;
+    await loadEcos();
     router.push(`/ecos/${created.id}`);
   }
 

@@ -35,13 +35,24 @@ export async function GET(
     const { ecoId } = await params;
     const db = getServiceClient();
 
-    const { data: eco } = await db
+    // maybeSingle returns (data: null, error: null) cleanly when the row
+    // doesn't exist, instead of wrapping "0 rows" in an error object. That
+    // lets us tell an empty result apart from an actual query failure
+    // (broken join, connection drop, etc.) without parsing error codes.
+    const { data: eco, error } = await db
       .from("ecos")
       .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
       .eq("id", ecoId)
       .eq("tenantId", tenantUser.tenantId)
-      .single();
+      .maybeSingle();
 
+    if (error) {
+      console.error(`[ecos/${ecoId}] GET failed:`, error);
+      return NextResponse.json(
+        { error: `Query failed: ${error.message}` },
+        { status: 500 }
+      );
+    }
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
 
     return NextResponse.json(eco);

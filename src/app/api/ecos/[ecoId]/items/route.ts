@@ -31,10 +31,77 @@ const RemoveEcoItemSchema = z.object({
   itemId: nonEmptyString,
 });
 
-const ITEM_SELECT =
-  "*, " +
-  "file:files!eco_items_fileId_fkey(id, name, partNumber, lifecycleState, currentVersion), " +
-  "part:parts!eco_items_partId_fkey(id, partNumber, name, revision, lifecycleState, category)";
+// We deliberately do NOT use PostgREST embed hints like
+// `part:parts!eco_items_partId_fkey(...)` here. Those were silently
+// coming back null — the joined rows never materialized — which
+// manifested as "Affected Items is empty even though eco_items has
+// rows in the DB". Rather than chase the schema-cache / constraint
+// name the resolver was unhappy about, just fetch the raw item rows
+// and hydrate the part/file sides with two cheap batched selects.
+//
+// Note: `eco_items` has no `createdAt` column (see migration-001 /
+// migration-017 — the schema was never backfilled with one). Ordering
+// by `id` is good enough for a stable, deterministic display order;
+// the previous `.order("createdAt")` was silently erroring and is what
+// actually caused the empty-list bug.
+
+type RawItem = {
+  id: string;
+  ecoId: string;
+  partId: string | null;
+  fileId: string | null;
+  changeType: string;
+  reason: string | null;
+  fromRevision: string | null;
+  toRevision: string | null;
+};
+
+type HydratedItem = RawItem & {
+  part: {
+    id: string;
+    partNumber: string;
+    name: string;
+    revision: string;
+    lifecycleState: string;
+    category: string;
+  } | null;
+  file: {
+    id: string;
+    name: string;
+    partNumber: string | null;
+    lifecycleState: string;
+    currentVersion: number;
+  } | null;
+};
+
+async function hydrateItems(
+  db: ReturnType<typeof getServiceClient>,
+  rows: RawItem[]
+): Promise<HydratedItem[]> {
+  const partIds = Array.from(new Set(rows.map((r) => r.partId).filter((v): v is string => !!v)));
+  const fileIds = Array.from(new Set(rows.map((r) => r.fileId).filter((v): v is string => !!v)));
+
+  const [partsRes, filesRes] = await Promise.all([
+    partIds.length
+      ? db.from("parts").select("id, partNumber, name, revision, lifecycleState, category").in("id", partIds)
+      : Promise.resolve({ data: [] as HydratedItem["part"][], error: null }),
+    fileIds.length
+      ? db.from("files").select("id, name, partNumber, lifecycleState, currentVersion").in("id", fileIds)
+      : Promise.resolve({ data: [] as HydratedItem["file"][], error: null }),
+  ]);
+
+  if (partsRes.error) throw partsRes.error;
+  if (filesRes.error) throw filesRes.error;
+
+  const partById = new Map((partsRes.data ?? []).map((p) => [p!.id, p!] as const));
+  const fileById = new Map((filesRes.data ?? []).map((f) => [f!.id, f!] as const));
+
+  return rows.map((r) => ({
+    ...r,
+    part: r.partId ? partById.get(r.partId) ?? null : null,
+    file: r.fileId ? fileById.get(r.fileId) ?? null : null,
+  }));
+}
 
 export async function GET(
   _request: NextRequest,
@@ -47,16 +114,25 @@ export async function GET(
     const db = getServiceClient();
 
     // Verify ECO belongs to tenant
-    const { data: eco } = await db.from("ecos").select("id").eq("id", ecoId).eq("tenantId", tenantUser.tenantId).single();
+    const { data: eco } = await db.from("ecos").select("id").eq("id", ecoId).eq("tenantId", tenantUser.tenantId).maybeSingle();
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
 
-    const { data: items } = await db
+    const { data: rawItems, error } = await db
       .from("eco_items")
-      .select(ITEM_SELECT)
+      .select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision")
       .eq("ecoId", ecoId)
-      .order("createdAt", { ascending: true });
+      .order("id", { ascending: true });
 
-    return NextResponse.json(items || []);
+    if (error) {
+      console.error(`[ecos/${ecoId}/items] GET failed:`, error);
+      return NextResponse.json(
+        { error: `Query failed: ${error.message}` },
+        { status: 500 }
+      );
+    }
+
+    const hydrated = await hydrateItems(db, (rawItems ?? []) as RawItem[]);
+    return NextResponse.json(hydrated);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch ECO items";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -137,7 +213,7 @@ export async function POST(
       }
     }
 
-    const { data: item, error } = await db.from("eco_items").insert({
+    const { data: rawItem, error } = await db.from("eco_items").insert({
       id: uuid(),
       ecoId,
       partId: partId ?? null,
@@ -146,9 +222,11 @@ export async function POST(
       reason: reason ?? null,
       fromRevision: seededFromRevision,
       toRevision: toRevision ?? null,
-    }).select(ITEM_SELECT).single();
+    }).select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision").single();
 
     if (error) throw error;
+
+    const [item] = await hydrateItems(db, [rawItem as RawItem]);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

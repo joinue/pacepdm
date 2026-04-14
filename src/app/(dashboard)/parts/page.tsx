@@ -1162,21 +1162,30 @@ export default function PartsPage() {
                             </Button>
                           </div>
                         ) : (
-                          <div className="relative">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                            <Input
-                              value={attachLinkSearch}
-                              onChange={(e) => { setAttachLinkSearch(e.target.value); debouncedAttachLinkSearch(e.target.value); }}
-                              placeholder="Search vault files..."
-                              className="pl-8 h-8 text-sm"
-                            />
+                          // Results render inline (in-flow) instead of as an
+                          // absolutely-positioned overlay. When the dialog is
+                          // near the bottom of the viewport an overlay dropdown
+                          // extends past the dialog boundary because DialogContent
+                          // isn't a positioning context for it; pushing the
+                          // rest of the form down with a normal-flow list keeps
+                          // the whole picker inside the modal.
+                          <div className="space-y-1.5">
+                            <div className="relative">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                              <Input
+                                value={attachLinkSearch}
+                                onChange={(e) => { setAttachLinkSearch(e.target.value); debouncedAttachLinkSearch(e.target.value); }}
+                                placeholder="Search vault files..."
+                                className="pl-8 h-8 text-sm"
+                              />
+                            </div>
                             {attachLinkSearching && (
-                              <div className="absolute top-full left-0 right-0 mt-1 flex items-center justify-center py-3 border rounded-lg bg-popover shadow-md z-10">
+                              <div className="flex items-center justify-center py-3 border rounded-lg bg-muted/20">
                                 <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                               </div>
                             )}
-                            {!attachLinkFileId && attachLinkResults.length > 0 && (
-                              <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg max-h-36 overflow-y-auto bg-popover shadow-md z-10">
+                            {!attachLinkSearching && attachLinkResults.length > 0 && (
+                              <div className="border rounded-lg max-h-40 overflow-y-auto bg-background">
                                 {attachLinkResults.map((f) => (
                                   <button
                                     key={f.id}
@@ -1185,14 +1194,14 @@ export default function PartsPage() {
                                     onClick={() => { setAttachLinkFileId(f.id); setAttachLinkFileName(f.name); setAttachLinkSearch(""); setAttachLinkResults([]); }}
                                   >
                                     <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                                    <span className="truncate">{f.name}</span>
+                                    <span className="truncate flex-1">{f.name}</span>
                                     {f.partNumber && <span className="text-xs text-muted-foreground shrink-0">{f.partNumber}</span>}
                                   </button>
                                 ))}
                               </div>
                             )}
                             {attachLinkSearch.length >= 2 && !attachLinkSearching && attachLinkResults.length === 0 && (
-                              <p className="absolute top-full left-0 right-0 mt-1 text-xs text-muted-foreground text-center py-2">No files found</p>
+                              <p className="text-xs text-muted-foreground text-center py-2">No files found</p>
                             )}
                           </div>
                         )}
