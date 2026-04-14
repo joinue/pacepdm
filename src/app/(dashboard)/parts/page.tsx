@@ -150,6 +150,19 @@ export default function PartsPage() {
   const [partWhereUsed, setPartWhereUsed] = useState<PartWhereUsed | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // CSV import: ref for the hidden file input, flag while POST is in
+  // flight, and the per-row result payload from the last import so we
+  // can show users exactly which rows succeeded and which need fixing.
+  const csvImportRef = useRef<HTMLInputElement>(null);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    inserted: number;
+    updated: number;
+    failed: number;
+    total: number;
+    results: { row: number; partNumber: string; action: "inserted" | "updated" | "failed"; error?: string }[];
+  } | null>(null);
+
   // Create/edit part
   const [showCreate, setShowCreate] = useState(false);
   const [editingPart, setEditingPart] = useState<Part | null>(null);
@@ -656,14 +669,81 @@ export default function PartsPage() {
     e.target.value = "";
   }
 
+  // Open a new tab pointing at the parts export endpoint, carrying the
+  // current search / filter params so "export what I'm looking at"
+  // works the way users expect. The browser handles the download.
+  function handleExportCsv() {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    if (categoryFilter && categoryFilter !== "all") params.set("category", categoryFilter);
+    if (stateFilter && stateFilter !== "all") params.set("state", stateFilter);
+    const qs = params.toString();
+    window.open(`/api/parts/export${qs ? `?${qs}` : ""}`, "_blank");
+  }
+
+  async function handleImportCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingCsv(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/parts/import", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Import failed");
+        return;
+      }
+      setImportResult(data);
+      const summary = `${data.inserted} added, ${data.updated} updated${data.failed ? `, ${data.failed} failed` : ""}`;
+      if (data.failed > 0) {
+        toast.warning(summary);
+      } else {
+        toast.success(summary);
+      }
+      loadParts(searchQuery, categoryFilter, stateFilter);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportingCsv(false);
+      if (csvImportRef.current) csvImportRef.current.value = "";
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Parts Library</h2>
-        <Button size="sm" onClick={openCreateDialog}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Part
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleExportCsv}>
+            <Download className="w-4 h-4 mr-1.5" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => csvImportRef.current?.click()}
+            disabled={importingCsv}
+          >
+            {importingCsv ? (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4 mr-1.5" />
+            )}
+            <span className="hidden sm:inline">Import CSV</span>
+          </Button>
+          <input
+            ref={csvImportRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleImportCsv}
+          />
+          <Button size="sm" onClick={openCreateDialog}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Part
+          </Button>
+        </div>
       </div>
 
       {/* Search and filters */}
@@ -1406,6 +1486,72 @@ export default function PartsPage() {
             <Button variant="outline" size="sm" onClick={() => { router.push(`/vault?fileId=${previewFile?.id}`); setPreviewFile(null); }}>
               <ExternalLink className="w-3.5 h-3.5 mr-1.5" />Open in Vault
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV import results dialog. Shows the per-row outcome of the
+          last import so the user can see which rows landed, which were
+          updated, and which failed with a specific error message. */}
+      <Dialog open={!!importResult} onOpenChange={(open) => { if (!open) setImportResult(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Import results</DialogTitle>
+            <DialogDescription>
+              {importResult && (
+                <>
+                  {importResult.total} row{importResult.total === 1 ? "" : "s"} processed &middot;{" "}
+                  <span className="text-green-600 dark:text-green-400 font-medium">{importResult.inserted} added</span>,{" "}
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">{importResult.updated} updated</span>
+                  {importResult.failed > 0 && (
+                    <>
+                      ,{" "}
+                      <span className="text-destructive font-medium">{importResult.failed} failed</span>
+                    </>
+                  )}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {importResult && (
+            <div className="overflow-y-auto max-h-[50vh] -mx-4 px-4">
+              <table className="w-full text-xs">
+                <thead className="text-left text-muted-foreground border-b">
+                  <tr>
+                    <th className="py-1.5 pr-2 w-12">Row</th>
+                    <th className="py-1.5 pr-2">Part Number</th>
+                    <th className="py-1.5 pr-2 w-24">Action</th>
+                    <th className="py-1.5 pr-2">Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importResult.results.map((r, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="py-1.5 pr-2 font-mono text-muted-foreground">{r.row}</td>
+                      <td className="py-1.5 pr-2 font-mono">{r.partNumber || "—"}</td>
+                      <td className="py-1.5 pr-2">
+                        <Badge
+                          variant={
+                            r.action === "inserted"
+                              ? "success"
+                              : r.action === "updated"
+                              ? "info"
+                              : "error"
+                          }
+                          className="text-[9px] px-1 py-0"
+                        >
+                          {r.action}
+                        </Badge>
+                      </td>
+                      <td className="py-1.5 pr-2 text-destructive">{r.error || ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportResult(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
