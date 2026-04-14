@@ -33,6 +33,8 @@ import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { FileWhereUsed } from "@/lib/where-used";
 import { CadViewer } from "@/components/vault/cad-viewer";
+import { ShareDialog } from "@/components/share/share-dialog";
+import { Link as LinkIcon } from "lucide-react";
 
 const FILE_CATEGORY_LABELS: Record<string, string> = {
   PART: "Part",
@@ -391,6 +393,7 @@ export function FileDetailPanel({
   const [linkPartResults, setLinkPartResults] = useState<{ id: string; partNumber: string; name: string }[]>([]);
   const [linkPartSearching, setLinkPartSearching] = useState(false);
   const [linkPartRole, setLinkPartRole] = useState("DRAWING");
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
   // Per-version revision history with linked ECO. Lives alongside `file.versions`
   // (which is the lightweight summary embedded in the file fetch) — this one
   // is the richer view rendered in the Versions tab so engineers can see
@@ -584,9 +587,11 @@ export function FileDetailPanel({
 
   const showCheckOut = !file.isCheckedOut;
   const showCheckIn = file.isCheckedOut && file.checkedOutById === userId && !!onCheckIn;
-  const hasAnyAction = showCheckOut || showCheckIn || onChangeState || onRename || onDelete;
 
-  const actionsDropdown = hasAnyAction ? (
+  // Share is always available when SHARE_CREATE is granted; lifecycle
+  // actions are conditional. Dropdown is always rendered now that Share
+  // is permanent.
+  const actionsDropdown = (
     <DropdownMenu>
       <DropdownMenuTrigger render={
         <Button variant="outline" size="sm" className="shrink-0">
@@ -594,6 +599,12 @@ export function FileDetailPanel({
         </Button>
       } />
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
+          <LinkIcon className="w-4 h-4 mr-2" />Share link
+        </DropdownMenuItem>
+        {(showCheckOut || showCheckIn || onChangeState || onRename || onDelete) && (
+          <DropdownMenuSeparator />
+        )}
         {showCheckOut && (
           <DropdownMenuItem onClick={handleCheckout}>
             <LogOut className="w-4 h-4 mr-2" />Check Out
@@ -624,7 +635,7 @@ export function FileDetailPanel({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  ) : null;
+  );
 
   // --- Sidebar content (properties / versions) ---
   const sidebarContent = (
@@ -894,80 +905,96 @@ export function FileDetailPanel({
     </Tabs>
   );
 
+  const shareDialog = (
+    <ShareDialog
+      open={shareDialogOpen}
+      onOpenChange={setShareDialogOpen}
+      resourceType="file"
+      resourceId={fileId}
+      resourceName={file.name}
+    />
+  );
+
   // --- Full layout: preview left, sidebar right (desktop vault view) ---
   if (layout === "full") {
     return (
-      <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
-          <Button variant="ghost" size="sm" onClick={onClose} className="shrink-0">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div className="min-w-0 flex-1">
-            <h3 className="font-semibold truncate">{file.name}</h3>
-            <p className="text-xs text-muted-foreground truncate">{file.folder.path} &middot; Rev {file.revision}.{file.currentVersion}</p>
+      <>
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
+            <Button variant="ghost" size="sm" onClick={onClose} className="shrink-0">
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold truncate">{file.name}</h3>
+              <p className="text-xs text-muted-foreground truncate">{file.folder.path} &middot; Rev {file.revision}.{file.currentVersion}</p>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleDownload()}>
+              <Download className="w-3.5 h-3.5 mr-1.5" />Download
+            </Button>
+            {actionsDropdown}
           </div>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleDownload()}>
-            <Download className="w-3.5 h-3.5 mr-1.5" />Download
-          </Button>
-          {actionsDropdown}
-        </div>
 
-        {/* Preview left, sidebar right */}
-        <div className="flex flex-1 min-h-0">
-          <div className="flex-1 min-w-0 p-4 overflow-auto bg-muted/20">
-            <FilePreview
-              fileId={fileId}
-              className="h-full"
-              shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
-              onCadThumbnailCaptured={() => { void refreshFile(); }}
-            />
-          </div>
-          <div className="w-80 lg:w-96 border-l p-4 overflow-auto shrink-0">
-            {sidebarContent}
+          {/* Preview left, sidebar right */}
+          <div className="flex flex-1 min-h-0">
+            <div className="flex-1 min-w-0 p-4 overflow-auto bg-muted/20">
+              <FilePreview
+                fileId={fileId}
+                className="h-full"
+                shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
+                onCadThumbnailCaptured={() => { void refreshFile(); }}
+              />
+            </div>
+            <div className="w-80 lg:w-96 border-l p-4 overflow-auto shrink-0">
+              {sidebarContent}
+            </div>
           </div>
         </div>
-      </div>
+        {shareDialog}
+      </>
     );
   }
 
   // --- Compact layout: stacked tabs (mobile sheet) ---
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
-        <Button variant="ghost" size="sm" onClick={onClose} className="shrink-0">
-          <X className="w-4 h-4" />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold truncate">{file.name}</h3>
-          <p className="text-xs text-muted-foreground truncate">{file.folder.path}</p>
+    <>
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
+          <Button variant="ghost" size="sm" onClick={onClose} className="shrink-0">
+            <X className="w-4 h-4" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold truncate">{file.name}</h3>
+            <p className="text-xs text-muted-foreground truncate">{file.folder.path}</p>
+          </div>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleDownload()}>
+            <Download className="w-3.5 h-3.5" />
+          </Button>
+          {actionsDropdown}
         </div>
-        <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleDownload()}>
-          <Download className="w-3.5 h-3.5" />
-        </Button>
-        {actionsDropdown}
-      </div>
 
-      <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0">
-        <div className="px-4 pt-3 shrink-0">
-          <TabsList className="w-full">
-            <TabsTrigger value="preview" className="flex-1 text-xs">Preview</TabsTrigger>
-            <TabsTrigger value="details" className="flex-1 text-xs">Details</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="flex-1 overflow-auto p-4 mt-0">
-          <FilePreview
-            fileId={fileId}
-            className="min-h-[50vh]"
-            shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
-            onCadThumbnailCaptured={() => { void refreshFile(); }}
-          />
-        </TabsContent>
-        <TabsContent value="details" className="flex-1 overflow-auto p-4 mt-0">
-          {sidebarContent}
-        </TabsContent>
-      </Tabs>
-    </div>
+        <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0">
+          <div className="px-4 pt-3 shrink-0">
+            <TabsList className="w-full">
+              <TabsTrigger value="preview" className="flex-1 text-xs">Preview</TabsTrigger>
+              <TabsTrigger value="details" className="flex-1 text-xs">Details</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="preview" className="flex-1 overflow-auto p-4 mt-0">
+            <FilePreview
+              fileId={fileId}
+              className="min-h-[50vh]"
+              shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
+              onCadThumbnailCaptured={() => { void refreshFile(); }}
+            />
+          </TabsContent>
+          <TabsContent value="details" className="flex-1 overflow-auto p-4 mt-0">
+            {sidebarContent}
+          </TabsContent>
+        </Tabs>
+      </div>
+      {shareDialog}
+    </>
   );
 }

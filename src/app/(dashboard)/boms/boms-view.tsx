@@ -12,7 +12,9 @@ import {
 import {
   Plus, Download, Upload, Trash2, Package, Loader2,
   MoreHorizontal, Pencil, Check, ChevronDown, X, ArrowRight,
+  Link as LinkIcon,
 } from "lucide-react";
+import { ShareDialog } from "@/components/share/share-dialog";
 import { toast } from "sonner";
 import { BOM_STATUS_FLOW } from "@/lib/status-flows";
 import { fetchJson, errorMessage } from "@/lib/api-client";
@@ -46,6 +48,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   const router = useRouter();
   const { can } = usePermissions();
   const canEdit = can(PERMISSIONS.FILE_EDIT);
+  const canShare = can(PERMISSIONS.SHARE_CREATE);
   const { clearRef, counts: notificationCounts } = useNotifications();
 
   // When the user opens a specific BOM, auto-clear any unread notifications
@@ -85,6 +88,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   // Inline rename
   const [renamingBom, setRenamingBom] = useState<string | null>(null);
@@ -465,7 +469,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                       </Button>
                     </>
                   )}
-                  {canEdit && (
+                  {(canEdit || canShare) && (
                     <DropdownMenu>
                       <DropdownMenuTrigger render={
                         <Button variant="ghost" size="icon-sm">
@@ -473,17 +477,27 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                         </Button>
                       } />
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => { setRenamingBom(selectedBomId); setRenameValue(selectedBomData.name); }}>
-                          <Pencil className="w-3.5 h-3.5 mr-2" /> Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => handleDeleteBom(selectedBomId)}
-                          disabled={selectedBomData.status === "RELEASED"}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
-                        </DropdownMenuItem>
+                        {canShare && (
+                          <DropdownMenuItem onClick={() => setShowShare(true)}>
+                            <LinkIcon className="w-3.5 h-3.5 mr-2" /> Share link
+                          </DropdownMenuItem>
+                        )}
+                        {canShare && canEdit && <DropdownMenuSeparator />}
+                        {canEdit && (
+                          <DropdownMenuItem onClick={() => { setRenamingBom(selectedBomId); setRenameValue(selectedBomData.name); }}>
+                            <Pencil className="w-3.5 h-3.5 mr-2" /> Rename
+                          </DropdownMenuItem>
+                        )}
+                        {canEdit && <DropdownMenuSeparator />}
+                        {canEdit && (
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleDeleteBom(selectedBomId)}
+                            disabled={selectedBomData.status === "RELEASED"}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
@@ -551,6 +565,15 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         onOpenChange={setShowCompare}
         boms={boms}
       />
+      {selectedBomId && selectedBomData && (
+        <ShareDialog
+          open={showShare}
+          onOpenChange={setShowShare}
+          resourceType="bom"
+          resourceId={selectedBomId}
+          resourceName={selectedBomData.name}
+        />
+      )}
     </div>
   );
 }

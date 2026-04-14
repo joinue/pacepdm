@@ -31,6 +31,12 @@ export const PERMISSIONS = {
   // access). Granted to Admin via "*"; can be granted explicitly to a
   // future Compliance/Quality role without conferring other admin powers.
   AUDIT_VIEW: "audit.view",
+  // Create / revoke public share links for files and BOMs. Gated
+  // separately from FILE_VIEW because making content public is a more
+  // sensitive action than just reading it — a Viewer role shouldn't be
+  // able to mint external-facing URLs even though they can open the
+  // file internally.
+  SHARE_CREATE: "share.create",
 } as const;
 
 export function hasPermission(
@@ -59,6 +65,7 @@ export const DEFAULT_ROLES = {
       PERMISSIONS.FOLDER_EDIT,
       PERMISSIONS.ECO_CREATE,
       PERMISSIONS.ECO_EDIT,
+      PERMISSIONS.SHARE_CREATE,
     ],
   },
   Viewer: {

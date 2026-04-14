@@ -44,7 +44,12 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/reset-password") &&
     !request.nextUrl.pathname.startsWith("/accept-invite") &&
     !request.nextUrl.pathname.startsWith("/auth") &&
-    !request.nextUrl.pathname.startsWith("/api")
+    !request.nextUrl.pathname.startsWith("/api") &&
+    // Public share links: /share/:token is the viewer page for an external
+    // partner with a tokenized URL. No account required. The matching data
+    // routes live under /api/public/share/:token and are authenticated by
+    // the token + optional password, not by Supabase session.
+    !request.nextUrl.pathname.startsWith("/share/")
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
