@@ -51,9 +51,31 @@ interface CadViewerProps {
   url: string;
   fileType: string;
   className?: string;
+  /**
+   * When set, enables opportunistic thumbnail capture after the first
+   * successful render. The captured PNG is POSTed to
+   * /api/files/[fileId]/thumbnail/set so the vault list picks it up
+   * next time someone opens the folder. Pass the file id through so
+   * the viewer knows where to send it, and pair with `autoCaptureThumbnail`
+   * so the capture only fires for files that don't already have one.
+   */
+  fileId?: string;
+  autoCaptureThumbnail?: boolean;
+  /** Called after the first successful render (whether or not a thumbnail was captured). */
+  onRendered?: () => void;
+  /** Called after a successful thumbnail capture+upload, so the parent can refresh. */
+  onThumbnailCaptured?: () => void;
 }
 
-export function CadViewer({ url, fileType, className }: CadViewerProps) {
+export function CadViewer({
+  url,
+  fileType,
+  className,
+  fileId,
+  autoCaptureThumbnail = false,
+  onRendered,
+  onThumbnailCaptured,
+}: CadViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -152,6 +174,44 @@ export function CadViewer({ url, fileType, className }: CadViewerProps) {
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
         controls.update();
+
+        // Render one frame synchronously before starting the loop so
+        // the opportunistic thumbnail capture below sees the
+        // auto-framed isometric view instead of a blank black canvas.
+        renderer.render(scene, camera);
+
+        // Fire-and-forget thumbnail capture for CAD files that don't
+        // already have a thumbnail. The user already paid the parse
+        // cost to open the file; capturing a PNG of what they're
+        // looking at is essentially free and means the vault list
+        // shows the actual geometry next time anyone browses the
+        // folder. Rendered at the live canvas size — the server's
+        // sharp pipeline caps it at 400px anyway.
+        if (autoCaptureThumbnail && fileId) {
+          renderer.domElement.toBlob(
+            (blob) => {
+              if (!blob || cancelled) return;
+              const form = new FormData();
+              form.append("image", new File([blob], `${fileId}-thumbnail.png`, { type: "image/png" }));
+              fetch(`/api/files/${fileId}/thumbnail/set`, {
+                method: "POST",
+                body: form,
+              })
+                .then((res) => {
+                  if (!cancelled && res.ok) onThumbnailCaptured?.();
+                })
+                .catch((err) => {
+                  // Non-fatal: the user can still see the model in
+                  // the viewer, they just won't get a list thumbnail
+                  // this round.
+                  console.warn("[CadViewer] thumbnail auto-capture failed:", err);
+                });
+            },
+            "image/png"
+          );
+        }
+
+        onRendered?.();
 
         const loop = () => {
           if (cancelled) return;

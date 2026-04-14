@@ -50,7 +50,21 @@ const FILE_CATEGORY_LABELS: Record<string, string> = {
 
 // --- Preview components ---
 
-function FilePreview({ fileId, className }: { fileId: string; className?: string }) {
+function FilePreview({
+  fileId,
+  className,
+  // Enables the CAD viewer's opportunistic thumbnail capture on the
+  // first successful render. Default false so we never auto-capture
+  // for files that already have a good thumbnail (manual, extracted,
+  // or SolidWorks-embedded). The parent passes `!file.thumbnailKey`.
+  shouldCaptureCadThumbnail = false,
+  onCadThumbnailCaptured,
+}: {
+  fileId: string;
+  className?: string;
+  shouldCaptureCadThumbnail?: boolean;
+  onCadThumbnailCaptured?: () => void;
+}) {
   const [preview, setPreview] = useState<{
     canPreview: boolean;
     previewType?: string;
@@ -253,7 +267,14 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
 
   if (preview.previewType === "cad" && preview.url && preview.fileType) {
     return (
-      <CadViewer url={preview.url} fileType={preview.fileType} className={className} />
+      <CadViewer
+        url={preview.url}
+        fileType={preview.fileType}
+        fileId={fileId}
+        autoCaptureThumbnail={shouldCaptureCadThumbnail}
+        onThumbnailCaptured={onCadThumbnailCaptured}
+        className={className}
+      />
     );
   }
 
@@ -310,6 +331,8 @@ interface FileDetail {
   checkedOutAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present when the file has an extracted or manually-uploaded thumbnail. */
+  thumbnailKey?: string | null;
   folder: { name: string; path: string };
   versions: {
     id: string;
@@ -893,7 +916,12 @@ export function FileDetailPanel({
         {/* Preview left, sidebar right */}
         <div className="flex flex-1 min-h-0">
           <div className="flex-1 min-w-0 p-4 overflow-auto bg-muted/20">
-            <FilePreview fileId={fileId} className="h-full" />
+            <FilePreview
+              fileId={fileId}
+              className="h-full"
+              shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
+              onCadThumbnailCaptured={() => { void refreshFile(); }}
+            />
           </div>
           <div className="w-80 lg:w-96 border-l p-4 overflow-auto shrink-0">
             {sidebarContent}
@@ -929,7 +957,12 @@ export function FileDetailPanel({
           </TabsList>
         </div>
         <TabsContent value="preview" className="flex-1 overflow-auto p-4 mt-0">
-          <FilePreview fileId={fileId} className="min-h-[50vh]" />
+          <FilePreview
+            fileId={fileId}
+            className="min-h-[50vh]"
+            shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
+            onCadThumbnailCaptured={() => { void refreshFile(); }}
+          />
         </TabsContent>
         <TabsContent value="details" className="flex-1 overflow-auto p-4 mt-0">
           {sidebarContent}
