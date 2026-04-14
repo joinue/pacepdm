@@ -42,3 +42,8 @@ next-env.d.ts
 
 # Prisma generated client (regenerated from schema via `npx prisma generate`)
 /src/generated/prisma
+
+# occt-import-js WASM binary (7MB) — copied from node_modules by the
+# postinstall script in scripts/copy-occt-wasm.mjs. Kept out of git so
+# the repo doesn't balloon; the script is idempotent and safe to re-run.
+/public/occt/

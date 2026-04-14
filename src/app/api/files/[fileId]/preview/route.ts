@@ -5,7 +5,17 @@ import { requireFileAccess } from "@/lib/folder-access-guards";
 
 const PREVIEWABLE_IMAGES = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
 const PREVIEWABLE_TEXT = ["txt", "csv", "md", "json", "xml"];
-const PREVIEWABLE_TYPES = ["pdf", ...PREVIEWABLE_IMAGES, ...PREVIEWABLE_TEXT];
+// Formats the in-browser CAD viewer can render. STL and OBJ are
+// handled by three.js's built-in loaders; STEP / STP / IGES / IGS go
+// through occt-import-js (WASM port of OpenCascade) which is lazy-
+// loaded client-side only when the user actually opens a CAD file.
+const PREVIEWABLE_CAD = ["stl", "obj", "step", "stp", "iges", "igs"];
+const PREVIEWABLE_TYPES = [
+  "pdf",
+  ...PREVIEWABLE_IMAGES,
+  ...PREVIEWABLE_TEXT,
+  ...PREVIEWABLE_CAD,
+];
 const SW_EXTENSIONS = ["sldprt", "sldasm", "slddrw"];
 
 export async function GET(
@@ -73,6 +83,7 @@ export async function GET(
     if (ext === "pdf") previewType = "pdf";
     else if (PREVIEWABLE_IMAGES.includes(ext)) previewType = "image";
     else if (PREVIEWABLE_TEXT.includes(ext)) previewType = "text";
+    else if (PREVIEWABLE_CAD.includes(ext)) previewType = "cad";
     else previewType = "download";
 
     return NextResponse.json({

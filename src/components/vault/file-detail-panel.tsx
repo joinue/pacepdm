@@ -32,6 +32,7 @@ import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { FileWhereUsed } from "@/lib/where-used";
+import { CadViewer } from "@/components/vault/cad-viewer";
 
 const FILE_CATEGORY_LABELS: Record<string, string> = {
   PART: "Part",
@@ -168,7 +169,12 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
     //   3. Anything else unsupported for preview — generic fallback.
     const ext = (preview?.fileType || "").toLowerCase();
     const isSolidWorks = ["sldprt", "sldasm", "slddrw"].includes(ext);
-    const isOtherCad = ["step", "stp", "stl", "dwg", "dxf", "iges", "igs"].includes(ext);
+    // DWG and DXF fall through to the fallback because there's no
+    // pure-JS renderer we trust for them yet. STL / OBJ / STEP / STP /
+    // IGES / IGS are now handled by the in-browser CadViewer above,
+    // so they shouldn't hit this branch — but if the preview endpoint
+    // ever stops recognising them we still want a sensible message.
+    const isOtherCad = ["dwg", "dxf"].includes(ext);
     const headline = isSolidWorks
       ? "No preview extracted yet for this file"
       : isOtherCad
@@ -242,6 +248,12 @@ function FilePreview({ fileId, className }: { fileId: string; className?: string
           </a>
         </div>
       </object>
+    );
+  }
+
+  if (preview.previewType === "cad" && preview.url && preview.fileType) {
+    return (
+      <CadViewer url={preview.url} fileType={preview.fileType} className={className} />
     );
   }
 

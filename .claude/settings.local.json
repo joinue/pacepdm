@@ -103,7 +103,10 @@
       "Read(//tmp/**)",
       "Bash(npx tsx:*)",
       "Bash(python3 -c:*)",
-      "Bash(grep -rn \"api/ecos/\\\\${\" src/app/\\\\\\(dashboard\\\\\\)/ecos/ src/components/)"
+      "Bash(grep -rn \"api/ecos/\\\\${\" src/app/\\\\\\(dashboard\\\\\\)/ecos/ src/components/)",
+      "Bash(awk 'NR>=1540 && NR<=1548 {print NR\": \"$0}' src/app/\\\\\\(dashboard\\\\\\)/parts/page.tsx)",
+      "Bash(node scripts/copy-occt-wasm.mjs)",
+      "Bash(grep -l \"notifications\" /c/Users/MarcS/Documents/pace-pdm/supabase/migrations/*.sql)"
     ]
   }
 }
