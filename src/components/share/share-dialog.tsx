@@ -36,10 +36,16 @@ interface ShareLink {
 interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  resourceType: "file" | "bom";
+  resourceType: "file" | "bom" | "release";
   resourceId: string;
   resourceName: string;
 }
+
+const RESOURCE_LABELS: Record<ShareDialogProps["resourceType"], string> = {
+  file: "file",
+  bom: "BOM",
+  release: "release",
+};
 
 // Expiry options map to a relative offset from "now". "never" serializes
 // to a null expiresAt so the token never expires (the decision we agreed
@@ -166,7 +172,7 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <LinkIcon className="w-5 h-5" />
-            Share {resourceType === "file" ? "file" : "BOM"}
+            Share {RESOURCE_LABELS[resourceType]}
           </DialogTitle>
         </DialogHeader>
 
@@ -309,7 +315,12 @@ export function ShareDialog({
                 onCheckedChange={(v) => setAllowDownload(v === true)}
               />
               <Label htmlFor="share-download" className="text-sm font-normal cursor-pointer">
-                Allow viewers to download the {resourceType === "file" ? "file" : "BOM as CSV"}
+                Allow viewers to download{" "}
+                {resourceType === "file"
+                  ? "the file"
+                  : resourceType === "bom"
+                    ? "the BOM as CSV"
+                    : "the release as a ZIP"}
               </Label>
             </div>
           </div>

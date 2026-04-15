@@ -7,6 +7,7 @@ import {
   verifyUnlockCookie,
 } from "@/lib/share-tokens";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { getReleaseById, type ReleaseManifest } from "@/lib/releases";
 
 // Type dispatch for the preview path — mirrors the authenticated
 // /api/files/[fileId]/preview route. Kept in sync manually; if the
@@ -40,6 +41,16 @@ interface BomContent {
     material: string | null;
     vendor: string | null;
   }>;
+  allowDownload: boolean;
+}
+
+interface ReleaseContent {
+  kind: "release";
+  releaseName: string;
+  ecoNumber: string;
+  releasedAt: string;
+  note: string | null;
+  manifest: ReleaseManifest;
   allowDownload: boolean;
 }
 
@@ -190,6 +201,29 @@ export async function GET(
         previewType,
         fileType: ext,
         url: signed.signedUrl,
+        allowDownload: row.allowDownload,
+      };
+      void bumpAccessCount(row.id);
+      return NextResponse.json(payload, {
+        headers: { "X-Robots-Tag": "noindex, nofollow" },
+      });
+    }
+
+    if (row.resourceType === "release") {
+      const release = await getReleaseById(db, row.tenantId, row.resourceId);
+      if (!release) {
+        return NextResponse.json(
+          { error: "not_found" },
+          { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+        );
+      }
+      const payload: ReleaseContent = {
+        kind: "release",
+        releaseName: release.name,
+        ecoNumber: release.ecoNumber,
+        releasedAt: release.releasedAt,
+        note: release.note,
+        manifest: release.manifest,
         allowDownload: row.allowDownload,
       };
       void bumpAccessCount(row.id);

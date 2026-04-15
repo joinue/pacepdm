@@ -13,7 +13,7 @@ import { requireFileAccess } from "@/lib/folder-access-guards";
 // Shape of the POST body. The password field is optional and only ever
 // travels over HTTPS; we hash it server-side before writing the row.
 const CreateSchema = z.object({
-  resourceType: z.enum(["file", "bom"]),
+  resourceType: z.enum(["file", "bom", "release"]),
   resourceId: z.string().min(1),
   expiresAt: z
     .string()
@@ -39,7 +39,7 @@ const CreateSchema = z.object({
 });
 
 const ListSchema = z.object({
-  resourceType: z.enum(["file", "bom"]),
+  resourceType: z.enum(["file", "bom", "release"]),
   resourceId: z.string().min(1),
 });
 
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       }
       const access = await requireFileAccess(tenantUser, file, "view");
       if (!access.ok) return access.response;
-    } else {
+    } else if (body.resourceType === "bom") {
       const { data: bom } = await db
         .from("boms")
         .select("id")
@@ -97,6 +97,17 @@ export async function POST(request: NextRequest) {
         .single();
       if (!bom) {
         return NextResponse.json({ error: "BOM not found" }, { status: 404 });
+      }
+    } else {
+      // release
+      const { data: release } = await db
+        .from("releases")
+        .select("id")
+        .eq("id", body.resourceId)
+        .eq("tenantId", tenantUser.tenantId)
+        .single();
+      if (!release) {
+        return NextResponse.json({ error: "Release not found" }, { status: 404 });
       }
     }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { notify, notifyFileTransition, sideEffect } from "@/lib/notifications";
+import { createReleaseFromEco } from "@/lib/releases";
 
 /**
  * POST /api/ecos/[ecoId]/implement
@@ -71,6 +72,33 @@ export async function POST(
         { error: rpcError.message || "Failed to implement ECO" },
         { status: 400 }
       );
+    }
+
+    // Capture the release snapshot. Runs after implement_eco has
+    // committed, so parts.revision / file.currentVersion / eco_items
+    // are all in their post-implement state — exactly what we want to
+    // freeze into the manifest. Failure here is non-fatal: the ECO is
+    // already implemented and a missing release row is a documentation
+    // gap, not a correctness problem.
+    let releaseId: string | null = null;
+    try {
+      const release = await createReleaseFromEco({
+        db,
+        tenantId: tenantUser.tenantId,
+        ecoId,
+        userId: tenantUser.id,
+      });
+      releaseId = release?.id ?? null;
+      if (release) {
+        console.info(
+          `[ecos/${ecoId}] release ${release.id} captured ` +
+            `(${release.manifest.parts.length} parts, ` +
+            `${release.manifest.files.length} files, ` +
+            `${release.manifest.boms.length} boms)`
+        );
+      }
+    } catch (err) {
+      console.error(`[ecos/${ecoId}] release capture failed:`, err);
     }
 
     // Notify the ECO creator that their ECO is now in production.
@@ -146,7 +174,7 @@ export async function POST(
       );
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...(result as object), releaseId });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to implement ECO";
     return NextResponse.json({ error: message }, { status: 500 });

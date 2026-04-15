@@ -12,8 +12,9 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Plus, Loader2, X, ArrowRight, Trash2,
+  Plus, Loader2, X, ArrowRight, Trash2, Package,
 } from "lucide-react";
+import Link from "next/link";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
@@ -68,6 +69,11 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   const [approval, setApproval] = useState<ApprovalData | null>(null);
   const [loadingApproval, setLoadingApproval] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  // Release id for the selected ECO if it has one. Populated whenever
+  // the selected ECO is IMPLEMENTED (or just became IMPLEMENTED via
+  // performTransition). Null means "no release captured" — either the
+  // ECO isn't implemented yet or the capture failed (rare, non-fatal).
+  const [releaseIdForSelected, setReleaseIdForSelected] = useState<string | null>(null);
 
   // Dialogs
   const [showCreate, setShowCreate] = useState(false);
@@ -121,6 +127,18 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
     }
   }, []);
 
+  // Load the release id for an ECO if one exists. 404 is the expected
+  // "no release yet" case; any other failure is silent because missing
+  // the link shouldn't block the rest of the detail panel from rendering.
+  const loadRelease = useCallback(async (ecoId: string) => {
+    try {
+      const data = await fetchJson<{ id: string }>(`/api/ecos/${ecoId}/release`);
+      setReleaseIdForSelected(data?.id ?? null);
+    } catch {
+      setReleaseIdForSelected(null);
+    }
+  }, []);
+
   // ─── Effects ─────────────────────────────────────────────────────────
   useEffect(() => {
     void (async () => { await loadEcos(); })();
@@ -136,6 +154,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
     if (!selectedEcoId) {
       setItems([]);
       setApproval(null);
+      setReleaseIdForSelected(null);
       return;
     }
     if (justCreatedRef.current === selectedEcoId) {
@@ -145,9 +164,11 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
     } else {
       setDetailTab("details");
     }
+    setReleaseIdForSelected(null);
     void loadItems(selectedEcoId);
     void loadApproval(selectedEcoId);
-  }, [selectedEcoId, loadItems, loadApproval]);
+    void loadRelease(selectedEcoId);
+  }, [selectedEcoId, loadItems, loadApproval, loadRelease]);
 
   // ─── Realtime ────────────────────────────────────────────────────────
   //
@@ -246,6 +267,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
           partsReleased?: number;
           filesTransitioned: number;
           filesStamped: number;
+          releaseId?: string | null;
         }>(`/api/ecos/${selectedEco.id}/implement`, { method: "POST" });
         const parts = result.partsReleased ?? 0;
         const files = result.filesTransitioned;
@@ -257,6 +279,9 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
             ? `ECO implemented — ${bits.join(", ")}`
             : "ECO implemented"
         );
+        // Capture the release id so the detail header can show the
+        // "View release" link immediately, without waiting for a refetch.
+        if (result.releaseId) setReleaseIdForSelected(result.releaseId);
         // Refresh the list so the derived selectedEco picks up the new status
         await loadEcos();
         return;
@@ -366,6 +391,14 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              {releaseIdForSelected && (
+                <Link
+                  href={`/releases/${releaseIdForSelected}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-background hover:bg-muted text-[0.8rem] font-medium px-3"
+                >
+                  <Package className="w-3.5 h-3.5" /> View release
+                </Link>
+              )}
               {canDelete && (
                 <Button
                   variant="ghost"

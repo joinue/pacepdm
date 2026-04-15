@@ -9,7 +9,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 // details beyond the display name for the "shared by" line.
 interface ResolvedMetadata {
   status: "ok" | "revoked" | "expired" | "not_found";
-  resourceType?: "file" | "bom";
+  resourceType?: "file" | "bom" | "release";
   resourceName?: string;
   requiresPassword?: boolean;
   allowDownload?: boolean;
@@ -52,9 +52,18 @@ export async function GET(
         .eq("tenantId", row.tenantId)
         .single();
       resourceName = (data?.name as string | undefined) ?? null;
-    } else {
+    } else if (row.resourceType === "bom") {
       const { data } = await db
         .from("boms")
+        .select("name")
+        .eq("id", row.resourceId)
+        .eq("tenantId", row.tenantId)
+        .single();
+      resourceName = (data?.name as string | undefined) ?? null;
+    } else {
+      // release
+      const { data } = await db
+        .from("releases")
         .select("name")
         .eq("id", row.resourceId)
         .eq("tenantId", row.tenantId)

@@ -20,7 +20,7 @@ const scrypt = promisify(scryptCb) as (
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
-export type ShareResourceType = "file" | "bom";
+export type ShareResourceType = "file" | "bom" | "release";
 
 export interface ShareTokenRow {
   id: string;

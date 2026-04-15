@@ -4,14 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Download, Lock, AlertTriangle, Loader2 } from "lucide-react";
+import { Download, Lock, AlertTriangle, Loader2, Package, FileText, Layers } from "lucide-react";
 import { CadViewer } from "@/components/vault/cad-viewer";
 import { fetchJson, errorMessage, ApiError } from "@/lib/api-client";
 
 // Mirrors /api/public/share/[token] GET response.
 interface ResolvedMetadata {
   status: "ok" | "revoked" | "expired" | "not_found";
-  resourceType?: "file" | "bom";
+  resourceType?: "file" | "bom" | "release";
   resourceName?: string;
   requiresPassword?: boolean;
   allowDownload?: boolean;
@@ -48,7 +48,43 @@ interface BomContent {
   allowDownload: boolean;
 }
 
-type Content = FileContent | BomContent;
+// Mirrors /api/public/share/[token]/content GET response (release branch).
+interface ReleaseContent {
+  kind: "release";
+  releaseName: string;
+  ecoNumber: string;
+  releasedAt: string;
+  note: string | null;
+  manifest: {
+    parts: Array<{
+      partId: string;
+      partNumber: string;
+      name: string;
+      fromRevision: string | null;
+      toRevision: string;
+      lifecycleState: string;
+    }>;
+    files: Array<{
+      fileId: string;
+      fileName: string;
+      fileType: string;
+      version: number;
+      revision: string;
+    }>;
+    boms: Array<{
+      snapshotId: string;
+      bomId: string;
+      bomName: string;
+      bomRevision: string | null;
+      bomStatus: string | null;
+      itemCount: number;
+      flatTotalCost: number;
+    }>;
+  };
+  allowDownload: boolean;
+}
+
+type Content = FileContent | BomContent | ReleaseContent;
 
 export function ShareViewerClient({ token }: { token: string }) {
   const [metadata, setMetadata] = useState<ResolvedMetadata | null>(null);
@@ -118,13 +154,19 @@ export function ShareViewerClient({ token }: { token: string }) {
   }
 
   // ─── Header ─────────────────────────────────────────────────────────────
+  const resourceLabel =
+    metadata?.resourceType === "bom"
+      ? "BOM"
+      : metadata?.resourceType === "release"
+        ? "release"
+        : "file";
   const header = (
     <header className="border-b bg-card/60 backdrop-blur">
       <div className="max-w-5xl mx-auto px-6 py-3 flex items-center gap-3">
         <div className="font-semibold text-sm tracking-tight">PACE PDM</div>
         <div className="h-4 w-px bg-border" />
         <div className="text-xs text-muted-foreground">
-          Shared {metadata?.resourceType === "bom" ? "BOM" : "file"}
+          Shared {resourceLabel}
           {metadata?.sharedByTenantName && (
             <> &middot; from {metadata.sharedByTenantName}</>
           )}
@@ -238,6 +280,9 @@ export function ShareViewerClient({ token }: { token: string }) {
       <main className="flex-1 max-w-5xl w-full mx-auto p-6">
         {content?.kind === "file" && <FileContentView content={content} />}
         {content?.kind === "bom" && <BomContentView content={content} token={token} />}
+        {content?.kind === "release" && (
+          <ReleaseContentView content={content} token={token} />
+        )}
       </main>
       <footer className="border-t text-center py-3 text-[11px] text-muted-foreground">
         Powered by <span className="font-semibold">PACE PDM</span>
@@ -443,6 +488,176 @@ function BomContentView({
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Release view ─────────────────────────────────────────────────────────
+
+function ReleaseContentView({
+  content,
+  token,
+}: {
+  content: ReleaseContent;
+  token: string;
+}) {
+  const { manifest } = content;
+  const totalCounts = [
+    `${manifest.parts.length} part${manifest.parts.length === 1 ? "" : "s"}`,
+    `${manifest.files.length} file${manifest.files.length === 1 ? "" : "s"}`,
+    ...(manifest.boms.length > 0
+      ? [`${manifest.boms.length} BOM${manifest.boms.length === 1 ? "" : "s"}`]
+      : []),
+  ].join(" · ");
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Release
+          </div>
+          <h1 className="text-2xl font-semibold truncate">{content.releaseName}</h1>
+          <div className="text-sm text-muted-foreground">
+            {content.ecoNumber} · released {new Date(content.releasedAt).toLocaleDateString()} ·{" "}
+            {totalCounts}
+          </div>
+        </div>
+        {content.allowDownload && (
+          <a
+            href={`/api/public/share/${token}/zip`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Download className="w-4 h-4 mr-1.5" /> Download ZIP
+          </a>
+        )}
+      </div>
+
+      {content.note && (
+        <div className="rounded-lg border bg-card p-4 text-sm">{content.note}</div>
+      )}
+
+      {/* Parts */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <Package className="w-4 h-4" /> Parts
+        </h2>
+        {manifest.parts.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4 text-center border border-dashed rounded-md">
+            No parts in this release.
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Part #</th>
+                  <th className="text-left px-3 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium">From</th>
+                  <th className="text-left px-3 py-2 font-medium">To</th>
+                  <th className="text-left px-3 py-2 font-medium">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {manifest.parts.map((p) => (
+                  <tr key={p.partId} className="border-t">
+                    <td className="px-3 py-2 font-mono text-xs">{p.partNumber}</td>
+                    <td className="px-3 py-2">{p.name}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                      {p.fromRevision ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{p.toRevision}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {p.lifecycleState}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Files */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <FileText className="w-4 h-4" /> Files
+        </h2>
+        {manifest.files.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4 text-center border border-dashed rounded-md">
+            No files in this release.
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium">Type</th>
+                  <th className="text-left px-3 py-2 font-medium">Rev</th>
+                  <th className="text-left px-3 py-2 font-medium">Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {manifest.files.map((f) => (
+                  <tr key={f.fileId} className="border-t">
+                    <td className="px-3 py-2 truncate max-w-xs">{f.fileName}</td>
+                    <td className="px-3 py-2 uppercase text-xs text-muted-foreground">
+                      {f.fileType}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{f.revision}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                      v{f.version}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="text-[11px] text-muted-foreground px-3 py-2 border-t bg-muted/20">
+              {content.allowDownload
+                ? "Use the Download ZIP button above to get all files in one archive."
+                : "The sender hasn't enabled downloads on this link."}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* BOMs */}
+      {manifest.boms.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+            <Layers className="w-4 h-4" /> BOMs
+          </h2>
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium">Rev</th>
+                  <th className="text-right px-3 py-2 font-medium">Items</th>
+                  <th className="text-right px-3 py-2 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {manifest.boms.map((b) => (
+                  <tr key={b.snapshotId} className="border-t">
+                    <td className="px-3 py-2">{b.bomName}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{b.bomRevision ?? "—"}</td>
+                    <td className="px-3 py-2 text-right">{b.itemCount}</td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">
+                      ${b.flatTotalCost.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <div className="text-[11px] text-muted-foreground pt-4 border-t">
+        This release is an immutable snapshot taken when {content.ecoNumber} was implemented.
       </div>
     </div>
   );
