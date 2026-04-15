@@ -37,6 +37,7 @@ interface SsoDomain {
   metadataUrl: string | null;
   createdAt: string;
   role: { id: string; name: string } | null;
+  existingUserCount: number;
 }
 
 const STATUS_LABEL: Record<DomainStatus, string> = {
@@ -143,7 +144,9 @@ export default function SsoAdminPage() {
               <Label htmlFor="role">Default role for new users</Label>
               <Select value={newRoleId} onValueChange={(v) => setNewRoleId(v || "")}>
                 <SelectTrigger id="role">
-                  <SelectValue placeholder="Select a role" />
+                  <SelectValue placeholder="Select a role">
+                    {(value) => roles.find((r) => r.id === value)?.name ?? "Select a role"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {roles.map((r) => (
@@ -209,6 +212,14 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
     if (!metadataUrl.trim() && !metadataXml.trim()) {
       toast.error("Paste your IdP metadata URL or XML");
       return;
+    }
+    if (domain.existingUserCount > 0) {
+      const msg =
+        `Activating SSO will migrate ${domain.existingUserCount} existing ` +
+        `${domain.existingUserCount === 1 ? "user" : "users"} in this workspace to SAML login. ` +
+        `On their next sign-in they'll be redirected to your IdP instead of entering a password. ` +
+        `Continue?`;
+      if (!confirm(msg)) return;
     }
     setBusy("activate");
     try {
@@ -340,6 +351,22 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
                 JumpCloud, etc.). Provide either a public URL Supabase can fetch, or
                 paste the XML directly.
               </p>
+              {domain.existingUserCount > 0 && (
+                <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200 flex gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium">
+                      {domain.existingUserCount} existing{" "}
+                      {domain.existingUserCount === 1 ? "user" : "users"} will be migrated
+                    </p>
+                    <p className="mt-0.5">
+                      On their next sign-in, users with an <span className="font-mono">@{domain.domain}</span>{" "}
+                      email will be redirected to your IdP instead of entering a password. Their
+                      history, approvals, and checkouts stay intact.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <Label htmlFor={`metadata-url-${domain.id}`} className="text-xs">

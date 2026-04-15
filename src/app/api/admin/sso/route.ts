@@ -30,15 +30,27 @@ export async function GET() {
 
     if (error) throw error;
 
-    // Decorate rows with the verification record name so the client
-    // doesn't need to duplicate the "_pacepdm-verify." prefix logic.
-    const domains = (data || []).map((d) => ({
-      ...d,
-      verificationRecordName:
-        d.status === "pending_verification" ? verificationRecordName(d.domain) : null,
-    }));
+    // Count existing tenant_users whose email ends in each domain, so
+    // the Activate confirmation can warn "N users will be migrated to
+    // SSO on their next login." Only matters before activation, but
+    // we expose it for every row to keep the UI simple.
+    const withCounts = await Promise.all(
+      (data || []).map(async (d) => {
+        const { count } = await db
+          .from("tenant_users")
+          .select("id", { count: "exact", head: true })
+          .eq("tenantId", tenantUser.tenantId)
+          .ilike("email", `%@${d.domain}`);
+        return {
+          ...d,
+          verificationRecordName:
+            d.status === "pending_verification" ? verificationRecordName(d.domain) : null,
+          existingUserCount: count ?? 0,
+        };
+      })
+    );
 
-    return NextResponse.json({ domains });
+    return NextResponse.json({ domains: withCounts });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch SSO domains";
     return NextResponse.json({ error: message }, { status: 500 });

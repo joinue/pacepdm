@@ -61,6 +61,33 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
     return { tenantId: preexisting.tenantId, tenantUserId: preexisting.id };
   }
 
+  // Adoption path — the common migration case. An existing password
+  // user logs in via SSO for the first time; Supabase creates a new
+  // SAML identity with a different authUserId. Their tenant_users row
+  // (keyed on email + tenant) is still there, with all their history
+  // attached. We rewrite `authUserId` on the existing row instead of
+  // inserting a second one, so audit trails, checkouts, and approvals
+  // stay wired up.
+  const { data: byEmail } = await db
+    .from("tenant_users")
+    .select("id, tenantId")
+    .eq("tenantId", mapping.tenantId)
+    .eq("email", params.email)
+    .maybeSingle();
+  if (byEmail) {
+    const now = new Date().toISOString();
+    await db
+      .from("tenant_users")
+      .update({
+        authUserId: params.authUserId,
+        ssoProvisioned: true,
+        lastSsoLoginAt: now,
+        updatedAt: now,
+      })
+      .eq("id", byEmail.id);
+    return { tenantId: byEmail.tenantId, tenantUserId: byEmail.id };
+  }
+
   const fullName = inferFullName(params.metadata, params.email);
   const now = new Date().toISOString();
   const { v4: uuid } = await import("uuid");

@@ -41,6 +41,7 @@ const breadcrumbLabels: Record<string, string> = {
   lifecycle: "Lifecycle",
   metadata: "Metadata",
   settings: "Settings",
+  sso: "SSO",
 };
 
 const typeBadgeVariant: Record<string, "info" | "purple" | "orange" | "warning" | "muted"> = {
