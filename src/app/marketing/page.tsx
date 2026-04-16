@@ -224,29 +224,16 @@ export default function MarketingPage() {
       {/* ── Setup + who it's for (two columns) ─────────────────── */}
       <section className="border-t border-white/[0.06] bg-white/[0.01]">
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
-          <div className="grid lg:grid-cols-2 gap-16">
-            <div className="space-y-4">
-              <p className="text-sm font-medium text-primary tracking-wide uppercase">Quick start</p>
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                Live by the end of the week.
-              </h2>
-              <p className="text-muted-foreground leading-relaxed">
-                Import parts from a CSV, upload your files to the vault, invite
-                your team. A small hardware team can be running on PACE PDM the
-                same week they sign up.
-              </p>
-            </div>
-            <div className="space-y-4">
-              <p className="text-sm font-medium text-primary tracking-wide uppercase">For engineers</p>
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                Made for hardware teams.
-              </h2>
-              <p className="text-muted-foreground leading-relaxed">
-                Fast search across every part, BOM, and file. Keyboard shortcuts
-                everywhere. A dark UI you can read at 11pm. The details matter
-                because a PDM your team avoids is a PDM they don&apos;t trust.
-              </p>
-            </div>
+          <div className="max-w-2xl space-y-4">
+            <p className="text-sm font-medium text-primary tracking-wide uppercase">Quick start</p>
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+              Live by the end of the week.
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Import parts from a CSV, upload your files to the vault, invite
+              your team. A small hardware team can be running on PACE PDM the
+              same week they sign up.
+            </p>
           </div>
         </div>
       </section>
