@@ -33,6 +33,7 @@ import { EcoList } from "./components/eco-list";
 import { EcoDetailsTab } from "./components/eco-details-tab";
 import { EcoItemsTab } from "./components/eco-items-tab";
 import { EcoApprovalTab } from "./components/eco-approval-tab";
+import { EcoBomImpact } from "./components/eco-bom-impact";
 
 /**
  * ECOs view — list + optional detail. Selection lives in the URL path
@@ -433,6 +434,13 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                   {t.label}
                 </Button>
               ))}
+            </div>
+          )}
+
+          {/* BOM impact — shows which downstream BOMs are affected */}
+          {items.length > 0 && (
+            <div className="mb-5">
+              <EcoBomImpact ecoId={selectedEco.id} />
             </div>
           )}
 
