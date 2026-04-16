@@ -280,10 +280,7 @@ export default function MarketingPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/images/ppdm-logo-white.png" alt="PACE PDM" className="h-5 w-5 opacity-40" />
               <span className="text-xs text-muted-foreground/70">
-                Built by{" "}
-                <a href="https://joinnovations.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors underline-offset-2 hover:underline">
-                  Joinnovations
-                </a>
+                &copy; {new Date().getFullYear()} Joinue LLC
               </span>
             </div>
             <div className="flex items-center gap-5 text-xs text-muted-foreground/70">
@@ -293,7 +290,9 @@ export default function MarketingPage() {
               <Link href="/marketing/terms" className="hover:text-foreground transition-colors">
                 Terms of Use
               </Link>
-              <span>&copy; {new Date().getFullYear()} Joinnovations LLC</span>
+              <a href="mailto:marc@joinue.com" className="hover:text-foreground transition-colors">
+                Contact
+              </a>
             </div>
           </div>
         </div>
