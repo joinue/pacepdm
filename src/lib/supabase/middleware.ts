@@ -33,6 +33,24 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Marketing homepage: on the apex domain (pacepdm.com, not app.pacepdm.com),
+  // unauthenticated visitors hitting / see the marketing page instead of a
+  // login redirect. The app subdomain and localhost skip this so developers
+  // and logged-in users always get the dashboard. Authenticated users on the
+  // apex domain also skip this — they see the dashboard, same as on app.
+  const host = request.headers.get("host") || "";
+  const isAppHost = host.startsWith("app.") || host.includes("localhost") || host.includes("127.0.0.1");
+  if (
+    !user &&
+    !isAppHost &&
+    (request.nextUrl.pathname === "/" || request.nextUrl.pathname.startsWith("/marketing"))
+  ) {
+    // Rewrite (not redirect) so the URL stays as / in the browser.
+    const url = request.nextUrl.clone();
+    url.pathname = "/marketing";
+    return NextResponse.rewrite(url);
+  }
+
   // Redirect unauthenticated users to login (except for auth pages and API
   // routes — API routes handle their own auth and a redirect would turn a
   // POST into a 405 on /login).
@@ -49,7 +67,11 @@ export async function updateSession(request: NextRequest) {
     // partner with a tokenized URL. No account required. The matching data
     // routes live under /api/public/share/:token and are authenticated by
     // the token + optional password, not by Supabase session.
-    !request.nextUrl.pathname.startsWith("/share/")
+    !request.nextUrl.pathname.startsWith("/share/") &&
+    // Marketing page is public — unauthenticated users should be able to
+    // reach it directly too (the rewrite above handles the / → /marketing
+    // case; this handles direct /marketing navigation).
+    !request.nextUrl.pathname.startsWith("/marketing")
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
