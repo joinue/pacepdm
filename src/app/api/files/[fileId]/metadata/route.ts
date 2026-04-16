@@ -49,6 +49,11 @@ export async function PUT(
       return NextResponse.json({ error: "Cannot edit a frozen/released file. Revise it first." }, { status: 409 });
     }
 
+    // Checked-out files can only be edited by the checkout owner (or admins)
+    if (file.isCheckedOut && file.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
+
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (partNumber !== undefined) updates.partNumber = partNumber;
     if (description !== undefined) updates.description = description;

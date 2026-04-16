@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus, Plus, Search } from "lucide-react";
+import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus, Plus, Search, LockOpen } from "lucide-react";
 import { useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -364,6 +364,7 @@ export function FileDetailPanel({
   onRename,
   onDelete,
   userId,
+  isAdmin = false,
   layout = "full",
 }: {
   fileId: string;
@@ -375,6 +376,8 @@ export function FileDetailPanel({
   onRename?: () => void;
   onDelete?: () => void;
   userId?: string;
+  /** When true, shows an "Unlock" option for files checked out by others. */
+  isAdmin?: boolean;
   layout?: "full" | "compact";
 }) {
   const [file, setFile] = useState<FileDetail | null>(null);
@@ -541,6 +544,18 @@ export function FileDetailPanel({
     onRefresh();
   }
 
+  async function handleAdminUnlock() {
+    if (!confirm(`This will cancel ${file?.checkedOutBy?.fullName ?? "the user"}'s checkout and discard any pending changes. Continue?`)) return;
+    const res = await fetch(`/api/files/${fileId}/checkin`, {
+      method: "POST",
+      body: new FormData(), // no file = undo checkout
+    });
+    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    toast.success("Checkout unlocked");
+    refreshFile();
+    onRefresh();
+  }
+
   async function doLinkPartSearch(q: string) {
     if (q.length < 2) { setLinkPartResults([]); setLinkPartSearching(false); return; }
     setLinkPartSearching(true);
@@ -587,6 +602,10 @@ export function FileDetailPanel({
 
   const showCheckOut = !file.isCheckedOut;
   const showCheckIn = file.isCheckedOut && file.checkedOutById === userId && !!onCheckIn;
+  // True when the file is checked out by a different user — disables editing
+  // for properties, rename, change state, and linked parts (admins bypass).
+  const lockedByOther = file.isCheckedOut && file.checkedOutById !== userId;
+  const editDisabled = file.isFrozen || (lockedByOther && !isAdmin);
 
   // Share is always available when SHARE_CREATE is granted; lifecycle
   // actions are conditional. Dropdown is always rendered now that Share
@@ -615,8 +634,13 @@ export function FileDetailPanel({
             <LogIn className="w-4 h-4 mr-2" />Check In
           </DropdownMenuItem>
         )}
+        {lockedByOther && isAdmin && (
+          <DropdownMenuItem onClick={handleAdminUnlock} className="text-destructive">
+            <LockOpen className="w-4 h-4 mr-2" />Unlock
+          </DropdownMenuItem>
+        )}
         {onChangeState && (
-          <DropdownMenuItem onClick={onChangeState}>
+          <DropdownMenuItem onClick={onChangeState} disabled={lockedByOther}>
             <ArrowRightLeft className="w-4 h-4 mr-2" />Change State
           </DropdownMenuItem>
         )}
@@ -624,7 +648,7 @@ export function FileDetailPanel({
           <DropdownMenuSeparator />
         )}
         {onRename && (
-          <DropdownMenuItem onClick={onRename}>
+          <DropdownMenuItem onClick={onRename} disabled={lockedByOther}>
             <Pencil className="w-4 h-4 mr-2" />Rename
           </DropdownMenuItem>
         )}
@@ -667,8 +691,10 @@ export function FileDetailPanel({
           </div>
 
           {file.isCheckedOut && file.checkedOutBy && (
-            <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded p-2 text-sm">
-              Checked out by {file.checkedOutBy.fullName}
+            <div className={`border rounded p-2 text-sm ${lockedByOther ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300" : "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800"}`}>
+              {lockedByOther
+                ? `Locked — checked out by ${file.checkedOutBy.fullName}. Properties are read-only.`
+                : `Checked out by ${file.checkedOutBy.fullName}`}
             </div>
           )}
 
@@ -677,7 +703,7 @@ export function FileDetailPanel({
           <div className="space-y-3">
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
-              <Select value={category} onValueChange={(v) => setCategory(v ?? "")} disabled={file.isFrozen}>
+              <Select value={category} onValueChange={(v) => setCategory(v ?? "")} disabled={editDisabled}>
                 <SelectTrigger className="h-8 text-sm">
                   <SelectValue>{(v) => FILE_CATEGORY_LABELS[v as string] ?? ""}</SelectValue>
                 </SelectTrigger>
@@ -701,13 +727,15 @@ export function FileDetailPanel({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="text-xs">Linked Parts</Label>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => { setShowLinkPart((v) => !v); setLinkPartSearch(""); setLinkPartResults([]); setLinkPartRole("DRAWING"); }}
-                >
-                  <Plus className="w-3 h-3" />
-                </Button>
+                {!editDisabled && (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => { setShowLinkPart((v) => !v); setLinkPartSearch(""); setLinkPartResults([]); setLinkPartRole("DRAWING"); }}
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                )}
               </div>
 
               {showLinkPart && (
@@ -765,12 +793,14 @@ export function FileDetailPanel({
                       <Link href="/parts" className="font-mono hover:underline shrink-0">{lp.part.partNumber}</Link>
                       <span className="truncate text-muted-foreground flex-1">{lp.part.name}</span>
                       <span className="text-[10px] text-muted-foreground shrink-0">{lp.role}</span>
-                      <button
-                        onClick={() => handleUnlinkPart(lp.part.id)}
-                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
+                      {!editDisabled && (
+                        <button
+                          onClick={() => handleUnlinkPart(lp.part.id)}
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -779,11 +809,11 @@ export function FileDetailPanel({
 
             <div className="space-y-1">
               <Label htmlFor="pn" className="text-xs">Part Number</Label>
-              <Input id="pn" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} className="h-8 text-sm" disabled={file.isFrozen} />
+              <Input id="pn" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} className="h-8 text-sm" disabled={editDisabled} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="desc" className="text-xs">Description</Label>
-              <Textarea id="desc" value={description} onChange={(e) => setDescription(e.target.value)} className="text-sm" rows={2} disabled={file.isFrozen} />
+              <Textarea id="desc" value={description} onChange={(e) => setDescription(e.target.value)} className="text-sm" rows={2} disabled={editDisabled} />
             </div>
           </div>
 
@@ -818,7 +848,7 @@ export function FileDetailPanel({
             ))}
           </div>
 
-          <Button onClick={handleSaveMetadata} disabled={saving} className="w-full" size="sm">
+          <Button onClick={handleSaveMetadata} disabled={saving || editDisabled} className="w-full" size="sm">
             <Save className="w-4 h-4 mr-2" />
             {saving ? "Saving..." : "Save Properties"}
           </Button>

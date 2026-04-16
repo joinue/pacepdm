@@ -77,6 +77,7 @@ export function VaultBrowser({
     onDelete: can(PERMISSIONS.FILE_DELETE)
       ? () => { if (selectedFileData) vault.setDeleteTarget({ id: selectedFileData.id, name: selectedFileData.name, type: "file" }); }
       : undefined,
+    isAdmin: can("admin.settings") || can("*"),
   } : null;
 
   return (

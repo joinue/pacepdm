@@ -36,12 +36,17 @@ export async function POST(
     // prevents linking a file from another tenant by guessing IDs.
     const { data: fileRecord } = await db
       .from("files")
-      .select("id, name")
+      .select("id, name, isCheckedOut, checkedOutById")
       .eq("id", body.fileId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
     if (!fileRecord) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    // Checked-out files can only have links changed by the checkout owner (or admins)
+    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
     // If setting as primary, unset others
@@ -103,10 +108,15 @@ export async function DELETE(
     // remains readable even if the file is later renamed or deleted.
     const { data: fileRecord } = await db
       .from("files")
-      .select("name")
+      .select("name, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
+
+    // Checked-out files can only have links changed by the checkout owner (or admins)
+    if (fileRecord?.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
 
     await db.from("part_files").delete().eq("partId", partId).eq("fileId", fileId);
 

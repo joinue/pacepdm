@@ -65,11 +65,16 @@ export async function POST(
     // Verify file belongs to this tenant.
     const { data: fileRecord } = await db
       .from("files")
-      .select("id, name")
+      .select("id, name, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
+
+    // Checked-out files can only have links changed by the checkout owner (or admins)
+    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
 
     // Verify part belongs to this tenant.
     const { data: partRecord } = await db
@@ -130,6 +135,19 @@ export async function DELETE(
 
     const { fileId } = await params;
     const db = getServiceClient();
+
+    // Verify file belongs to this tenant and check checkout lock.
+    const { data: fileRecord } = await db
+      .from("files")
+      .select("id, isCheckedOut, checkedOutById")
+      .eq("id", fileId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+    if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
+
+    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
 
     // Snapshot part name for audit before deleting the link.
     const { data: partRecord } = await db

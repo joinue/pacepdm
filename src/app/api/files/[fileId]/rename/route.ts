@@ -41,6 +41,11 @@ export async function PUT(
       return NextResponse.json({ error: "Cannot rename a frozen/released file. Revise it first." }, { status: 409 });
     }
 
+    // Checked-out files can only be renamed by the checkout owner (or admins)
+    if (file.isCheckedOut && file.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
+
     const oldName = file.name;
     const { error } = await db.from("files")
       .update({ name, updatedAt: new Date().toISOString() })

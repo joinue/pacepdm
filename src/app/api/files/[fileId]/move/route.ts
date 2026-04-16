@@ -60,6 +60,11 @@ export async function PUT(
       return NextResponse.json({ error: "Cannot move a frozen/released file. Revise it first." }, { status: 409 });
     }
 
+    // Checked-out files can only be moved by the checkout owner (or admins)
+    if (file.isCheckedOut && file.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
+    }
+
     const { error } = await db.from("files")
       .update({ folderId, updatedAt: new Date().toISOString() })
       .eq("id", fileId);
