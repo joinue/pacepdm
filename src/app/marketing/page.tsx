@@ -7,6 +7,12 @@ export const metadata: Metadata = {
     "Revision-controlled parts, routed ECO approvals, configurable lifecycle states, and an in-browser CAD viewer. All in the browser. No plugin required.",
 };
 
+// Auth pages live on the app subdomain so session cookies scope correctly.
+// Falls back to relative URLs on localhost where there's no subdomain.
+const APP_ORIGIN = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || "";
+const LOGIN_URL = `${APP_ORIGIN}/login`;
+const REGISTER_URL = `${APP_ORIGIN}/register`;
+
 const FEATURES = [
   {
     title: "Parts & revisions",
@@ -58,15 +64,15 @@ export default function MarketingPage() {
             <span className="font-semibold text-sm tracking-tight">PACE PDM</span>
           </Link>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <a href={LOGIN_URL} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Sign in
-            </Link>
-            <Link
-              href="/register"
+            </a>
+            <a
+              href={REGISTER_URL}
               className="inline-flex h-8 items-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
             >
               Start free
-            </Link>
+            </a>
           </div>
         </div>
       </nav>
@@ -95,21 +101,21 @@ export default function MarketingPage() {
               but don&apos;t need an enterprise PLM rollout.
             </p>
             <div className="flex items-center gap-3 pt-3">
-              <Link
-                href="/register"
+              <a
+                href={REGISTER_URL}
                 className="group inline-flex h-11 items-center rounded-full bg-primary px-7 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40"
               >
                 Start free
                 <svg className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
-              </Link>
-              <Link
-                href="/login"
+              </a>
+              <a
+                href={LOGIN_URL}
                 className="inline-flex h-11 items-center rounded-full border border-white/10 bg-white/[0.03] px-7 text-sm font-medium hover:bg-white/[0.06] transition-all"
               >
                 Sign in
-              </Link>
+              </a>
             </div>
             <p className="text-xs text-muted-foreground/70">
               No credit card required. Import your parts from CSV in minutes.
@@ -252,21 +258,21 @@ export default function MarketingPage() {
               No credit card required. Get your parts imported in under ten minutes.
             </p>
             <div className="flex items-center justify-center gap-3 pt-3">
-              <Link
-                href="/register"
+              <a
+                href={REGISTER_URL}
                 className="group inline-flex h-11 items-center rounded-full bg-primary px-7 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40"
               >
                 Start free
                 <svg className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
-              </Link>
-              <Link
-                href="/login"
+              </a>
+              <a
+                href={LOGIN_URL}
                 className="inline-flex h-11 items-center rounded-full border border-white/10 bg-white/[0.03] px-7 text-sm font-medium hover:bg-white/[0.06] transition-all"
               >
                 Sign in
-              </Link>
+              </a>
             </div>
           </div>
         </div>

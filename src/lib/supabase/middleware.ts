@@ -33,23 +33,72 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Marketing homepage: on the apex domain (pacepdm.com, not app.pacepdm.com),
-  // unauthenticated visitors hitting / see the marketing page instead of a
-  // login redirect. The app subdomain and localhost skip this so developers
-  // and logged-in users always get the dashboard. Authenticated users on the
-  // apex domain also skip this — they see the dashboard, same as on app.
+  // ── Domain routing ──────────────────────────────────────────────────
+  //
+  // pacepdm.com (apex)       → marketing only, all auth happens on app.
+  // app.pacepdm.com          → the application (login, dashboard, etc.)
+  // localhost / 127.0.0.1    → treated as the app host for dev.
+  //
+  // Auth cookies are scoped to the host that set them. If a user logs
+  // in on pacepdm.com, the cookie won't ride on requests to
+  // app.pacepdm.com. To avoid this split-brain, the apex domain NEVER
+  // serves login/register — it either shows marketing (unauthenticated)
+  // or redirects to the app subdomain (authenticated or auth-page hit).
+
   const host = request.headers.get("host") || "";
   const isAppHost = host.startsWith("app.") || host.includes("localhost") || host.includes("127.0.0.1");
-  if (
-    !user &&
-    !isAppHost &&
-    (request.nextUrl.pathname === "/" || request.nextUrl.pathname.startsWith("/marketing"))
-  ) {
-    // Rewrite (not redirect) so the URL stays as / in the browser.
-    const url = request.nextUrl.clone();
-    url.pathname = "/marketing";
-    return NextResponse.rewrite(url);
+
+  if (!isAppHost) {
+    // Apex domain: derive the app origin for redirects.
+    const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "")
+      || `https://app.${host}`;
+
+    // Authenticated users on the apex domain should be on app. so their
+    // session cookie stays consistent. Redirect with the current path.
+    if (user) {
+      return NextResponse.redirect(
+        new URL(request.nextUrl.pathname + request.nextUrl.search, appOrigin)
+      );
+    }
+
+    // Unauthenticated users hitting auth pages on the apex domain need
+    // to be routed to app. so the auth cookie lands on the right host.
+    if (
+      request.nextUrl.pathname.startsWith("/login") ||
+      request.nextUrl.pathname.startsWith("/register") ||
+      request.nextUrl.pathname.startsWith("/forgot-password") ||
+      request.nextUrl.pathname.startsWith("/reset-password") ||
+      request.nextUrl.pathname.startsWith("/accept-invite") ||
+      request.nextUrl.pathname.startsWith("/auth")
+    ) {
+      return NextResponse.redirect(
+        new URL(request.nextUrl.pathname + request.nextUrl.search, appOrigin)
+      );
+    }
+
+    // Marketing and public pages: serve on the apex domain.
+    if (
+      request.nextUrl.pathname === "/" ||
+      request.nextUrl.pathname.startsWith("/marketing") ||
+      request.nextUrl.pathname.startsWith("/share/") ||
+      request.nextUrl.pathname.startsWith("/api")
+    ) {
+      // Rewrite / to /marketing so the URL stays clean in the browser.
+      if (request.nextUrl.pathname === "/") {
+        const url = request.nextUrl.clone();
+        url.pathname = "/marketing";
+        return NextResponse.rewrite(url);
+      }
+      return supabaseResponse;
+    }
+
+    // Everything else on the apex domain → redirect to app.
+    return NextResponse.redirect(
+      new URL(request.nextUrl.pathname + request.nextUrl.search, appOrigin)
+    );
   }
+
+  // ── App subdomain / localhost ────────────────────────────────────────
 
   // Redirect unauthenticated users to login (except for auth pages and API
   // routes — API routes handle their own auth and a redirect would turn a
@@ -63,14 +112,7 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/accept-invite") &&
     !request.nextUrl.pathname.startsWith("/auth") &&
     !request.nextUrl.pathname.startsWith("/api") &&
-    // Public share links: /share/:token is the viewer page for an external
-    // partner with a tokenized URL. No account required. The matching data
-    // routes live under /api/public/share/:token and are authenticated by
-    // the token + optional password, not by Supabase session.
     !request.nextUrl.pathname.startsWith("/share/") &&
-    // Marketing page is public — unauthenticated users should be able to
-    // reach it directly too (the rewrite above handles the / → /marketing
-    // case; this handles direct /marketing navigation).
     !request.nextUrl.pathname.startsWith("/marketing")
   ) {
     const url = request.nextUrl.clone();
