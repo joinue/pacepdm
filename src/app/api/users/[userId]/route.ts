@@ -45,6 +45,40 @@ export async function PATCH(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    // When deactivating, release all files the user has checked out so
+    // they don't become permanent blockers for the rest of the team.
+    let releasedCheckouts = 0;
+    if (!body.isActive) {
+      const { data: checkedOut } = await db
+        .from("files")
+        .select("id, name")
+        .eq("tenantId", tenantUser.tenantId)
+        .eq("checkedOutById", userId)
+        .eq("isCheckedOut", true);
+
+      if (checkedOut && checkedOut.length > 0) {
+        const now = new Date().toISOString();
+        await db
+          .from("files")
+          .update({ isCheckedOut: false, checkedOutById: null, checkedOutAt: null, updatedAt: now })
+          .eq("tenantId", tenantUser.tenantId)
+          .eq("checkedOutById", userId)
+          .eq("isCheckedOut", true);
+        releasedCheckouts = checkedOut.length;
+
+        for (const file of checkedOut) {
+          await logAudit({
+            tenantId: tenantUser.tenantId,
+            userId: tenantUser.id,
+            action: "file.undo_checkout",
+            entityType: "file",
+            entityId: file.id,
+            details: { name: file.name, reason: "user_deactivated" },
+          });
+        }
+      }
+    }
+
     const { error } = await db
       .from("tenant_users")
       .update({ isActive: body.isActive })
@@ -59,10 +93,10 @@ export async function PATCH(
       action: body.isActive ? "user.activate" : "user.deactivate",
       entityType: "user",
       entityId: userId,
-      details: { targetUser: targetUser.fullName },
+      details: { targetUser: targetUser.fullName, releasedCheckouts },
     });
 
-    return NextResponse.json({ success: true, isActive: body.isActive });
+    return NextResponse.json({ success: true, isActive: body.isActive, releasedCheckouts });
   } catch (err) {
     console.error("Failed to update user:", err);
     const message = err instanceof Error ? err.message : "Failed to update user";

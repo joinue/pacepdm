@@ -15,7 +15,7 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { UserPlus } from "lucide-react";
+import { UserPlus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 interface User {
@@ -39,6 +39,9 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
   const [fullName, setFullName] = useState("");
   const [roleId, setRoleId] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Deactivation confirmation
+  const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -83,12 +86,28 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
     setRoleId("");
   }
 
-  async function toggleActive(userId: string, currentlyActive: boolean) {
+  function handleStatusClick(user: User) {
+    if (!user.isActive) {
+      // Reactivation — no confirmation needed
+      void setActive(user.id, true);
+      return;
+    }
+    // Deactivation — show confirmation dialog
+    setDeactivateTarget(user);
+  }
+
+  async function confirmDeactivate() {
+    if (!deactivateTarget) return;
+    await setActive(deactivateTarget.id, false);
+    setDeactivateTarget(null);
+  }
+
+  async function setActive(userId: string, isActive: boolean) {
     try {
       const res = await fetch(`/api/users/${userId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: !currentlyActive }),
+        body: JSON.stringify({ isActive }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -96,9 +115,13 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
         return;
       }
       setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isActive: !currentlyActive } : u))
+        prev.map((u) => (u.id === userId ? { ...u, isActive } : u))
       );
-      toast.success(`User ${currentlyActive ? "deactivated" : "activated"}`);
+      if (!isActive && data.releasedCheckouts > 0) {
+        toast.success(`User deactivated. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`);
+      } else {
+        toast.success(`User ${isActive ? "activated" : "deactivated"}`);
+      }
     } catch {
       toast.error("Failed to update user");
     }
@@ -136,7 +159,7 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
                     variant="ghost"
                     size="sm"
                     className="h-auto px-2 py-0.5"
-                    onClick={() => toggleActive(user.id, user.isActive)}
+                    onClick={() => handleStatusClick(user)}
                   >
                     <Badge variant={user.isActive ? "default" : "destructive"}>
                       {user.isActive ? "Active" : "Inactive"}
@@ -211,6 +234,38 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
                 </Button>
               </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deactivation confirmation */}
+      <Dialog open={!!deactivateTarget} onOpenChange={(open) => { if (!open) setDeactivateTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Deactivate user</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to deactivate {deactivateTarget?.fullName}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-sm space-y-1">
+                <p>This user will be immediately logged out and unable to sign back in.</p>
+                <p>Any files they have checked out will be automatically released so other team members can edit them.</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Their data (files, parts, BOMs, ECOs) will be preserved. You can reactivate them at any time.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeactivateTarget(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmDeactivate}>
+              Deactivate
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
