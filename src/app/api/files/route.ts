@@ -395,18 +395,31 @@ export async function POST(request: NextRequest) {
     // extraction, image resize, …). Non-fatal: a missing thumbnail is a UX
     // gap, not a correctness problem, so failures are logged and surfaced
     // as a warning in the response.
+    //
+    // Clone the buffer before passing to the extractor: the Supabase
+    // storage upload above may consume the underlying ArrayBuffer (Node's
+    // undici can detach it when streaming the request body), leaving a
+    // zero-length buffer for the extractor. A fresh slice guarantees the
+    // bytes are still readable.
     let thumbnailKey: string | null = null;
     let thumbnailWarning: string | null = null;
     try {
-      const thumb = await extractThumbnail(arrayBuffer, file.name);
+      const thumbBuffer = arrayBuffer.slice(0);
+      const thumb = await extractThumbnail(thumbBuffer, file.name);
       if (thumb) {
-        thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
-        await supabase.storage
+        const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
+        const { error: thumbUploadError } = await supabase.storage
           .from("vault")
-          .upload(thumbnailKey, thumb.data, {
+          .upload(key, thumb.data, {
             contentType: thumb.mimeType,
             upsert: false,
           });
+        if (thumbUploadError) {
+          console.error("Thumbnail storage upload failed:", thumbUploadError);
+          thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+        } else {
+          thumbnailKey = key;
+        }
       }
     } catch (e) {
       console.error("Thumbnail generation failed:", e);

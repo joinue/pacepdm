@@ -76,17 +76,25 @@ export async function POST(
       return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
     }
 
-    // Regenerate thumbnail
+    // Regenerate thumbnail. Clone the buffer — the storage upload above may
+    // have consumed / detached the original ArrayBuffer.
     let thumbnailKey = file.thumbnailKey;
     let thumbnailWarning: string | null = null;
     try {
-      const thumb = await extractThumbnail(arrayBuffer, newFile.name);
+      const thumbBuffer = arrayBuffer.slice(0);
+      const thumb = await extractThumbnail(thumbBuffer, newFile.name);
       if (thumb) {
-        thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
-        await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+        const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
+        const { error: thumbUploadError } = await db.storage.from("vault").upload(key, thumb.data, {
           contentType: thumb.mimeType,
           upsert: false,
         });
+        if (thumbUploadError) {
+          console.error("Thumbnail storage upload failed:", thumbUploadError);
+          thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+        } else {
+          thumbnailKey = key;
+        }
       }
     } catch (e) {
       console.error("Thumbnail generation failed:", e);

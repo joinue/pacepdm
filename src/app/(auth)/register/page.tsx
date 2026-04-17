@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Mail } from "lucide-react";
 
 const homepageUrl = (() => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
@@ -24,6 +24,7 @@ export default function RegisterPage() {
   const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -56,26 +57,57 @@ export default function RegisterPage() {
       return;
     }
 
-    // Try to create tenant immediately (works if email confirmation is off)
-    const res = await fetch("/api/tenants", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        companyName,
-        fullName,
-        email,
-        authUserId: authData.user.id,
-      }),
-    });
-
-    if (res.ok) {
-      router.push("/");
-      router.refresh();
-    } else {
-      // Email confirmation required — user will create workspace after confirming
+    // If the user has a session, email confirmation is off — they're ready to go.
+    // The dashboard layout will redirect to /onboarding if no tenant exists yet,
+    // and the callback/onboarding flow handles tenant creation.
+    if (authData.session) {
       router.push("/onboarding");
       router.refresh();
+      return;
     }
+
+    // No session means email confirmation is required.
+    setEmailSent(true);
+    setLoading(false);
+  }
+
+  if (emailSent) {
+    return (
+      <div className="min-h-dvh flex flex-col sm:items-center sm:justify-center bg-background">
+        <div className="flex flex-col items-center pt-12 pb-6 sm:flex-none sm:pt-0 sm:pb-8">
+          <a href={homepageUrl} className="flex flex-col items-center">
+            <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
+            <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">PACE PDM</h1>
+          </a>
+        </div>
+
+        <div className="shrink-0 sm:w-full sm:max-w-sm">
+          <div className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5 text-center">
+            <div className="flex justify-center mb-4">
+              <div className="rounded-full bg-primary/10 p-3">
+                <Mail className="h-6 w-6 text-primary" />
+              </div>
+            </div>
+            <h2 className="text-lg sm:text-base font-semibold mb-2">Check your email</h2>
+            <p className="text-sm sm:text-xs text-muted-foreground mb-1">
+              We sent a confirmation link to
+            </p>
+            <p className="text-sm sm:text-xs font-medium mb-4">{email}</p>
+            <p className="text-sm sm:text-xs text-muted-foreground">
+              Click the link in the email to verify your account and finish setting up your workspace.
+            </p>
+            <p className="text-sm sm:text-xs text-muted-foreground mt-6 sm:mt-4">
+              Already confirmed?{" "}
+              <Link href="/login" className="text-primary hover:underline font-medium">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </div>
+
+        <div className="h-10 sm:h-8 shrink-0" />
+      </div>
+    );
   }
 
   return (

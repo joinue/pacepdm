@@ -198,9 +198,9 @@ export function ShareDialog({
                   key={link.id}
                   className="flex items-center gap-2 rounded-md border bg-card px-3 py-2"
                 >
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 overflow-hidden">
                     <div className="flex items-center gap-2">
-                      <code className="text-xs truncate flex-1">{link.url}</code>
+                      <code className="text-xs truncate block min-w-0">{link.url}</code>
                       {link.hasPassword && (
                         <Lock className="w-3 h-3 text-muted-foreground shrink-0" />
                       )}

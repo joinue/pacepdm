@@ -76,15 +76,23 @@ export async function POST(
       // Regenerate the thumbnail via the format dispatcher. Keeps the old
       // key on failure so the file list still has *something* to show; the
       // dispatcher returns null for unsupported formats, which is fine.
+      // Clone the buffer — the storage upload above may have consumed it.
       let thumbnailKey = file.thumbnailKey;
       try {
-        const thumb = await extractThumbnail(arrayBuffer, newFile.name);
+        const thumbBuffer = arrayBuffer.slice(0);
+        const thumb = await extractThumbnail(thumbBuffer, newFile.name);
         if (thumb) {
-          thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
-          await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+          const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
+          const { error: thumbUploadError } = await db.storage.from("vault").upload(key, thumb.data, {
             contentType: thumb.mimeType,
             upsert: false,
           });
+          if (thumbUploadError) {
+            console.error("Thumbnail storage upload failed:", thumbUploadError);
+            thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+          } else {
+            thumbnailKey = key;
+          }
         }
       } catch (e) {
         console.error("Thumbnail generation failed:", e);

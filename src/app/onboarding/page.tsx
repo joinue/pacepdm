@@ -1,19 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Logo } from "@/components/layout/logo";
+
+const homepageUrl = (() => {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
+  return "/";
+})();
 
 export default function OnboardingPage() {
   const [companyName, setCompanyName] = useState("");
@@ -23,6 +22,7 @@ export default function OnboardingPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const autoCreated = useRef(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -33,10 +33,53 @@ export default function OnboardingPage() {
         router.push("/login");
         return;
       }
+
+      const meta = user.user_metadata || {};
+      const name = meta.full_name || "";
+      const company = meta.company_name || "";
+      const userEmail = user.email || "";
+
       setAuthUserId(user.id);
-      setEmail(user.email || "");
-      setFullName(user.user_metadata?.full_name || "");
-      setCompanyName(user.user_metadata?.company_name || "");
+      setEmail(userEmail);
+      setFullName(name);
+      setCompanyName(company);
+
+      // Auto-create the tenant if we have all the info from registration.
+      if (name && company && userEmail && !autoCreated.current) {
+        autoCreated.current = true;
+        const res = await fetch("/api/tenants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyName: company,
+            fullName: name,
+            email: userEmail,
+            authUserId: user.id,
+          }),
+        });
+
+        if (res.ok) {
+          router.push("/");
+          router.refresh();
+          return;
+        }
+
+        // Tenant may already exist (e.g. page refresh) — check if we can
+        // just go to the dashboard.
+        const body = await res.json().catch(() => null);
+        const msg = body?.error || "";
+
+        // If the user already has a tenant, just redirect.
+        if (res.status === 409 || msg.includes("already exists")) {
+          router.push("/");
+          router.refresh();
+          return;
+        }
+
+        // Otherwise fall through to the manual form with the error shown.
+        setError(msg || "Failed to create workspace. Please try again.");
+      }
+
       setCheckingAuth(false);
     }
     loadUser();
@@ -76,65 +119,78 @@ export default function OnboardingPage() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/40">
-        <p className="text-muted-foreground">Loading...</p>
+      <div className="min-h-dvh flex flex-col items-center justify-center bg-background">
+        <Logo size={40} className="mb-4 animate-pulse" />
+        <p className="text-sm text-muted-foreground">Setting up your workspace...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">PACE PDM</CardTitle>
-          <CardDescription>
-            Set up your workspace to get started
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleCreateWorkspace}>
-          <CardContent className="space-y-4">
+    <div className="min-h-dvh flex flex-col sm:items-center sm:justify-center bg-background">
+      <div className="flex flex-col items-center pt-12 pb-6 sm:flex-none sm:pt-0 sm:pb-8">
+        <a href={homepageUrl} className="flex flex-col items-center">
+          <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
+          <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">PACE PDM</h1>
+        </a>
+        <p className="text-sm sm:text-xs text-muted-foreground mt-1">Set up your workspace</p>
+      </div>
+
+      <div className="shrink-0 sm:w-full sm:max-w-sm">
+        <form
+          onSubmit={handleCreateWorkspace}
+          className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5"
+        >
+          <div className="space-y-5 sm:space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company Name</Label>
+
+            <div className="space-y-2 sm:space-y-1.5">
+              <Label htmlFor="companyName" className="text-sm sm:text-xs">Company Name</Label>
               <Input
                 id="companyName"
                 placeholder="PACE Technologies"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Your Full Name</Label>
+
+            <div className="space-y-2 sm:space-y-1.5">
+              <Label htmlFor="fullName" className="text-sm sm:text-xs">Full Name</Label>
               <Input
                 id="fullName"
                 placeholder="John Smith"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+
+            <div className="space-y-2 sm:space-y-1.5">
+              <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
               <Input
                 id="email"
                 type="email"
                 value={email}
+                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg bg-muted"
                 disabled
               />
             </div>
-          </CardContent>
-          <CardFooter>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Creating workspace..." : "Create Workspace"}
+
+            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+              {loading ? "Creating..." : "Create Workspace"}
             </Button>
-          </CardFooter>
+          </div>
         </form>
-      </Card>
+      </div>
+
+      <div className="h-10 sm:h-8 shrink-0" />
     </div>
   );
 }
