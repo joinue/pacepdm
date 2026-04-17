@@ -45,7 +45,8 @@ export function GettingStarted({ hasFiles, hasParts, hasBoms, hasEcos }: Getting
   }
 
   return (
-    <Card>
+    <Card className="relative overflow-hidden border-primary/30 bg-linear-to-br from-primary/8 via-primary/3 to-transparent shadow-sm shadow-primary/5">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-linear-to-r from-primary/20 via-primary/60 to-primary/20" />
       <CardHeader className="flex flex-row items-start justify-between pb-3">
         <div className="flex items-center gap-2">
           <Rocket className="w-4 h-4 text-primary" />
