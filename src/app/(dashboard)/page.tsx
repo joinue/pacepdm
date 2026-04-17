@@ -21,6 +21,7 @@ import {
 import Link from "next/link";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { EmptyState } from "@/components/ui/empty-state";
+import { GettingStarted } from "./components/getting-started";
 
 // Checkouts older than this are surfaced as "stale" — long-held checkouts
 // block teammates, so the dashboard nudges the owner to check them back in.
@@ -96,6 +97,10 @@ export default async function DashboardPage() {
     { count: openEcoCount, data: latestEco },
     { count: unreadNotifications },
     { data: recentActivity },
+    { count: totalFiles },
+    { count: totalParts },
+    { count: totalBoms },
+    { count: totalEcos },
   ] = await Promise.all([
     pendingDecisionsPromise,
     db
@@ -127,6 +132,11 @@ export default async function DashboardPage() {
       .eq("tenantId", tenantId)
       .order("createdAt", { ascending: false })
       .limit(10),
+    // Getting-started counts — head-only queries (no row data transferred)
+    db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
+    db.from("parts").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
+    db.from("boms").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
+    db.from("ecos").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
   ]);
 
   // Mirror the /api/approvals filter: only surface decisions whose parent
@@ -154,6 +164,13 @@ export default async function DashboardPage() {
           Welcome back, {tenantUser.fullName}
         </p>
       </div>
+
+      <GettingStarted
+        hasFiles={(totalFiles ?? 0) > 0}
+        hasParts={(totalParts ?? 0) > 0}
+        hasBoms={(totalBoms ?? 0) > 0}
+        hasEcos={(totalEcos ?? 0) > 0}
+      />
 
       {/* "For you" cards — actionable counts, each with a secondary line
           showing the most relevant follow-up (oldest age, stale count, etc). */}
