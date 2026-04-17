@@ -345,6 +345,32 @@ export async function POST(request: NextRequest) {
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
     const category = requestedCategory || CATEGORY_MAP[ext] || "OTHER";
 
+    // Pre-check for duplicate filename in the same folder. Done before
+    // the storage upload so we never create orphan blobs for rejected files.
+    const { data: existingFile } = await db
+      .from("files")
+      .select("id, name, currentVersion, isCheckedOut, checkedOutById, isFrozen, lifecycleState")
+      .eq("tenantId", tenantUser.tenantId)
+      .eq("folderId", folderId)
+      .eq("name", file.name)
+      .maybeSingle();
+
+    if (existingFile) {
+      return NextResponse.json({
+        error: "A file with this name already exists in this folder",
+        code: "DUPLICATE_FILE",
+        existingFile: {
+          id: existingFile.id,
+          name: existingFile.name,
+          currentVersion: existingFile.currentVersion,
+          isCheckedOut: existingFile.isCheckedOut,
+          checkedOutById: existingFile.checkedOutById,
+          isFrozen: existingFile.isFrozen,
+          lifecycleState: existingFile.lifecycleState,
+        },
+      }, { status: 409 });
+    }
+
     const { data: lifecycle } = await db
       .from("lifecycles")
       .select("id")
@@ -416,7 +442,12 @@ export async function POST(request: NextRequest) {
 
     if (fileError) {
       if (fileError.code === "23505") {
-        return NextResponse.json({ error: "A file with this name already exists in this folder" }, { status: 409 });
+        // Race condition: another upload of the same name snuck in between
+        // the pre-check and the insert. Return the same enriched shape.
+        return NextResponse.json({
+          error: "A file with this name already exists in this folder",
+          code: "DUPLICATE_FILE",
+        }, { status: 409 });
       }
       throw fileError;
     }

@@ -27,6 +27,7 @@ export function CheckInDialog({
   onCheckedIn: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,8 +80,18 @@ export function CheckInDialog({
         <form onSubmit={handleCheckIn}>
           <div className="space-y-4 py-4">
             <div
-              className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
               onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+                const dropped = e.dataTransfer.files?.[0];
+                if (dropped) setFile(dropped);
+              }}
             >
               {file ? (
                 <div>
@@ -93,7 +104,7 @@ export function CheckInDialog({
                 <div>
                   <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">
-                    Click to select updated file (optional)
+                    {isDragging ? "Drop file here" : "Drag a file here, or click to browse (optional)"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Leave empty to cancel check-out without changes

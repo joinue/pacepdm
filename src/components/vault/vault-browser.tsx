@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { useNotifications } from "@/components/providers/notification-provider";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -10,6 +10,7 @@ import { useVaultBrowser } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { PERMISSIONS } from "@/lib/permissions";
+import { Upload } from "lucide-react";
 import { CreateFolderDialog } from "./create-folder-dialog";
 import { UploadFileDialog } from "./upload-file-dialog";
 import { FileDetailPanel } from "./file-detail-panel";
@@ -54,6 +55,53 @@ export function VaultBrowser({
     onChange: vault.refresh,
   });
 
+  // External file drop: detect files dragged from the desktop onto the vault
+  // area and open the upload dialog with the dropped file pre-populated.
+  const [externalDropFile, setExternalDropFile] = useState<File | null>(null);
+  const [showDropOverlay, setShowDropOverlay] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handleExternalDragEnter = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounter.current++;
+    setShowDropOverlay(true);
+  }, []);
+
+  const handleExternalDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleExternalDragLeave = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setShowDropOverlay(false);
+    }
+  }, []);
+
+  const handleExternalDrop = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragCounter.current = 0;
+    setShowDropOverlay(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) {
+      setExternalDropFile(dropped);
+      vault.setShowUpload(true);
+    }
+  }, [vault]);
+
+  // Clear the external drop file when the upload dialog closes
+  const handleUploadDialogChange = useCallback((open: boolean) => {
+    vault.setShowUpload(open);
+    if (!open) setExternalDropFile(null);
+  }, [vault]);
+
   const selectedFileData = vault.files.find((f) => f.id === vault.selectedFile);
 
   // Pass undefined for actions the user can't perform — the detail panel
@@ -81,7 +129,21 @@ export function VaultBrowser({
   } : null;
 
   return (
-    <div className="space-y-4">
+    <div
+      className="space-y-4 relative"
+      onDragEnter={handleExternalDragEnter}
+      onDragOver={handleExternalDragOver}
+      onDragLeave={handleExternalDragLeave}
+      onDrop={handleExternalDrop}
+    >
+      {showDropOverlay && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary/5 backdrop-blur-sm pointer-events-none">
+          <div className="text-center">
+            <Upload className="w-10 h-10 mx-auto text-primary mb-2" />
+            <p className="text-sm font-medium text-primary">Drop file to upload</p>
+          </div>
+        </div>
+      )}
       <VaultToolbar vault={vault} />
 
       {/* Detail view — replaces file list on desktop, sheet on mobile.
@@ -111,7 +173,7 @@ export function VaultBrowser({
 
       {/* Dialogs */}
       <CreateFolderDialog open={vault.showCreateFolder} onOpenChange={vault.setShowCreateFolder} parentId={vault.currentFolderId} onCreated={() => vault.refresh()} />
-      <UploadFileDialog open={vault.showUpload} onOpenChange={vault.setShowUpload} folderId={vault.currentFolderId} onUploaded={() => vault.refresh()} />
+      <UploadFileDialog open={vault.showUpload} onOpenChange={handleUploadDialogChange} folderId={vault.currentFolderId} onUploaded={() => vault.refresh()} initialFile={externalDropFile} />
       {vault.checkInFileId && <CheckInDialog open={!!vault.checkInFileId} onOpenChange={(open) => !open && vault.setCheckInFileId(null)} fileId={vault.checkInFileId} onCheckedIn={() => { vault.setCheckInFileId(null); vault.refresh(); }} />}
 
       <VaultDialogs vault={vault} />

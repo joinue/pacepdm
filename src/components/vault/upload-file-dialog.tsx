@@ -16,24 +16,37 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, Search } from "lucide-react";
+import { Upload, Search, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+
+interface DuplicateFileInfo {
+  id: string;
+  name: string;
+  currentVersion: number;
+  isCheckedOut: boolean;
+  checkedOutById: string | null;
+  isFrozen: boolean;
+  lifecycleState: string;
+}
 
 export function UploadFileDialog({
   open,
   onOpenChange,
   folderId,
   onUploaded,
+  initialFile,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   folderId: string;
   onUploaded: () => void;
+  initialFile?: File | null;
 }) {
   const user = useTenantUser();
   const isAdmin = user.permissions.includes("*");
   const [file, setFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [partNumber, setPartNumber] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -48,7 +61,14 @@ export function UploadFileDialog({
   const [newPartNumber, setNewPartNumber] = useState("");
   const [newPartName, setNewPartName] = useState("");
   const [fileRole, setFileRole] = useState("DRAWING");
+  const [duplicateFile, setDuplicateFile] = useState<DuplicateFileInfo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open && initialFile) {
+      setFile(initialFile);
+    }
+  }, [open, initialFile]);
 
   useEffect(() => {
     if (open && isAdmin && lifecycleStates.length === 0) {
@@ -107,6 +127,11 @@ export function UploadFileDialog({
       const fileData = await res.json();
 
       if (!res.ok) {
+        if (res.status === 409 && fileData.code === "DUPLICATE_FILE" && fileData.existingFile) {
+          setDuplicateFile(fileData.existingFile);
+          setLoading(false);
+          return;
+        }
         toast.error(fileData.error || "Failed to upload file");
         setLoading(false);
         return;
@@ -148,19 +173,7 @@ export function UploadFileDialog({
         }
       }
 
-      setFile(null);
-      setPartNumber("");
-      setDescription("");
-      setCategory("");
-      setLifecycleState("");
-      setLinkToPart(false);
-      setLinkMode("existing");
-      setPartSearchQuery("");
-      setPartSearchResults([]);
-      setSelectedPart(null);
-      setNewPartNumber("");
-      setNewPartName("");
-      setFileRole("DRAWING");
+      resetForm();
       onOpenChange(false);
       onUploaded();
     } catch {
@@ -169,17 +182,120 @@ export function UploadFileDialog({
     setLoading(false);
   }
 
+  async function handleVersionBump() {
+    if (!file || !duplicateFile) return;
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("comment", `New version uploaded (replaced duplicate)`);
+
+      const res = await fetch(`/api/files/${duplicateFile.id}/upload-version`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast.error(data.error || "Failed to upload new version");
+        setLoading(false);
+        return;
+      }
+
+      toast.success(`Uploaded as version ${data.version} of "${duplicateFile.name}"`);
+      if (data.warnings?.length) {
+        for (const w of data.warnings) toast.warning(w);
+      }
+      resetForm();
+      onOpenChange(false);
+      onUploaded();
+    } catch {
+      toast.error("Failed to upload new version");
+    }
+    setLoading(false);
+  }
+
+  function resetForm() {
+    setFile(null);
+    setPartNumber("");
+    setDescription("");
+    setCategory("");
+    setLifecycleState("");
+    setLinkToPart(false);
+    setLinkMode("existing");
+    setPartSearchQuery("");
+    setPartSearchResults([]);
+    setSelectedPart(null);
+    setNewPartNumber("");
+    setNewPartName("");
+    setFileRole("DRAWING");
+    setDuplicateFile(null);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Upload File</DialogTitle>
         </DialogHeader>
+        {duplicateFile ? (
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  &ldquo;{duplicateFile.name}&rdquo; already exists in this folder
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Current version: {duplicateFile.currentVersion} &middot; State: {duplicateFile.lifecycleState}
+                </p>
+              </div>
+            </div>
+
+            {duplicateFile.isFrozen ? (
+              <p className="text-sm text-muted-foreground">
+                This file is released/frozen and cannot accept new versions. Revise it first from the file detail panel.
+              </p>
+            ) : duplicateFile.isCheckedOut && duplicateFile.checkedOutById !== user.id ? (
+              <p className="text-sm text-muted-foreground">
+                This file is checked out by another user and cannot accept new versions until checked in.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Upload your file as version {duplicateFile.currentVersion + 1}?
+              </p>
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDuplicateFile(null)}>
+                Back
+              </Button>
+              <Button type="button" variant="outline" onClick={() => { resetForm(); onOpenChange(false); }}>
+                Cancel
+              </Button>
+              {!duplicateFile.isFrozen && !(duplicateFile.isCheckedOut && duplicateFile.checkedOutById !== user.id) && (
+                <Button type="button" disabled={loading} onClick={handleVersionBump}>
+                  {loading ? "Uploading..." : `Upload as Version ${duplicateFile.currentVersion + 1}`}
+                </Button>
+              )}
+            </DialogFooter>
+          </div>
+        ) : (
         <form onSubmit={handleUpload}>
           <div className="space-y-4 py-4">
             <div
-              className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
               onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+                const dropped = e.dataTransfer.files?.[0];
+                if (dropped) setFile(dropped);
+              }}
             >
               {file ? (
                 <div>
@@ -192,7 +308,7 @@ export function UploadFileDialog({
                 <div>
                   <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">
-                    Click to select a file
+                    {isDragging ? "Drop file here" : "Drag a file here, or click to browse"}
                   </p>
                 </div>
               )}
@@ -409,6 +525,7 @@ export function UploadFileDialog({
             </Button>
           </DialogFooter>
         </form>
+        )}
       </DialogContent>
     </Dialog>
   );
