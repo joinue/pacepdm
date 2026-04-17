@@ -280,11 +280,11 @@ function BaselineViewerDialog({
 
   useEffect(() => {
     if (!baselineId) {
-      setDetail(null);
+      queueMicrotask(() => setDetail(null));
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     fetchJson<BaselineDetail>(`/api/boms/${bomId}/baselines/${baselineId}`)
       .then((d) => {
         if (!cancelled) setDetail(d);

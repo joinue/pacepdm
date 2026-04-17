@@ -107,11 +107,11 @@ export function Header({
   const [dynamicLabel, setDynamicLabel] = useState<string | null>(null);
   useEffect(() => {
     if (!dynamicSegment) {
-      setDynamicLabel(null);
+      queueMicrotask(() => setDynamicLabel(null));
       return;
     }
     let cancelled = false;
-    setDynamicLabel(null);
+    queueMicrotask(() => setDynamicLabel(null));
     fetch(dynamicSegment.endpoint)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {

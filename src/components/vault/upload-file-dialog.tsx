@@ -66,7 +66,7 @@ export function UploadFileDialog({
 
   useEffect(() => {
     if (open && initialFile) {
-      setFile(initialFile);
+      queueMicrotask(() => setFile(initialFile));
     }
   }, [open, initialFile]);
 

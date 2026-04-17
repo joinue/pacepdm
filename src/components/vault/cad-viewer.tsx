@@ -276,6 +276,7 @@ export function CadViewer({
       renderer = null;
       controls = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fileId, autoCaptureThumbnail, onRendered, onThumbnailCaptured omitted: adding them would re-init the 3D scene on every render
   }, [url, fileType]);
 
   return (

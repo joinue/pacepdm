@@ -34,7 +34,7 @@ const { tableResults, updateCalls, mockFrom } = vi.hoisted(() => {
       return updateChain;
     };
 
-    chain.insert = (data: unknown) => {
+    chain.insert = () => {
       return { select: () => ({ single: () => ({ data: null, error: null }) }), data: null, error: null };
     };
 
