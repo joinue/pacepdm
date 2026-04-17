@@ -605,7 +605,7 @@ export function FileDetailPanel({
   // True when the file is checked out by a different user — disables editing
   // for properties, rename, change state, and linked parts (admins bypass).
   const lockedByOther = file.isCheckedOut && file.checkedOutById !== userId;
-  const editDisabled = file.isFrozen || (lockedByOther && !isAdmin);
+  const editDisabled = file.isFrozen || lockedByOther;
 
   // Share is always available when SHARE_CREATE is granted; lifecycle
   // actions are conditional. Dropdown is always rendered now that Share
