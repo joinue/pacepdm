@@ -10,7 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 
-const homepageUrl = "/marketing";
+// Derive the marketing site URL from the app URL. If NEXT_PUBLIC_APP_URL
+// is https://app.pacepdm.com, the marketing site is https://pacepdm.com.
+// Falls back to /marketing for localhost where there's no subdomain.
+const homepageUrl = (() => {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
+  return "/marketing";
+})();
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");

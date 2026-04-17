@@ -10,7 +10,11 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff } from "lucide-react";
 
-const homepageUrl = "/marketing";
+const homepageUrl = (() => {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
+  return "/marketing";
+})();
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
