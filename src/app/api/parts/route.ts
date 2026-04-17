@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(withThumbs);
   } catch (err) {
+    console.error("Failed to fetch parts:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch parts";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -169,6 +170,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(part);
   } catch (err) {
+    console.error("Failed to create part:", err);
     const message = err instanceof Error ? err.message : "Failed to create part";
     return NextResponse.json({ error: message }, { status: 500 });
   }

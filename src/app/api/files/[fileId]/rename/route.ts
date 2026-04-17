@@ -66,6 +66,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to rename file:", err);
     const message = err instanceof Error ? err.message : "Failed to rename file";
     return NextResponse.json({ error: message }, { status: 500 });
   }

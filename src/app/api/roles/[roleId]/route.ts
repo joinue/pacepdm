@@ -49,6 +49,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to update role:", err);
     const message = err instanceof Error ? err.message : "Failed to update role";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -89,6 +90,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete role:", err);
     const message = err instanceof Error ? err.message : "Failed to delete role";
     return NextResponse.json({ error: message }, { status: 500 });
   }

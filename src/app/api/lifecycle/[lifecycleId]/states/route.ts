@@ -100,6 +100,7 @@ export async function POST(
 
     return NextResponse.json(state);
   } catch (err) {
+    console.error("Failed to create state:", err);
     const message = err instanceof Error ? err.message : "Failed to create state";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -166,6 +167,7 @@ export async function PUT(
 
     return NextResponse.json(state);
   } catch (err) {
+    console.error("Failed to update state:", err);
     const message = err instanceof Error ? err.message : "Failed to update state";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -235,6 +237,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete state:", err);
     const message = err instanceof Error ? err.message : "Failed to delete state";
     return NextResponse.json({ error: message }, { status: 500 });
   }

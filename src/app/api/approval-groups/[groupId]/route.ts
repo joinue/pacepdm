@@ -91,6 +91,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, archived: false });
   } catch (err) {
+    console.error("Failed to delete group:", err);
     const message = err instanceof Error ? err.message : "Failed to delete group";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -148,6 +149,7 @@ export async function PATCH(
 
     return NextResponse.json(data);
   } catch (err) {
+    console.error("Failed to update group:", err);
     const message = err instanceof Error ? err.message : "Failed to update group";
     return NextResponse.json({ error: message }, { status: 500 });
   }

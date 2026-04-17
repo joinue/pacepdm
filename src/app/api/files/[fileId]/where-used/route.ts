@@ -45,6 +45,7 @@ export async function GET(
     const result = await getFileWhereUsed(db, tenantUser.tenantId, fileId);
     return NextResponse.json(result);
   } catch (err) {
+    console.error("Failed to fetch where-used data:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch where-used data";
     return NextResponse.json({ error: message }, { status: 500 });
   }

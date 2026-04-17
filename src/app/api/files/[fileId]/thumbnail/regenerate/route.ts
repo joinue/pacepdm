@@ -145,6 +145,7 @@ export async function POST(
       size: thumb.data.length,
     });
   } catch (err) {
+    console.error("Failed to regenerate thumbnail:", err);
     const message = err instanceof Error ? err.message : "Failed to regenerate thumbnail";
     return NextResponse.json({ error: message }, { status: 500 });
   }

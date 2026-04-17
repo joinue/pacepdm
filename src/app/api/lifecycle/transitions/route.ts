@@ -42,7 +42,8 @@ export async function GET() {
     }));
 
     return NextResponse.json(result);
-  } catch {
+  } catch (err) {
+    console.error("GET /api/lifecycle/transitions failed:", err);
     return NextResponse.json({ error: "Failed to fetch transitions" }, { status: 500 });
   }
 }

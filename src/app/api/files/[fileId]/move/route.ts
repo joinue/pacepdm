@@ -84,6 +84,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to move file:", err);
     const message = err instanceof Error ? err.message : "Failed to move file";
     return NextResponse.json({ error: message }, { status: 500 });
   }

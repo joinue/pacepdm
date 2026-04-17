@@ -99,6 +99,7 @@ export async function POST(
 
     return NextResponse.json({ thumbnailUrl: signed?.signedUrl || null });
   } catch (err) {
+    console.error("Failed to upload thumbnail:", err);
     const message = err instanceof Error ? err.message : "Failed to upload thumbnail";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -148,6 +149,7 @@ export async function DELETE(
 
     return NextResponse.json({ thumbnailUrl: null });
   } catch (err) {
+    console.error("Failed to delete thumbnail:", err);
     const message = err instanceof Error ? err.message : "Failed to delete thumbnail";
     return NextResponse.json({ error: message }, { status: 500 });
   }

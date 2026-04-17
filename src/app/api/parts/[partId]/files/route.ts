@@ -80,6 +80,7 @@ export async function POST(
 
     return NextResponse.json(pf);
   } catch (err) {
+    console.error("Failed to link file:", err);
     const message = err instanceof Error ? err.message : "Failed to link file";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -131,6 +132,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to unlink file:", err);
     const message = err instanceof Error ? err.message : "Failed to unlink file";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -43,6 +43,7 @@ export async function GET() {
 
     return NextResponse.json(enriched);
   } catch (err) {
+    console.error("Failed to fetch lifecycles:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch lifecycles";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(lifecycle);
   } catch (err) {
+    console.error("Failed to create lifecycle:", err);
     const message = err instanceof Error ? err.message : "Failed to create lifecycle";
     return NextResponse.json({ error: message }, { status: 500 });
   }

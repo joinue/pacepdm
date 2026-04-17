@@ -48,6 +48,7 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to add member:", err);
     const message = err instanceof Error ? err.message : "Failed to add member";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -82,6 +83,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to remove member:", err);
     const message = err instanceof Error ? err.message : "Failed to remove member";
     return NextResponse.json({ error: message }, { status: 500 });
   }

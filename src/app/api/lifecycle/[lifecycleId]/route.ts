@@ -75,6 +75,7 @@ export async function PUT(
 
     return NextResponse.json(lifecycle);
   } catch (err) {
+    console.error("Failed to update lifecycle:", err);
     const message = err instanceof Error ? err.message : "Failed to update lifecycle";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -129,6 +130,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete lifecycle:", err);
     const message = err instanceof Error ? err.message : "Failed to delete lifecycle";
     return NextResponse.json({ error: message }, { status: 500 });
   }

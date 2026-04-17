@@ -93,6 +93,7 @@ export async function POST(
 
     return NextResponse.json({ success: true, newVersion });
   } catch (err) {
+    console.error("Failed to restore version:", err);
     const message = err instanceof Error ? err.message : "Failed to restore version";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     const { data: users } = await query;
 
     return NextResponse.json(users || []);
-  } catch {
+  } catch (err) {
+    console.error("GET /api/users/search failed:", err);
     return NextResponse.json(
       { error: "Failed to search users" },
       { status: 500 }

@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ files: results });
   } catch (err) {
+    console.error("Failed to prepare download:", err);
     const message = err instanceof Error ? err.message : "Failed to prepare download";
     return NextResponse.json({ error: message }, { status: 500 });
   }

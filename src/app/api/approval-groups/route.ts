@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(enriched);
   } catch (err) {
+    console.error("Failed to fetch groups:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch groups";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ...group, members: [] });
   } catch (err) {
+    console.error("Failed to create group:", err);
     const message = err instanceof Error ? err.message : "Failed to create group";
     return NextResponse.json({ error: message }, { status: 500 });
   }

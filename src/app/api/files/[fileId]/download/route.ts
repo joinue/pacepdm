@@ -53,7 +53,8 @@ export async function GET(
     });
 
     return NextResponse.json({ url: data.signedUrl });
-  } catch {
+  } catch (err) {
+    console.error("GET /api/files/[fileId]/download failed:", err);
     return NextResponse.json({ error: "Failed to download file" }, { status: 500 });
   }
 }

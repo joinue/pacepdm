@@ -36,7 +36,8 @@ export async function GET(
     });
 
     return NextResponse.json(items);
-  } catch {
+  } catch (err) {
+    console.error("GET /api/files/[fileId]/ecos failed:", err);
     return NextResponse.json({ error: "Failed to fetch ECO linkage" }, { status: 500 });
   }
 }

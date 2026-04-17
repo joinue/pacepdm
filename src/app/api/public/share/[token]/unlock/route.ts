@@ -66,6 +66,7 @@ export async function POST(
     });
     return response;
   } catch (err) {
+    console.error("Failed to unlock share link:", err);
     const message = err instanceof Error ? err.message : "Failed to unlock share link";
     return NextResponse.json({ error: message }, { status: 500 });
   }

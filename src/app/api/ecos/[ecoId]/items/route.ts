@@ -134,6 +134,7 @@ export async function GET(
     const hydrated = await hydrateItems(db, (rawItems ?? []) as RawItem[]);
     return NextResponse.json(hydrated);
   } catch (err) {
+    console.error("Failed to fetch ECO items:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch ECO items";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -245,6 +246,7 @@ export async function POST(
 
     return NextResponse.json(item);
   } catch (err) {
+    console.error("Failed to add ECO item:", err);
     const message = err instanceof Error ? err.message : "Failed to add ECO item";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -292,6 +294,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to remove ECO item:", err);
     const message = err instanceof Error ? err.message : "Failed to remove ECO item";
     return NextResponse.json({ error: message }, { status: 500 });
   }

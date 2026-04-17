@@ -64,6 +64,7 @@ export async function PATCH(
 
     return NextResponse.json({ success: true, isActive: body.isActive });
   } catch (err) {
+    console.error("Failed to update user:", err);
     const message = err instanceof Error ? err.message : "Failed to update user";
     return NextResponse.json({ error: message }, { status: 500 });
   }

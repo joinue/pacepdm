@@ -108,6 +108,7 @@ export async function POST(
       providerId: provider.id,
     });
   } catch (err) {
+    console.error("Failed to activate SSO:", err);
     const message = err instanceof Error ? err.message : "Failed to activate SSO";
     return NextResponse.json({ error: message }, { status: 500 });
   }

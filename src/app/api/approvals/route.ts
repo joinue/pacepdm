@@ -42,7 +42,8 @@ export async function GET() {
     );
 
     return NextResponse.json(pending);
-  } catch {
+  } catch (err) {
+    console.error("GET /api/approvals failed:", err);
     return NextResponse.json({ error: "Failed to fetch approvals" }, { status: 500 });
   }
 }

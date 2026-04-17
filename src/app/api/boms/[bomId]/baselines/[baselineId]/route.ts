@@ -48,6 +48,7 @@ export async function GET(
 
     return NextResponse.json(snapshot);
   } catch (err) {
+    console.error("Failed to fetch baseline:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch baseline";
     return NextResponse.json({ error: message }, { status: 500 });
   }

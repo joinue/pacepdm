@@ -30,6 +30,7 @@ export async function GET() {
 
     return NextResponse.json(sorted);
   } catch (err) {
+    console.error("Failed to fetch workflows:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch workflows";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(workflow);
   } catch (err) {
+    console.error("Failed to create workflow:", err);
     const message = err instanceof Error ? err.message : "Failed to create workflow";
     return NextResponse.json({ error: message }, { status: 500 });
   }

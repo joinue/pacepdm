@@ -62,6 +62,7 @@ export async function GET(
 
     return NextResponse.json(versions || []);
   } catch (err) {
+    console.error("Failed to fetch file revisions:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch file revisions";
     return NextResponse.json({ error: message }, { status: 500 });
   }

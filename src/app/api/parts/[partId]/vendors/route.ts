@@ -77,7 +77,8 @@ export async function POST(
     await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.vendor_add", entityType: "part", entityId: partId, details: { vendorId: body.vendorId, vendorName: vendorRecord.name, linkId: link.id } });
 
     return NextResponse.json(link);
-  } catch {
+  } catch (err) {
+    console.error("POST /api/parts/[partId]/vendors failed:", err);
     return NextResponse.json({ error: "Failed to add vendor" }, { status: 500 });
   }
 }
@@ -126,7 +127,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    console.error("DELETE /api/parts/[partId]/vendors failed:", err);
     return NextResponse.json({ error: "Failed to remove vendor" }, { status: 500 });
   }
 }

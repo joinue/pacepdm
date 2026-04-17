@@ -140,6 +140,7 @@ export async function GET(
       throw err;
     }
   } catch (err) {
+    console.error("Failed to compute BOM rollup:", err);
     const message = err instanceof Error ? err.message : "Failed to compute BOM rollup";
     return NextResponse.json({ error: message }, { status: 500 });
   }

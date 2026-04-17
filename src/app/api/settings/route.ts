@@ -37,6 +37,7 @@ export async function GET() {
       settings: (tenant?.settings as Record<string, unknown> | null) ?? {},
     });
   } catch (err) {
+    console.error("Failed to fetch settings:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch settings";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -86,6 +87,7 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to update settings:", err);
     const message = err instanceof Error ? err.message : "Failed to update settings";
     return NextResponse.json({ error: message }, { status: 500 });
   }

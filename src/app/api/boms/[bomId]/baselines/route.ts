@@ -56,6 +56,7 @@ export async function GET(
 
     return NextResponse.json(snapshots ?? []);
   } catch (err) {
+    console.error("Failed to fetch baselines:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch baselines";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -131,6 +132,7 @@ export async function POST(
       flatTotalCost: result.flatTotalCost,
     });
   } catch (err) {
+    console.error("Failed to capture baseline:", err);
     const message = err instanceof Error ? err.message : "Failed to capture baseline";
     return NextResponse.json({ error: message }, { status: 500 });
   }

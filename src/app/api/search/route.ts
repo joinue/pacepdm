@@ -133,7 +133,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(results);
-  } catch {
+  } catch (err) {
+    console.error("GET /api/search failed:", err);
     return NextResponse.json({ error: "Search failed" }, { status: 500 });
   }
 }

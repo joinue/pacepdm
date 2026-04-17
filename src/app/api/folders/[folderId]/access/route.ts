@@ -80,6 +80,7 @@ export async function GET(
 
     return NextResponse.json(data || []);
   } catch (err) {
+    console.error("Failed to load folder access:", err);
     const message = err instanceof Error ? err.message : "Failed to load folder access";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -153,6 +154,7 @@ export async function POST(
 
     return NextResponse.json(row);
   } catch (err) {
+    console.error("Failed to grant folder access:", err);
     const message = err instanceof Error ? err.message : "Failed to grant folder access";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -201,6 +203,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to revoke folder access:", err);
     const message = err instanceof Error ? err.message : "Failed to revoke folder access";
     return NextResponse.json({ error: message }, { status: 500 });
   }

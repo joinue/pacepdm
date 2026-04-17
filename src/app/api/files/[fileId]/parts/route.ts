@@ -38,6 +38,7 @@ export async function GET(
 
     return NextResponse.json(data || []);
   } catch (err) {
+    console.error("Failed to fetch linked parts:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch linked parts";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -112,6 +113,7 @@ export async function POST(
 
     return NextResponse.json(pf);
   } catch (err) {
+    console.error("Failed to link part:", err);
     const message = err instanceof Error ? err.message : "Failed to link part";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -170,6 +172,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to unlink part:", err);
     const message = err instanceof Error ? err.message : "Failed to unlink part";
     return NextResponse.json({ error: message }, { status: 500 });
   }

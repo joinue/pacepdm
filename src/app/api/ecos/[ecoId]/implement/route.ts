@@ -176,6 +176,7 @@ export async function POST(
 
     return NextResponse.json({ ...(result as object), releaseId });
   } catch (err) {
+    console.error("Failed to implement ECO:", err);
     const message = err instanceof Error ? err.message : "Failed to implement ECO";
     return NextResponse.json({ error: message }, { status: 500 });
   }

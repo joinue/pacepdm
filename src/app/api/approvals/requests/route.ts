@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(myRequests || []);
   } catch (err) {
+    console.error("Failed to fetch requests:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch requests";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -91,6 +92,7 @@ export async function POST(request: NextRequest) {
     if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json(result);
   } catch (err) {
+    console.error("Failed to process request:", err);
     const message = err instanceof Error ? err.message : "Failed to process request";
     return NextResponse.json({ error: message }, { status: 500 });
   }

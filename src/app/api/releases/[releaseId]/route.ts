@@ -20,6 +20,7 @@ export async function GET(
     }
     return NextResponse.json(release);
   } catch (err) {
+    console.error("Failed to fetch release:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch release";
     return NextResponse.json({ error: message }, { status: 500 });
   }

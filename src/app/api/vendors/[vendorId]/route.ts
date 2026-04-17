@@ -41,7 +41,8 @@ export async function GET(
     });
 
     return NextResponse.json({ ...vendor, usedBy });
-  } catch {
+  } catch (err) {
+    console.error("GET /api/vendors/[vendorId] failed:", err);
     return NextResponse.json({ error: "Failed to fetch vendor" }, { status: 500 });
   }
 }
@@ -107,7 +108,8 @@ export async function PUT(
     });
 
     return NextResponse.json(vendor);
-  } catch {
+  } catch (err) {
+    console.error("PUT /api/vendors/[vendorId] failed:", err);
     return NextResponse.json({ error: "Failed to update vendor" }, { status: 500 });
   }
 }
@@ -161,7 +163,8 @@ export async function DELETE(
     });
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    console.error("DELETE /api/vendors/[vendorId] failed:", err);
     return NextResponse.json({ error: "Failed to delete vendor" }, { status: 500 });
   }
 }

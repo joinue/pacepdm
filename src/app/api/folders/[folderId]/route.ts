@@ -48,6 +48,7 @@ export async function GET(
 
     return NextResponse.json({ ...folder, ancestors });
   } catch (err) {
+    console.error("Failed to fetch folder:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch folder";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -109,6 +110,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to rename folder:", err);
     const message = err instanceof Error ? err.message : "Failed to rename folder";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -161,6 +163,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete folder:", err);
     const message = err instanceof Error ? err.message : "Failed to delete folder";
     return NextResponse.json({ error: message }, { status: 500 });
   }

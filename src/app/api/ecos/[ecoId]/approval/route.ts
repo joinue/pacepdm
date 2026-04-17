@@ -41,7 +41,8 @@ export async function GET(
     const timeline = await getRequestTimeline(request.id);
 
     return NextResponse.json({ ...request, timeline });
-  } catch {
+  } catch (err) {
+    console.error("GET /api/ecos/[ecoId]/approval failed:", err);
     return NextResponse.json({ error: "Failed to fetch approval status" }, { status: 500 });
   }
 }

@@ -67,6 +67,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to remove SSO domain:", err);
     const message = err instanceof Error ? err.message : "Failed to remove SSO domain";
     return NextResponse.json({ error: message }, { status: 500 });
   }

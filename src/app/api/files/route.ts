@@ -311,6 +311,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "File and folderId are required" }, { status: 400 });
     }
 
+    // 5 GB hard cap — prevents storage exhaustion from malicious or
+    // accidental uploads. Supabase Storage has its own limits, but we
+    // reject early to avoid buffering the entire body.
+    const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: "File exceeds the 5 GB size limit" }, { status: 413 });
+    }
+
     const db = getServiceClient();
 
     const { data: folder } = await db
@@ -359,8 +367,10 @@ export async function POST(request: NextRequest) {
 
     // Generate a thumbnail via the format dispatcher (SolidWorks preview
     // extraction, image resize, …). Non-fatal: a missing thumbnail is a UX
-    // gap, not a correctness problem, so failures are logged and swallowed.
+    // gap, not a correctness problem, so failures are logged and surfaced
+    // as a warning in the response.
     let thumbnailKey: string | null = null;
+    let thumbnailWarning: string | null = null;
     try {
       const thumb = await extractThumbnail(arrayBuffer, file.name);
       if (thumb) {
@@ -374,7 +384,7 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) {
       console.error("Thumbnail generation failed:", e);
-      // Non-fatal — continue without thumbnail
+      thumbnailWarning = "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
     }
 
     const now = new Date().toISOString();
@@ -431,7 +441,8 @@ export async function POST(request: NextRequest) {
       details: { name: file.name, version: 1, size: file.size },
     });
 
-    return NextResponse.json(dbFile);
+    const warnings = thumbnailWarning ? [thumbnailWarning] : undefined;
+    return NextResponse.json({ ...dbFile, warnings });
   } catch (error) {
     console.error("File creation error:", error);
     const message = error instanceof Error ? error.message : "Failed to create file";

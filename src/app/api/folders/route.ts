@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(foldersWithCounts);
   } catch (err) {
+    console.error("Failed to fetch folders:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch folders";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(folder);
   } catch (err) {
+    console.error("Failed to create folder:", err);
     const message = err instanceof Error ? err.message : "Failed to create folder";
     return NextResponse.json({ error: message }, { status: 500 });
   }

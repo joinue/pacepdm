@@ -26,6 +26,7 @@ export async function GET() {
 
     return NextResponse.json(roles || []);
   } catch (err) {
+    console.error("Failed to fetch roles:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch roles";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(role);
   } catch (err) {
+    console.error("Failed to create role:", err);
     const message = err instanceof Error ? err.message : "Failed to create role";
     return NextResponse.json({ error: message }, { status: 500 });
   }

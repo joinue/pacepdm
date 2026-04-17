@@ -61,6 +61,7 @@ export async function POST(
 
     return NextResponse.json(step);
   } catch (err) {
+    console.error("Failed to add step:", err);
     const message = err instanceof Error ? err.message : "Failed to add step";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -101,6 +102,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to remove step:", err);
     const message = err instanceof Error ? err.message : "Failed to remove step";
     return NextResponse.json({ error: message }, { status: 500 });
   }

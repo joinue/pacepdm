@@ -34,6 +34,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to revoke share link:", err);
     const message = err instanceof Error ? err.message : "Failed to revoke share link";
     return NextResponse.json({ error: message }, { status: 500 });
   }

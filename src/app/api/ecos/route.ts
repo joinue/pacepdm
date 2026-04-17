@@ -52,6 +52,18 @@ export async function POST(request: NextRequest) {
 
     const db = getServiceClient();
     const now = new Date().toISOString();
+    const idempotencyKey = request.headers.get("idempotency-key") || null;
+
+    // Idempotency: return existing ECO if a matching key exists.
+    if (idempotencyKey) {
+      const { data: existing } = await db
+        .from("ecos")
+        .select("*")
+        .eq("tenantId", tenantUser.tenantId)
+        .eq("clientRequestKey", idempotencyKey)
+        .maybeSingle();
+      if (existing) return NextResponse.json(existing);
+    }
 
     // Generate ECO number based on total count for this tenant
     const { count } = await db
@@ -77,13 +89,25 @@ export async function POST(request: NextRequest) {
         disposition: null,
         effectivity: null,
         createdById: tenantUser.id,
+        clientRequestKey: idempotencyKey,
         createdAt: now,
         updatedAt: now,
       })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === "23505" && idempotencyKey) {
+        const { data: existing } = await db
+          .from("ecos")
+          .select("*")
+          .eq("tenantId", tenantUser.tenantId)
+          .eq("clientRequestKey", idempotencyKey)
+          .maybeSingle();
+        if (existing) return NextResponse.json(existing);
+      }
+      throw error;
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

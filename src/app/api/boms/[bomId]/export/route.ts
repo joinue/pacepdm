@@ -92,7 +92,8 @@ export async function GET(
         "Content-Disposition": `attachment; filename="${bom.name}.csv"`,
       },
     });
-  } catch {
+  } catch (err) {
+    console.error("GET /api/boms/[bomId]/export failed:", err);
     return NextResponse.json({ error: "Failed to export BOM" }, { status: 500 });
   }
 }

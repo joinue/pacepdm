@@ -141,6 +141,13 @@ export function UploadFileDialog({
         toast.success("File uploaded successfully");
       }
 
+      // Surface thumbnail extraction warnings so users know to upload manually
+      if (fileData.warnings?.length) {
+        for (const w of fileData.warnings) {
+          toast.warning(w);
+        }
+      }
+
       setFile(null);
       setPartNumber("");
       setDescription("");

@@ -52,6 +52,7 @@ export async function GET() {
 
     return NextResponse.json({ domains: withCounts });
   } catch (err) {
+    console.error("Failed to fetch SSO domains:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch SSO domains";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -142,6 +143,7 @@ export async function POST(request: NextRequest) {
       createdAt: now,
     });
   } catch (err) {
+    console.error("Failed to register SSO domain:", err);
     const message = err instanceof Error ? err.message : "Failed to register SSO domain";
     return NextResponse.json({ error: message }, { status: 500 });
   }

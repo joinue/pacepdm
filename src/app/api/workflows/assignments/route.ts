@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(data);
   } catch (err) {
+    console.error("Failed to create assignment:", err);
     const message = err instanceof Error ? err.message : "Failed to create assignment";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -74,6 +75,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete assignment:", err);
     const message = err instanceof Error ? err.message : "Failed to delete assignment";
     return NextResponse.json({ error: message }, { status: 500 });
   }

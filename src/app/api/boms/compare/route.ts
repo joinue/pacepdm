@@ -106,7 +106,8 @@ export async function GET(request: NextRequest) {
         unchanged: changes.filter((c) => c.type === "unchanged").length,
       },
     });
-  } catch {
+  } catch (err) {
+    console.error("GET /api/boms/compare failed:", err);
     return NextResponse.json({ error: "Failed to compare BOMs" }, { status: 500 });
   }
 }

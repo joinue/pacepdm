@@ -273,6 +273,7 @@ export async function GET(
       headers: { "X-Robots-Tag": "noindex, nofollow" },
     });
   } catch (err) {
+    console.error("Failed to load shared content:", err);
     const message = err instanceof Error ? err.message : "Failed to load shared content";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -52,7 +52,11 @@ export function CheckInDialog({
         return;
       }
 
+      const data = await res.json();
       toast.success(file ? "File checked in with new version" : "Check-out cancelled");
+      if (data.warnings?.length) {
+        for (const w of data.warnings) toast.warning(w);
+      }
       setFile(null);
       setComment("");
       onOpenChange(false);

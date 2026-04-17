@@ -120,6 +120,7 @@ export async function GET(
       ecoHistory,
     });
   } catch (err) {
+    console.error("Failed to fetch part:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch part";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -174,6 +175,7 @@ export async function PUT(
 
     return NextResponse.json(part);
   } catch (err) {
+    console.error("Failed to update part:", err);
     const message = err instanceof Error ? err.message : "Failed to update part";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -216,6 +218,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete part:", err);
     const message = err instanceof Error ? err.message : "Failed to delete part";
     return NextResponse.json({ error: message }, { status: 500 });
   }

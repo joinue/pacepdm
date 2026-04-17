@@ -54,6 +54,7 @@ export async function PUT(
 
     return NextResponse.json(data);
   } catch (err) {
+    console.error("Failed to update workflow:", err);
     const message = err instanceof Error ? err.message : "Failed to update workflow";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -145,6 +146,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, archived: false });
   } catch (err) {
+    console.error("Failed to delete workflow:", err);
     const message = err instanceof Error ? err.message : "Failed to delete workflow";
     return NextResponse.json({ error: message }, { status: 500 });
   }

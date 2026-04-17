@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
       url: `${baseUrlFrom(request)}/share/${created.token}`,
     });
   } catch (err) {
+    console.error("Failed to create share link:", err);
     const message = err instanceof Error ? err.message : "Failed to create share link";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -177,6 +178,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(safe);
   } catch (err) {
+    console.error("Failed to list share links:", err);
     const message = err instanceof Error ? err.message : "Failed to list share links";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -70,6 +70,7 @@ export async function POST(
 
     return NextResponse.json({ ok: true, status: "verified", verifiedAt: now });
   } catch (err) {
+    console.error("Failed to verify domain:", err);
     const message = err instanceof Error ? err.message : "Failed to verify domain";
     return NextResponse.json({ error: message }, { status: 500 });
   }

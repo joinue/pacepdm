@@ -96,6 +96,7 @@ export async function GET(
       headers: { "X-Robots-Tag": "noindex, nofollow" },
     });
   } catch (err) {
+    console.error("Failed to resolve share link:", err);
     const message = err instanceof Error ? err.message : "Failed to resolve share link";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
+    console.error("Failed to export parts:", err);
     const message = err instanceof Error ? err.message : "Failed to export parts";
     return NextResponse.json({ error: message }, { status: 500 });
   }

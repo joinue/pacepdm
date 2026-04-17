@@ -57,7 +57,8 @@ export async function POST(
     });
 
     return NextResponse.json(updated);
-  } catch {
+  } catch (err) {
+    console.error("POST /api/files/[fileId]/checkout failed:", err);
     return NextResponse.json({ error: "Failed to check out file" }, { status: 500 });
   }
 }

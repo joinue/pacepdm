@@ -117,6 +117,7 @@ export async function POST(request: NextRequest) {
       newState: transition.toState.name,
     });
   } catch (err) {
+    console.error("Failed to perform bulk transition:", err);
     const message = err instanceof Error ? err.message : "Failed to perform bulk transition";
     return NextResponse.json({ error: message }, { status: 500 });
   }

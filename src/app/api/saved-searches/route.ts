@@ -27,6 +27,7 @@ export async function GET() {
 
     return NextResponse.json(data || []);
   } catch (err) {
+    console.error("Failed to fetch saved searches:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch saved searches";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
     return NextResponse.json(data);
   } catch (err) {
+    console.error("Failed to save search:", err);
     const message = err instanceof Error ? err.message : "Failed to save search";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -76,6 +78,7 @@ export async function DELETE(request: NextRequest) {
     await db.from("saved_searches").delete().eq("id", searchId).eq("userId", tenantUser.id);
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete search:", err);
     const message = err instanceof Error ? err.message : "Failed to delete search";
     return NextResponse.json({ error: message }, { status: 500 });
   }

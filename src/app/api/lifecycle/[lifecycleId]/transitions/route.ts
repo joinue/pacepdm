@@ -50,6 +50,7 @@ export async function GET(
 
     return NextResponse.json(transitions || []);
   } catch (err) {
+    console.error("Failed to fetch transitions:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch transitions";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -124,6 +125,7 @@ export async function POST(
 
     return NextResponse.json(transition);
   } catch (err) {
+    console.error("Failed to create transition:", err);
     const message = err instanceof Error ? err.message : "Failed to create transition";
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -170,6 +172,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("Failed to delete transition:", err);
     const message = err instanceof Error ? err.message : "Failed to delete transition";
     return NextResponse.json({ error: message }, { status: 500 });
   }

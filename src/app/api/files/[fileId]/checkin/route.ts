@@ -56,6 +56,12 @@ export async function POST(
     const now = new Date().toISOString();
     const newVersion = file.currentVersion + 1;
 
+    if (newFile && newFile.size > 5 * 1024 * 1024 * 1024) {
+      return NextResponse.json({ error: "File exceeds the 5 GB size limit" }, { status: 413 });
+    }
+
+    let thumbnailWarning: string | null = null;
+
     if (newFile) {
       const storageKey = `${tenantUser.tenantId}/${file.folderId}/${Date.now()}-${newFile.name}`;
       const arrayBuffer = await newFile.arrayBuffer();
@@ -82,6 +88,7 @@ export async function POST(
         }
       } catch (e) {
         console.error("Thumbnail generation failed:", e);
+        thumbnailWarning = "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
       }
 
       await db.from("file_versions").insert({
@@ -159,7 +166,8 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ success: true, version: newFile ? newVersion : file.currentVersion });
+    const warnings = (newFile && thumbnailWarning) ? [thumbnailWarning] : undefined;
+    return NextResponse.json({ success: true, version: newFile ? newVersion : file.currentVersion, warnings });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to check in file";
     return NextResponse.json({ error: message }, { status: 500 });
