@@ -58,7 +58,7 @@ export default function MarketingPage() {
       {/* ── Nav ────────────────────────────────────────────────── */}
       <nav className="sticky top-0 z-40 border-b border-white/[0.06] bg-background/70 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-6 h-14">
-          <Link href="/marketing" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/images/ppdm-logo-white.png" alt="PACE PDM" className="h-7 w-7" />
             <span className="font-semibold text-sm tracking-tight">PACE PDM</span>
@@ -194,7 +194,7 @@ export default function MarketingPage() {
               <div className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none" aria-hidden="true" />
               <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-xl shadow-black/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/images/screenshots/step-file-preview-in-vault.png" alt="In-browser STEP file viewer" className="w-full" />
+                <img src="/images/screenshots/dashboard.png" alt="PACE PDM dashboard showing approvals, checked-out files, and open ECOs" className="w-full" />
               </div>
             </div>
           </div>
@@ -227,6 +227,100 @@ export default function MarketingPage() {
         </div>
       </section>
 
+      {/* ── ECO / approval workflows ─────────────────────────── */}
+      <section className="border-t border-white/[0.06] bg-white/[0.01]">
+        <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
+          <div className="grid lg:grid-cols-2 gap-14 items-center">
+            <div className="space-y-5">
+              <p className="text-sm font-medium text-primary tracking-wide uppercase">Approvals</p>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                Route changes through the right people.
+              </h2>
+              <p className="text-muted-foreground leading-relaxed">
+                Define multi-step approval workflows with deadlines. Assign them
+                to lifecycle transitions so the right reviewers sign off before
+                anything gets released. No more chasing signatures over email.
+              </p>
+            </div>
+            <div className="relative">
+              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none" aria-hidden="true" />
+              <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-xl shadow-black/20">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/images/screenshots/approval-workflows.png" alt="Configurable approval workflows with multi-step sequences and trigger assignments" className="w-full" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Comparison table ───────────────────────────────────── */}
+      <section className="border-t border-white/[0.06]">
+        <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
+          <div className="text-center mb-14">
+            <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">How it compares</p>
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+              More than a spreadsheet. Less than a rollout.
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-white/[0.08]">
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground" />
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Spreadsheet</th>
+                  <th className="text-left py-3 px-4 font-medium text-primary">PACE PDM</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Enterprise PLM</th>
+                </tr>
+              </thead>
+              <tbody className="text-muted-foreground">
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">Setup time</td>
+                  <td className="py-3 px-4">Already done</td>
+                  <td className="py-3 px-4 text-foreground">Days</td>
+                  <td className="py-3 px-4">Months</td>
+                </tr>
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">Revision control</td>
+                  <td className="py-3 px-4">Manual naming</td>
+                  <td className="py-3 px-4 text-foreground">Built-in</td>
+                  <td className="py-3 px-4">Built-in</td>
+                </tr>
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">ECO approvals</td>
+                  <td className="py-3 px-4">Email chains</td>
+                  <td className="py-3 px-4 text-foreground">Routed workflows</td>
+                  <td className="py-3 px-4">Routed workflows</td>
+                </tr>
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">CAD viewing</td>
+                  <td className="py-3 px-4">Download + local app</td>
+                  <td className="py-3 px-4 text-foreground">In-browser</td>
+                  <td className="py-3 px-4">Varies</td>
+                </tr>
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">BOM management</td>
+                  <td className="py-3 px-4">Flat spreadsheet</td>
+                  <td className="py-3 px-4 text-foreground">Multi-level with rollups</td>
+                  <td className="py-3 px-4">Multi-level with rollups</td>
+                </tr>
+                <tr className="border-b border-white/[0.04]">
+                  <td className="py-3 px-4 font-medium text-foreground">Admin overhead</td>
+                  <td className="py-3 px-4">None</td>
+                  <td className="py-3 px-4 text-foreground">Minimal</td>
+                  <td className="py-3 px-4">Dedicated staff</td>
+                </tr>
+                <tr>
+                  <td className="py-3 px-4 font-medium text-foreground">Cost</td>
+                  <td className="py-3 px-4">Free</td>
+                  <td className="py-3 px-4 text-foreground">Low</td>
+                  <td className="py-3 px-4">$$$ per seat</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       {/* ── Setup + who it's for (two columns) ─────────────────── */}
       <section className="border-t border-white/[0.06] bg-white/[0.01]">
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
@@ -241,6 +335,20 @@ export default function MarketingPage() {
               same week they sign up.
             </p>
           </div>
+        </div>
+      </section>
+
+      {/* ── Pricing ───────────────────────────────────────────── */}
+      <section className="border-t border-white/[0.06] bg-white/[0.01]">
+        <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32 text-center">
+          <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">Pricing</p>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-4">
+            Free while in beta.
+          </h2>
+          <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
+            Full access. No credit card. No feature gates. We&apos;ll introduce
+            paid plans down the road and give beta users a permanent discount.
+          </p>
         </div>
       </section>
 
@@ -290,10 +398,10 @@ export default function MarketingPage() {
               </span>
             </div>
             <div className="flex items-center gap-5 text-xs text-muted-foreground/70">
-              <Link href="/marketing/privacy" className="hover:text-foreground transition-colors">
+              <Link href="/privacy" className="hover:text-foreground transition-colors">
                 Privacy Policy
               </Link>
-              <Link href="/marketing/terms" className="hover:text-foreground transition-colors">
+              <Link href="/terms" className="hover:text-foreground transition-colors">
                 Terms of Use
               </Link>
               <a href="mailto:marc@joinue.com" className="hover:text-foreground transition-colors">

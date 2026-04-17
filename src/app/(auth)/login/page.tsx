@@ -12,11 +12,11 @@ import { Eye, EyeOff, KeyRound } from "lucide-react";
 
 // Derive the marketing site URL from the app URL. If NEXT_PUBLIC_APP_URL
 // is https://app.pacepdm.com, the marketing site is https://pacepdm.com.
-// Falls back to /marketing for localhost where there's no subdomain.
+// Falls back to / for localhost where there's no subdomain.
 const homepageUrl = (() => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
   if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
-  return "/marketing";
+  return "/";
 })();
 
 export default function LoginPage() {

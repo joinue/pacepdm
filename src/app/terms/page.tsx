@@ -11,7 +11,7 @@ export default function TermsOfUsePage() {
     <div className="min-h-screen bg-background text-foreground">
       <nav className="sticky top-0 z-40 border-b border-white/6 bg-background/70 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-6 h-14">
-          <Link href="/marketing" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/images/ppdm-logo-white.png" alt="PACE PDM" className="h-7 w-7" />
             <span className="font-semibold text-sm tracking-tight">PACE PDM</span>
@@ -134,7 +134,7 @@ export default function TermsOfUsePage() {
             <h2>Data handling</h2>
             <p>
               We process and store your data in accordance with our{" "}
-              <Link href="/marketing/privacy" className="text-primary hover:underline">Privacy Policy</Link>,
+              <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>,
               which is incorporated into these Terms by reference. You acknowledge and agree
               that your data is stored on third-party infrastructure and that we rely on
               third-party providers for hosting, storage, and security.
@@ -278,8 +278,8 @@ export default function TermsOfUsePage() {
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <span className="text-xs text-muted-foreground/70">&copy; {new Date().getFullYear()} Joinue LLC</span>
           <div className="flex items-center gap-5 text-xs text-muted-foreground/70">
-            <Link href="/marketing/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
-            <Link href="/marketing/terms" className="text-foreground font-medium">Terms of Use</Link>
+            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="text-foreground font-medium">Terms of Use</Link>
           </div>
         </div>
       </footer>

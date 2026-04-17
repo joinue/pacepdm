@@ -13,7 +13,7 @@ import { Eye, EyeOff } from "lucide-react";
 const homepageUrl = (() => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
   if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
-  return "/marketing";
+  return "/";
 })();
 
 export default function RegisterPage() {

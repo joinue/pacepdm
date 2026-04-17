@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
     <div className="min-h-screen bg-background text-foreground">
       <nav className="sticky top-0 z-40 border-b border-white/[0.06] bg-background/70 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-6 h-14">
-          <Link href="/marketing" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/images/ppdm-logo-white.png" alt="PACE PDM" className="h-7 w-7" />
             <span className="font-semibold text-sm tracking-tight">PACE PDM</span>
@@ -146,8 +146,8 @@ export default function PrivacyPolicyPage() {
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <span className="text-xs text-muted-foreground/70">&copy; {new Date().getFullYear()} Joinue LLC</span>
           <div className="flex items-center gap-5 text-xs text-muted-foreground/70">
-            <Link href="/marketing/privacy" className="text-foreground font-medium">Privacy Policy</Link>
-            <Link href="/marketing/terms" className="hover:text-foreground transition-colors">Terms of Use</Link>
+            <Link href="/privacy" className="text-foreground font-medium">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Use</Link>
           </div>
         </div>
       </footer>
