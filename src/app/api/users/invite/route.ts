@@ -40,6 +40,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "User already exists in this workspace" }, { status: 409 });
     }
 
+    // Guard: if this email is active in another tenant, block the invite.
+    // A user can only be active in one workspace at a time — this prevents
+    // the .single() auth lookup from failing when multiple active rows exist.
+    const { data: activeElsewhere } = await db
+      .from("tenant_users")
+      .select("id, tenant:tenants(name)")
+      .eq("email", email)
+      .eq("isActive", true)
+      .neq("tenantId", tenantUser.tenantId)
+      .limit(1)
+      .maybeSingle();
+
+    if (activeElsewhere) {
+      return NextResponse.json(
+        { error: "This user is active in another workspace. They must be deactivated there before they can join yours." },
+        { status: 409 }
+      );
+    }
+
     // Verify role belongs to tenant
     const { data: role } = await db
       .from("roles")
