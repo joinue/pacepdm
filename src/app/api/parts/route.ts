@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       .from("parts")
       .select("*")
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .order("partNumber");
 
     if (q) {

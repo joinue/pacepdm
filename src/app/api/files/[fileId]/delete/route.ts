@@ -36,10 +36,17 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot delete a released file. Mark it as obsolete first." }, { status: 409 });
     }
 
-    // Delete metadata values and file versions, then the file
-    await db.from("metadata_values").delete().eq("fileId", fileId);
-    await db.from("file_versions").delete().eq("fileId", fileId);
-    await db.from("files").delete().eq("id", fileId);
+    if (file.deletedAt) {
+      return NextResponse.json({ error: "File already deleted" }, { status: 404 });
+    }
+
+    // Soft-delete: mark the file as deleted instead of removing the row.
+    // Child rows (versions, metadata) are left intact for audit trail.
+    const { error: updateError } = await db
+      .from("files")
+      .update({ deletedAt: new Date().toISOString() })
+      .eq("id", fileId);
+    if (updateError) throw updateError;
 
     await logAudit({
       tenantId: tenantUser.tenantId, userId: tenantUser.id,

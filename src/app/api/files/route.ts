@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
           `*, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName), folder:folders!files_folderId_fkey(id, name, path)`
         )
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .eq("isCheckedOut", true)
         .eq("checkedOutById", tenantUser.id)
         .order("checkedOutAt", { ascending: true });
@@ -104,6 +105,7 @@ export async function GET(request: NextRequest) {
           checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
         `)
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .eq("folderId", folderId!)
         .order("name");
       files = (data ?? []) as unknown as RawFileRow[];

@@ -44,6 +44,7 @@ export async function GET(
       .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
       .eq("id", ecoId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .maybeSingle();
 
     if (error) {
@@ -83,7 +84,7 @@ export async function PUT(
     const db = getServiceClient();
 
     const { data: eco } = await db.from("ecos").select("*").eq("id", ecoId).single();
-    if (!eco || eco.tenantId !== tenantUser.tenantId) {
+    if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) {
       return NextResponse.json({ error: "ECO not found" }, { status: 404 });
     }
 
@@ -245,8 +246,8 @@ export async function DELETE(
 
     const db = getServiceClient();
 
-    const { data: eco } = await db.from("ecos").select("id, status, ecoNumber, tenantId").eq("id", ecoId).single();
-    if (!eco || eco.tenantId !== tenantUser.tenantId) {
+    const { data: eco } = await db.from("ecos").select("id, status, ecoNumber, tenantId, deletedAt").eq("id", ecoId).single();
+    if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) {
       return NextResponse.json({ error: "ECO not found" }, { status: 404 });
     }
 
@@ -256,8 +257,13 @@ export async function DELETE(
       }, { status: 400 });
     }
 
-    // eco_items cascade-deletes via FK
-    await db.from("ecos").delete().eq("id", ecoId);
+    // Soft-delete: mark as deleted instead of removing the row.
+    // Child rows (eco_items) are left intact for audit trail.
+    const { error: delError } = await db
+      .from("ecos")
+      .update({ deletedAt: new Date().toISOString() })
+      .eq("id", ecoId);
+    if (delError) throw delError;
 
     await logAudit({
       tenantId: tenantUser.tenantId,

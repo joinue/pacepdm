@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
       .from("approval_groups")
       .select("*")
       .eq("tenantId", tenantUser.tenantId)
-      .order("name");
+      .order("name")
+      .limit(200);
     if (activeOnly) query = query.eq("isActive", true);
 
     const { data: groups } = await query;

@@ -84,7 +84,7 @@ export default function MarketingPage() {
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-primary/[0.07] rounded-full blur-[120px]" />
         </div>
 
-        <div className="relative max-w-6xl mx-auto px-6 pt-28 pb-16 lg:pt-40 lg:pb-20">
+        <div className="relative max-w-6xl mx-auto px-6 pt-20 pb-16 lg:pt-28 lg:pb-20">
           <div className="max-w-3xl space-y-6">
             <p className="text-sm font-medium text-primary tracking-wide uppercase">
               Product Data Management

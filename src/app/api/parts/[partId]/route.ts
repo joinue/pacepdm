@@ -37,6 +37,7 @@ export async function GET(
       .select("*")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     if (!part) {
@@ -149,6 +150,7 @@ export async function PUT(
       .select("partNumber")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!existing) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
@@ -196,8 +198,8 @@ export async function DELETE(
     const { partId } = await params;
     const db = getServiceClient();
 
-    const { data: existing } = await db.from("parts").select("partNumber, name").eq("id", partId).eq("tenantId", tenantUser.tenantId).single();
-    if (!existing) {
+    const { data: existing } = await db.from("parts").select("partNumber, name, deletedAt").eq("id", partId).eq("tenantId", tenantUser.tenantId).single();
+    if (!existing || existing.deletedAt) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
     }
 
@@ -207,7 +209,11 @@ export async function DELETE(
       return NextResponse.json({ error: `Cannot delete — part is used in ${count} BOM item(s). Remove it from all BOMs first.` }, { status: 400 });
     }
 
-    const { error } = await db.from("parts").delete().eq("id", partId);
+    // Soft-delete: mark as deleted instead of removing the row.
+    const { error } = await db
+      .from("parts")
+      .update({ deletedAt: new Date().toISOString() })
+      .eq("id", partId);
     if (error) throw error;
 
     await logAudit({

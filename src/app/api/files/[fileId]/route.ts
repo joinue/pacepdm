@@ -23,7 +23,7 @@ export async function GET(
       .eq("id", fileId)
       .single();
 
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 

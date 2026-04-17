@@ -34,6 +34,7 @@ export async function GET(
       .select("*")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     if (!bom) {
@@ -72,6 +73,7 @@ export async function PUT(
       .select("status, name, createdById")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     if (!existing) {
@@ -199,6 +201,7 @@ export async function DELETE(
       .select("name, status")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     if (!existing) {
@@ -212,8 +215,12 @@ export async function DELETE(
       );
     }
 
-    // CASCADE will delete bom_items
-    const { error } = await db.from("boms").delete().eq("id", bomId);
+    // Soft-delete: mark as deleted instead of removing the row.
+    // Child rows (bom_items, snapshots) are left intact for audit trail.
+    const { error } = await db
+      .from("boms")
+      .update({ deletedAt: new Date().toISOString() })
+      .eq("id", bomId);
     if (error) throw error;
 
     await logAudit({

@@ -27,7 +27,9 @@ export async function GET() {
       .from("ecos")
       .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
       .eq("tenantId", tenantUser.tenantId)
-      .order("createdAt", { ascending: false });
+      .is("deletedAt", null)
+      .order("createdAt", { ascending: false })
+      .limit(500);
 
     return NextResponse.json(ecos || []);
   } catch (err) {

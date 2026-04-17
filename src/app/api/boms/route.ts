@@ -19,7 +19,9 @@ export async function GET() {
       .from("boms")
       .select("*")
       .eq("tenantId", tenantUser.tenantId)
-      .order("createdAt", { ascending: false });
+      .is("deletedAt", null)
+      .order("createdAt", { ascending: false })
+      .limit(500);
     return NextResponse.json(data || []);
   } catch (err) {
     console.error("Failed to fetch BOMs:", err);
