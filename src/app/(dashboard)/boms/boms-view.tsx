@@ -331,10 +331,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
               return (
                 <button
                   key={bom.id}
-                  className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-150 ${
+                  className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
                     selectedBomId === bom.id
-                      ? "bg-foreground/12 text-foreground font-medium"
-                      : "text-muted-foreground hover:text-foreground hover:bg-foreground/6"
+                      ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
+                      : "bg-card border-border/60 text-foreground hover:border-foreground/20 hover:bg-foreground/5"
                   }`}
                   onClick={() => selectBom(bom.id)}
                 >
