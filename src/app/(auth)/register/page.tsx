@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff } from "lucide-react";
 
+const homepageUrl = "/marketing";
+
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -75,8 +77,10 @@ export default function RegisterPage() {
   return (
     <div className="min-h-dvh flex flex-col sm:items-center sm:justify-center bg-background">
       <div className="flex flex-col items-center pt-12 pb-6 sm:flex-none sm:pt-0 sm:pb-8">
-        <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
-        <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">PACE PDM</h1>
+        <a href={homepageUrl} className="flex flex-col items-center">
+          <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
+          <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">PACE PDM</h1>
+        </a>
         <p className="text-sm sm:text-xs text-muted-foreground mt-1">Create your workspace</p>
       </div>
 
