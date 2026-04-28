@@ -63,12 +63,14 @@ export function useVaultBrowser({ rootFolderId, userId }: UseVaultBrowserOptions
     rootFolderId,
   });
 
-  // Bulk delete + zip download
+  // Bulk delete + zip download (selections and current folder)
   const bulkActions = useBulkActions({
     selectedFiles: selection.selectedFiles,
     clearSelection: () => selection.setSelectedFiles(new Set()),
     refresh,
     downloadSingle: fileActions.handleDownload,
+    currentFolderId: navigation.currentFolderId,
+    rootFolderId,
   });
 
   // Drag-and-drop file moves
@@ -151,6 +153,9 @@ export function useVaultBrowser({ rootFolderId, userId }: UseVaultBrowserOptions
     bulkDownloading: bulkActions.bulkDownloading,
     handleBulkDownload: bulkActions.handleBulkDownload,
     handleBulkDelete: bulkActions.handleBulkDelete,
+    canDownloadFolder: bulkActions.canDownloadFolder,
+    folderDownloading: bulkActions.folderDownloading,
+    handleFolderDownload: bulkActions.handleFolderDownload,
 
     // Drag-and-drop
     dragFileId: dnd.dragFileId,

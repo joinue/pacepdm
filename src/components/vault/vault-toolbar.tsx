@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  FolderPlus, Upload, Download, Trash2, Search, LogOut, ArrowLeft,
+  FolderPlus, Upload, Download, FolderDown, Trash2, Search, LogOut, ArrowLeft,
 } from "lucide-react";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -93,9 +93,25 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
               )}
             </>
           )}
-          {/* Folder-scoped actions (create folder, upload) don't make sense
-              in flat views — there's no single destination folder — so we
-              hide them. Exiting the flat view brings them back. */}
+          {/* Folder-scoped actions (download folder, create folder, upload)
+              don't make sense in flat views — there's no single source/dest
+              folder — so we hide them. Exiting the flat view brings them
+              back. The folder-download button is also hidden at the vault
+              root to discourage "download everything" misclicks. */}
+          {!isFlat && vault.canDownloadFolder && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={vault.handleFolderDownload}
+              disabled={vault.folderDownloading}
+              title="Download this folder and everything inside it as a ZIP"
+            >
+              <FolderDown className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">
+                {vault.folderDownloading ? "Preparing..." : "Download folder"}
+              </span>
+            </Button>
+          )}
           {!isFlat && canCreateFolder && (
             <Button variant="outline" size="sm" onClick={() => vault.setShowCreateFolder(true)}>
               <FolderPlus className="w-4 h-4 sm:mr-2" />
