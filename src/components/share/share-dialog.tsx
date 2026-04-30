@@ -16,8 +16,17 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { toast } from "sonner";
-import { Copy, Trash2, ExternalLink, Link as LinkIcon, Lock } from "lucide-react";
+import {
+  Copy,
+  Trash2,
+  ExternalLink,
+  Link as LinkIcon,
+  Lock,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { ShareActivityPanel } from "./share-activity-panel";
 
 interface ShareLink {
   id: string;
@@ -75,6 +84,10 @@ export function ShareDialog({
 }: ShareDialogProps) {
   const [links, setLinks] = useState<ShareLink[]>([]);
   const [loading, setLoading] = useState(false);
+  // Track which row's activity panel is open. At most one open at a time
+  // — keeps the dialog scrollable and avoids the "everyone expanded"
+  // mess when there are many links.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Form state for creating a new link
   const [label, setLabel] = useState("");
@@ -193,62 +206,86 @@ export function ShareDialog({
             </div>
           ) : (
             <ul className="space-y-2">
-              {links.map((link) => (
-                <li
-                  key={link.id}
-                  className="flex items-center gap-2 rounded-md border bg-card px-3 py-2"
-                >
-                  <div className="flex-1 min-w-0 overflow-hidden">
-                    <div className="flex items-center gap-2">
-                      <code className="text-xs truncate block min-w-0">{link.url}</code>
-                      {link.hasPassword && (
-                        <Lock className="w-3 h-3 text-muted-foreground shrink-0" />
-                      )}
+              {links.map((link) => {
+                const isExpanded = expandedId === link.id;
+                return (
+                  <li
+                    key={link.id}
+                    className="rounded-md border bg-card"
+                  >
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs truncate block min-w-0">{link.url}</code>
+                          {link.hasPassword && (
+                            <Lock className="w-3 h-3 text-muted-foreground shrink-0" />
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground flex gap-3 mt-0.5">
+                          {link.label && (
+                            <span className="truncate max-w-45">{link.label}</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedId(isExpanded ? null : link.id)
+                            }
+                            className="inline-flex items-center gap-0.5 hover:text-foreground transition-colors"
+                            title="View access activity"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-3 h-3" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3" />
+                            )}
+                            {link.accessCount} view{link.accessCount === 1 ? "" : "s"}
+                          </button>
+                          <span>
+                            {link.expiresAt ? (
+                              <>
+                                Expires <FormattedDate date={link.expiresAt} variant="date" />
+                              </>
+                            ) : (
+                              "No expiry"
+                            )}
+                          </span>
+                          <span>{link.allowDownload ? "Download allowed" : "View only"}</span>
+                        </div>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleCopy(link.url)}
+                        title="Copy link"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
+                        title="Open in new tab"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleRevoke(link.id)}
+                        title="Revoke link"
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <div className="text-[11px] text-muted-foreground flex gap-3 mt-0.5">
-                      {link.label && <span className="truncate max-w-45">{link.label}</span>}
-                      <span>
-                        {link.accessCount} view{link.accessCount === 1 ? "" : "s"}
-                      </span>
-                      <span>
-                        {link.expiresAt ? (
-                          <>
-                            Expires <FormattedDate date={link.expiresAt} variant="date" />
-                          </>
-                        ) : (
-                          "No expiry"
-                        )}
-                      </span>
-                      <span>{link.allowDownload ? "Download allowed" : "View only"}</span>
-                    </div>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleCopy(link.url)}
-                    title="Copy link"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
-                    title="Open in new tab"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => handleRevoke(link.id)}
-                    title="Revoke link"
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </li>
-              ))}
+                    {isExpanded && (
+                      <div className="border-t px-3 py-2">
+                        <ShareActivityPanel tokenId={link.id} />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -5,8 +5,9 @@ import {
   unlockCookieName,
   verifyUnlockCookie,
   bumpAccessCount,
+  logShareAccess,
 } from "@/lib/share-tokens";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
   getReleaseById,
   buildReleaseZipStream,
@@ -69,6 +70,15 @@ export async function GET(
   }
 
   void bumpAccessCount(row.id);
+  logShareAccess({
+    tenantId: row.tenantId,
+    tokenId: row.id,
+    resourceType: row.resourceType,
+    resourceId: row.resourceId,
+    action: "zip-download",
+    ipAddress: getClientIp(request),
+    userAgent: request.headers.get("user-agent"),
+  });
 
   const stream = buildReleaseZipStream(release, db);
   return new Response(stream, {

@@ -5,8 +5,9 @@ import {
   verifyPassword,
   unlockCookieName,
   unlockCookieValue,
+  logShareAccess,
 } from "@/lib/share-tokens";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const UnlockSchema = z.object({
   password: z.string().min(1).max(200),
@@ -40,6 +41,18 @@ export async function POST(
     if (!parsed.ok) return parsed.response;
 
     const ok = await verifyPassword(parsed.data.password, result.token.passwordHash);
+    const row = result.token;
+    logShareAccess({
+      tenantId: row.tenantId,
+      tokenId: row.id,
+      resourceType: row.resourceType,
+      resourceId: row.resourceId,
+      action: "unlock",
+      success: ok,
+      failureReason: ok ? null : "wrong_password",
+      ipAddress: getClientIp(request),
+      userAgent: request.headers.get("user-agent"),
+    });
     if (!ok) {
       return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
     }

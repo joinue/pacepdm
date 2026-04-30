@@ -268,3 +268,166 @@ export async function bumpAccessCount(tokenId: string): Promise<void> {
     })
     .eq("id", tokenId);
 }
+
+// ─── Per-access audit log ─────────────────────────────────────────────────
+//
+// Records every public hit on a share link in `share_token_access`. Backs
+// the activity panel in the share dialog and gives security a forensic
+// trail. See migration-037-share-token-access-log.sql.
+
+export type ShareAccessAction =
+  | "resolve"
+  | "unlock"
+  | "view-content"
+  | "download"
+  | "zip-download";
+
+export type ShareAccessFailureReason =
+  | "revoked"
+  | "expired"
+  | "wrong_password"
+  | "not_allowed";
+
+export interface ShareAccessRow {
+  id: string;
+  tenantId: string;
+  tokenId: string;
+  resourceType: ShareResourceType;
+  resourceId: string;
+  action: ShareAccessAction;
+  success: boolean;
+  failureReason: string | null;
+  fileId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+interface LogShareAccessInput {
+  tenantId: string;
+  tokenId: string;
+  resourceType: ShareResourceType;
+  resourceId: string;
+  action: ShareAccessAction;
+  success?: boolean;
+  failureReason?: ShareAccessFailureReason | null;
+  fileId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+/**
+ * Insert a row in `share_token_access`. Designed to be `void`-called from
+ * public routes — never throws, never blocks the response. A logger
+ * outage shouldn't deny content to a guest viewer.
+ *
+ * The userAgent is truncated to 500 chars before insert to bound the row
+ * size; some bots ship pathological UAs.
+ */
+export function logShareAccess(input: LogShareAccessInput): void {
+  void (async () => {
+    try {
+      const db = getServiceClient();
+      await db.from("share_token_access").insert({
+        id: uuid(),
+        tenantId: input.tenantId,
+        tokenId: input.tokenId,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        action: input.action,
+        success: input.success ?? true,
+        failureReason: input.failureReason ?? null,
+        fileId: input.fileId ?? null,
+        ipAddress: input.ipAddress ?? null,
+        userAgent: input.userAgent ? input.userAgent.slice(0, 500) : null,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      // Logger failure is non-fatal; surface it for server logs.
+      console.warn("share access log failed:", err);
+    }
+  })();
+}
+
+export interface ListShareTokenAccessOptions {
+  /** Page size; capped at 100 by callers. */
+  limit?: number;
+  /** Exclusive cursor — return rows with createdAt < this ISO string. */
+  before?: string | null;
+}
+
+export interface ShareAccessRowWithFile extends ShareAccessRow {
+  /** Resolved file name when `fileId` is present and the file still exists. */
+  fileName: string | null;
+}
+
+/**
+ * Paginated read of access events for a single token, newest first. Joins
+ * `files` to surface a friendly file name for download/view-content rows.
+ *
+ * Caller is responsible for tenant + permission gating. This helper trusts
+ * its inputs and applies tenant scope as a defense-in-depth check.
+ */
+export async function listShareTokenAccess(
+  tenantId: string,
+  tokenId: string,
+  options: ListShareTokenAccessOptions = {}
+): Promise<ShareAccessRowWithFile[]> {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+  const db = getServiceClient();
+  let query = db
+    .from("share_token_access")
+    .select("*")
+    .eq("tenantId", tenantId)
+    .eq("tokenId", tokenId)
+    .order("createdAt", { ascending: false })
+    .limit(limit);
+  if (options.before) {
+    query = query.lt("createdAt", options.before);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = (data ?? []) as ShareAccessRow[];
+
+  const fileIds = Array.from(
+    new Set(rows.map((r) => r.fileId).filter((id): id is string => !!id))
+  );
+  let fileNames: Map<string, string> = new Map();
+  if (fileIds.length > 0) {
+    const { data: files } = await db
+      .from("files")
+      .select("id, name")
+      .in("id", fileIds);
+    fileNames = new Map(
+      ((files ?? []) as Array<{ id: string; name: string }>).map((f) => [
+        f.id,
+        f.name,
+      ])
+    );
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    fileName: r.fileId ? fileNames.get(r.fileId) ?? null : null,
+  }));
+}
+
+/**
+ * Fetch a single share token by id within a tenant. Returns null if not
+ * found — used by the activity endpoint to authorize the caller without
+ * needing a separate lookup.
+ */
+export async function getShareTokenById(
+  tenantId: string,
+  tokenId: string
+): Promise<ShareTokenRow | null> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from("share_tokens")
+    .select("*")
+    .eq("id", tokenId)
+    .eq("tenantId", tenantId)
+    .single();
+  if (error || !data) return null;
+  return data as ShareTokenRow;
+}

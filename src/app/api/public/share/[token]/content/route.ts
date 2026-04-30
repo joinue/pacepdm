@@ -5,8 +5,9 @@ import {
   bumpAccessCount,
   unlockCookieName,
   verifyUnlockCookie,
+  logShareAccess,
 } from "@/lib/share-tokens";
-import { enforceRateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getReleaseById, type ReleaseManifest } from "@/lib/releases";
 
 // Type dispatch for the preview path — mirrors the authenticated
@@ -72,6 +73,8 @@ export async function GET(
     }
 
     const row = result.token;
+    const ipAddress = getClientIp(request);
+    const userAgent = request.headers.get("user-agent");
 
     // Password gate: if the token has a password, require the unlock
     // cookie set by /api/public/share/:token/unlock. Note that the cookie
@@ -123,6 +126,18 @@ export async function GET(
             allowDownload: row.allowDownload,
           };
           void bumpAccessCount(row.id);
+          // Thumbnail-only branch: no `download` row — the URL points at
+          // the thumbnail bitmap, not the underlying SW file.
+          logShareAccess({
+            tenantId: row.tenantId,
+            tokenId: row.id,
+            resourceType: row.resourceType,
+            resourceId: row.resourceId,
+            action: "view-content",
+            fileId: file.id,
+            ipAddress,
+            userAgent,
+          });
           return NextResponse.json(payload, {
             headers: { "X-Robots-Tag": "noindex, nofollow" },
           });
@@ -145,6 +160,7 @@ export async function GET(
           fileType: ext,
           allowDownload: row.allowDownload,
         };
+        let downloadIssued = false;
         if (row.allowDownload) {
           const { data: version } = await db
             .from("file_versions")
@@ -156,10 +172,35 @@ export async function GET(
             const { data: signed } = await db.storage
               .from("vault")
               .createSignedUrl(version.storageKey, 300);
-            if (signed) payload.url = signed.signedUrl;
+            if (signed) {
+              payload.url = signed.signedUrl;
+              downloadIssued = true;
+            }
           }
         }
         void bumpAccessCount(row.id);
+        logShareAccess({
+          tenantId: row.tenantId,
+          tokenId: row.id,
+          resourceType: row.resourceType,
+          resourceId: row.resourceId,
+          action: "view-content",
+          fileId: file.id,
+          ipAddress,
+          userAgent,
+        });
+        if (downloadIssued) {
+          logShareAccess({
+            tenantId: row.tenantId,
+            tokenId: row.id,
+            resourceType: row.resourceType,
+            resourceId: row.resourceId,
+            action: "download",
+            fileId: file.id,
+            ipAddress,
+            userAgent,
+          });
+        }
         return NextResponse.json(payload, {
           headers: { "X-Robots-Tag": "noindex, nofollow" },
         });
@@ -204,6 +245,34 @@ export async function GET(
         allowDownload: row.allowDownload,
       };
       void bumpAccessCount(row.id);
+      logShareAccess({
+        tenantId: row.tenantId,
+        tokenId: row.id,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+        action: "view-content",
+        fileId: file.id,
+        ipAddress,
+        userAgent,
+      });
+      // The signed URL is needed to render the preview itself, but it
+      // also lets the guest save the file. When `allowDownload` is true
+      // we count it as a download opportunity. When false, the UI hides
+      // the download button — but a determined viewer can still save
+      // the previewed PDF. That's a separate hardening item; this audit
+      // only logs `download` when downloads are formally permitted.
+      if (row.allowDownload) {
+        logShareAccess({
+          tenantId: row.tenantId,
+          tokenId: row.id,
+          resourceType: row.resourceType,
+          resourceId: row.resourceId,
+          action: "download",
+          fileId: file.id,
+          ipAddress,
+          userAgent,
+        });
+      }
       return NextResponse.json(payload, {
         headers: { "X-Robots-Tag": "noindex, nofollow" },
       });
@@ -227,6 +296,15 @@ export async function GET(
         allowDownload: row.allowDownload,
       };
       void bumpAccessCount(row.id);
+      logShareAccess({
+        tenantId: row.tenantId,
+        tokenId: row.id,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+        action: "view-content",
+        ipAddress,
+        userAgent,
+      });
       return NextResponse.json(payload, {
         headers: { "X-Robots-Tag": "noindex, nofollow" },
       });
@@ -269,6 +347,15 @@ export async function GET(
       allowDownload: row.allowDownload,
     };
     void bumpAccessCount(row.id);
+    logShareAccess({
+      tenantId: row.tenantId,
+      tokenId: row.id,
+      resourceType: row.resourceType,
+      resourceId: row.resourceId,
+      action: "view-content",
+      ipAddress,
+      userAgent,
+    });
     return NextResponse.json(payload, {
       headers: { "X-Robots-Tag": "noindex, nofollow" },
     });

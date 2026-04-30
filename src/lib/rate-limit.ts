@@ -62,14 +62,21 @@ function consume(key: string, config: LimiterConfig): boolean {
 }
 
 /**
- * Pull a stable client key from a request. Vercel sets `x-forwarded-for`;
+ * Pull a stable client IP from a request. Vercel sets `x-forwarded-for`;
  * local dev sometimes only has the socket address. We accept the first
  * forwarded IP since later entries can be spoofed by the client.
+ *
+ * Exported so callers that need the IP for audit logging share the same
+ * extraction logic as the rate limiter.
  */
-function clientKey(request: NextRequest): string {
+export function getClientIp(request: NextRequest): string {
   const xff = request.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
   return request.headers.get("x-real-ip") ?? "unknown";
+}
+
+function clientKey(request: NextRequest): string {
+  return getClientIp(request);
 }
 
 /**
