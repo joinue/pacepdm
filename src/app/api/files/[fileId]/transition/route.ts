@@ -43,12 +43,36 @@ export async function POST(
 
     const { data: transition } = await db
       .from("lifecycle_transitions")
-      .select("*, fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name), toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name)")
+      .select(`
+        *,
+        fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name),
+        toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name),
+        lifecycle:lifecycles!lifecycle_transitions_lifecycleId_fkey(tenantId)
+      `)
       .eq("id", transitionId)
       .single();
 
     if (!transition) {
       return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
+    }
+
+    // Tenant scoping: a transition's lifecycle must live in the caller's
+    // tenant. Without this a user could pass a foreign tenant's
+    // transition ID and — because the workflow assignment lookup is
+    // keyed on (tenantId, transitionId) and would find nothing — slip
+    // straight past the approval gate into direct execution.
+    const txnLifecycle = transition.lifecycle as unknown as { tenantId: string } | null;
+    if (!txnLifecycle || txnLifecycle.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
+    }
+
+    // Lifecycle pinning: a file tied to a specific lifecycle must use
+    // that lifecycle's transitions. Otherwise a tenant with multiple
+    // lifecycles (or anyone with ADMIN_LIFECYCLE who creates a "loose"
+    // lifecycle) lets a user mix transitions across lifecycles to dodge
+    // the approval requirement on the file's actual lifecycle.
+    if (file.lifecycleId && transition.lifecycleId !== file.lifecycleId) {
+      return NextResponse.json({ error: "Transition does not belong to this file's lifecycle" }, { status: 400 });
     }
 
     if (transition.fromState.name !== file.lifecycleState) {

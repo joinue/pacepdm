@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, permissionsExceedingActor, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, optionalString } from "@/lib/validation";
 
@@ -32,6 +32,26 @@ export async function PUT(
     const { data: role } = await db.from("roles").select("*").eq("id", roleId).single();
     if (!role || role.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // System roles (Admin / Engineer / Viewer) are part of the
+    // application's contract — neutering Admin's permissions would
+    // brick the workspace. DELETE already blocks them; PUT needs the
+    // same fence so an ADMIN_ROLES holder can't strip "*" from Admin.
+    if (role.isSystem) {
+      return NextResponse.json({ error: "Cannot edit system roles" }, { status: 400 });
+    }
+
+    // Privilege ceiling — same reason as POST in /api/roles. You can
+    // only assign permissions you yourself hold.
+    if (permissions !== undefined) {
+      const excess = permissionsExceedingActor(permissions, perms);
+      if (excess.length > 0) {
+        return NextResponse.json(
+          { error: `Cannot grant permissions you don't hold: ${excess.join(", ")}` },
+          { status: 403 }
+        );
+      }
     }
 
     await db.from("roles").update({

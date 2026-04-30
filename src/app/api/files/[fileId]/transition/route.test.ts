@@ -133,16 +133,20 @@ const wipFile = {
 const releaseTransition = {
   id: "trans-1",
   name: "Release",
+  lifecycleId: null,
   fromState: { name: "WIP" },
   toState: { name: "Released" },
+  lifecycle: { tenantId: "tenant-1" },
   requiresApproval: false,
 };
 
 const reviseTransition = {
   id: "trans-2",
   name: "Revise",
+  lifecycleId: null,
   fromState: { name: "Released" },
   toState: { name: "WIP" },
+  lifecycle: { tenantId: "tenant-1" },
   requiresApproval: false,
 };
 
@@ -252,6 +256,41 @@ describe("POST /api/files/[fileId]/transition", () => {
       isFrozen: false,
       revision: "B", // A → B
     });
+  });
+
+  it("rejects a transition whose lifecycle is in another tenant", async () => {
+    mockTenantUser.current = engineer;
+    tableResults["files"] = { data: { ...wipFile }, error: null };
+    tableResults["lifecycle_transitions"] = {
+      data: { ...releaseTransition, lifecycle: { tenantId: "tenant-OTHER" } },
+      error: null,
+    };
+    mockFindWorkflow.mockResolvedValue(null);
+
+    const res = await POST(makeRequest(), { params });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/invalid transition/i);
+    expect(updateCalls.length).toBe(0);
+  });
+
+  it("rejects a transition that does not belong to the file's lifecycle", async () => {
+    mockTenantUser.current = engineer;
+    tableResults["files"] = {
+      data: { ...wipFile, lifecycleId: "lc-1" },
+      error: null,
+    };
+    tableResults["lifecycle_transitions"] = {
+      data: { ...releaseTransition, lifecycleId: "lc-2" },
+      error: null,
+    };
+    mockFindWorkflow.mockResolvedValue(null);
+
+    const res = await POST(makeRequest(), { params });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/file's lifecycle/i);
+    expect(updateCalls.length).toBe(0);
   });
 
   it("routes through approval engine when workflow exists", async () => {

@@ -34,6 +34,25 @@ export async function POST(
     const { workflowId } = await params;
     const db = getServiceClient();
 
+    // Tenant scoping: the workflow_steps table inherits tenant via its
+    // workflow, and the group inherits via approval_groups.tenantId.
+    // Without explicit checks here an admin in tenant A could append
+    // steps to tenant B's workflows, or wire a tenant-B group into a
+    // tenant-A workflow — routing approvals to people in another org.
+    const [{ data: workflow }, { data: group }] = await Promise.all([
+      db.from("approval_workflows").select("id, tenantId").eq("id", workflowId).single(),
+      db.from("approval_groups").select("id, tenantId, isActive").eq("id", body.groupId).single(),
+    ]);
+    if (!workflow || workflow.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
+    if (!group || group.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Group not found" }, { status: 404 });
+    }
+    if (!group.isActive) {
+      return NextResponse.json({ error: "Cannot add an archived group to a workflow" }, { status: 400 });
+    }
+
     // Get next step order
     const { data: existing } = await db.from("approval_workflow_steps")
       .select("stepOrder").eq("workflowId", workflowId).order("stepOrder", { ascending: false }).limit(1);
@@ -85,6 +104,18 @@ export async function DELETE(
 
     const { workflowId } = await params;
     const db = getServiceClient();
+
+    // Tenant scoping: see POST. The eq("workflowId", ...) below scopes
+    // the delete to this workflow, but only if we've already verified
+    // that the workflow itself belongs to the caller's tenant.
+    const { data: workflow } = await db
+      .from("approval_workflows")
+      .select("id, tenantId")
+      .eq("id", workflowId)
+      .single();
+    if (!workflow || workflow.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
 
     await db.from("approval_workflow_steps").delete().eq("id", stepId).eq("workflowId", workflowId);
 

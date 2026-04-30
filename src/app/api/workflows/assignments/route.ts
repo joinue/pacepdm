@@ -28,6 +28,32 @@ export async function POST(request: NextRequest) {
 
     const db = getServiceClient();
 
+    // Tenant scoping: the assignment row carries the caller's tenantId,
+    // but the rows it references (workflows, transitions) don't get
+    // checked by the FK. Without these guards, an admin in tenant A
+    // could create an assignment that points at tenant B's workflow or
+    // transition — corrupting the workflow lookup for either tenant.
+    const { data: workflow } = await db
+      .from("approval_workflows")
+      .select("id, tenantId")
+      .eq("id", workflowId)
+      .single();
+    if (!workflow || workflow.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
+    }
+
+    if (transitionId) {
+      const { data: transition } = await db
+        .from("lifecycle_transitions")
+        .select("id, lifecycle:lifecycles!lifecycle_transitions_lifecycleId_fkey(tenantId)")
+        .eq("id", transitionId)
+        .single();
+      const lifecycle = transition?.lifecycle as unknown as { tenantId: string } | null;
+      if (!transition || !lifecycle || lifecycle.tenantId !== tenantUser.tenantId) {
+        return NextResponse.json({ error: "Transition not found" }, { status: 404 });
+      }
+    }
+
     const { data, error } = await db.from("approval_workflow_assignments").insert({
       id: uuid(),
       tenantId: tenantUser.tenantId,

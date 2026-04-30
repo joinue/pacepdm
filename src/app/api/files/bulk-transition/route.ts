@@ -29,11 +29,25 @@ export async function POST(request: NextRequest) {
 
     const { data: transition } = await db
       .from("lifecycle_transitions")
-      .select("*, fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name), toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name)")
+      .select(`
+        *,
+        fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name),
+        toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name),
+        lifecycle:lifecycles!lifecycle_transitions_lifecycleId_fkey(tenantId)
+      `)
       .eq("id", transitionId)
       .single();
 
     if (!transition) {
+      return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
+    }
+
+    // Tenant scoping: see /api/files/[fileId]/transition for the
+    // rationale. Without this, a foreign-tenant transition slips past
+    // the workflow gate (no assignment matches in this tenant) into
+    // direct bulk execution.
+    const txnLifecycle = transition.lifecycle as unknown as { tenantId: string } | null;
+    if (!txnLifecycle || txnLifecycle.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
     }
 
@@ -73,6 +87,13 @@ export async function POST(request: NextRequest) {
       }
       if (!canEditFolder(scope, file.folderId)) {
         errors.push(`${file.name}: no edit access`);
+        continue;
+      }
+      // Lifecycle pinning — see /api/files/[fileId]/transition. A file
+      // pinned to a specific lifecycle must use that lifecycle's
+      // transitions, not another lifecycle's same-named one.
+      if (file.lifecycleId && transition.lifecycleId !== file.lifecycleId) {
+        errors.push(`${file.name}: transition does not belong to this file's lifecycle`);
         continue;
       }
       if (file.lifecycleState !== transition.fromState.name) {

@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/auth";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 
+// authUserId / email are derived from the verified session, not the
+// request body. Letting the client name them lets a logged-in user
+// plant a tenant_users row keyed to *another* user's auth identity.
 const CreateTenantSchema = z.object({
   companyName: nonEmptyString,
   fullName: nonEmptyString,
-  email: z.string().email("Must be a valid email"),
-  authUserId: nonEmptyString,
 });
 
 function slugify(text: string): string {
@@ -22,11 +24,36 @@ function slugify(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createServerSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !user.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const parsed = await parseBody(request, CreateTenantSchema);
     if (!parsed.ok) return parsed.response;
-    const { companyName, fullName, email, authUserId } = parsed.data;
+    const { companyName, fullName } = parsed.data;
+    const authUserId = user.id;
+    const email = user.email;
 
+    // One tenant per auth identity. Without this an authenticated user
+    // can hit the onboarding endpoint repeatedly and spam tenants — and
+    // the second one would silently orphan their tenant_users row from
+    // the first since findTenantUser uses .single().
     const db = getServiceClient();
+    const { data: existingMembership } = await db
+      .from("tenant_users")
+      .select("tenantId")
+      .eq("authUserId", authUserId)
+      .eq("isActive", true)
+      .maybeSingle();
+    if (existingMembership) {
+      return NextResponse.json(
+        { error: "You're already a member of a workspace" },
+        { status: 409 }
+      );
+    }
+
     const now = new Date().toISOString();
 
     // Generate unique slug

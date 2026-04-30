@@ -47,6 +47,22 @@ export function hasPermission(
   return userPermissions.includes(required);
 }
 
+/**
+ * Returns the subset of `requested` that the actor doesn't already
+ * hold. Used by role-authoring routes to prevent privilege escalation
+ * — an admin-of-roles whose own role lacks (say) ADMIN_USERS shouldn't
+ * be able to mint a new role that grants ADMIN_USERS and then assign
+ * themselves to it. Wildcard "*" can only be granted by someone who
+ * already holds "*".
+ */
+export function permissionsExceedingActor(
+  requested: string[],
+  actor: string[]
+): string[] {
+  if (actor.includes("*")) return [];
+  return requested.filter((p) => !actor.includes(p));
+}
+
 export const DEFAULT_ROLES = {
   Admin: {
     description: "Full system access",

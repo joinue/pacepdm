@@ -21,6 +21,7 @@ export default async function UsersPage() {
     <UsersClient
       users={users || []}
       roles={roles || []}
+      currentUserId={tenantUser.id}
     />
   );
 }

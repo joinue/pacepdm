@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { jitProvisionSsoUser } from "@/lib/sso-jit";
 
 // Re-export shared constants so existing imports from "@/lib/auth" still work
-export { PERMISSIONS, hasPermission, DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/permissions";
+export { PERMISSIONS, hasPermission, permissionsExceedingActor, DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/permissions";
 
 export async function getSession() {
   const supabase = await createServerSupabaseClient();

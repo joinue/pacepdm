@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { getApiTenantUser, hasPermission, permissionsExceedingActor, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
@@ -44,6 +44,18 @@ export async function POST(request: NextRequest) {
     const parsed = await parseBody(request, CreateRoleSchema);
     if (!parsed.ok) return parsed.response;
     const { name, description, permissions: rolePerms } = parsed.data;
+
+    // Privilege ceiling — you can't grant a permission you don't already
+    // hold. Without this, anyone with ADMIN_ROLES could mint a "*" role
+    // and (via /api/users/[userId] role reassignment) escalate to full
+    // admin without ADMIN_USERS or ADMIN_SETTINGS.
+    const excess = permissionsExceedingActor(rolePerms || [], permissions);
+    if (excess.length > 0) {
+      return NextResponse.json(
+        { error: `Cannot grant permissions you don't hold: ${excess.join(", ")}` },
+        { status: 403 }
+      );
+    }
 
     const db = getServiceClient();
     const now = new Date().toISOString();

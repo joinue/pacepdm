@@ -32,7 +32,15 @@ interface Role {
   name: string;
 }
 
-export function UsersClient({ users: initialUsers, roles }: { users: User[]; roles: Role[] }) {
+export function UsersClient({
+  users: initialUsers,
+  roles,
+  currentUserId,
+}: {
+  users: User[];
+  roles: Role[];
+  currentUserId: string;
+}) {
   const [users, setUsers] = useState(initialUsers);
   const [showInvite, setShowInvite] = useState(false);
   const [email, setEmail] = useState("");
@@ -127,6 +135,41 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
     }
   }
 
+  async function changeRole(user: User, newRoleId: string) {
+    if (user.role?.id === newRoleId) return;
+    const newRole = roles.find((r) => r.id === newRoleId);
+    if (!newRole) return;
+
+    // Optimistically swap; revert on failure so the dropdown reflects
+    // server truth (e.g., privilege ceiling rejected the change).
+    const previousRole = user.role;
+    setUsers((prev) =>
+      prev.map((u) => (u.id === user.id ? { ...u, role: { id: newRole.id, name: newRole.name } } : u))
+    );
+
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roleId: newRoleId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to change role");
+        setUsers((prev) =>
+          prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u))
+        );
+        return;
+      }
+      toast.success(`${user.fullName} is now ${newRole.name}`);
+    } catch {
+      toast.error("Failed to change role");
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u))
+      );
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -149,28 +192,56 @@ export function UsersClient({ users: initialUsers, roles }: { users: User[]; rol
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell className="font-medium">{user.fullName}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell><Badge variant="secondary">{user.role?.name}</Badge></TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-auto px-2 py-0.5"
-                    onClick={() => handleStatusClick(user)}
-                  >
-                    <Badge variant={user.isActive ? "default" : "destructive"}>
-                      {user.isActive ? "Active" : "Inactive"}
-                    </Badge>
-                  </Button>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  <FormattedDate date={user.createdAt} variant="date" />
-                </TableCell>
-              </TableRow>
-            ))}
+            {users.map((user) => {
+              // Self-row uses a read-only badge — the API rejects
+              // self-role-change anyway, no point showing an input that
+              // would only ever 400.
+              const isSelf = user.id === currentUserId;
+              return (
+                <TableRow key={user.id}>
+                  <TableCell className="font-medium">{user.fullName}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>
+                    {isSelf ? (
+                      <Badge variant="secondary">{user.role?.name}</Badge>
+                    ) : (
+                      <Select
+                        value={user.role?.id ?? ""}
+                        onValueChange={(v) => v && changeRole(user, v)}
+                      >
+                        <SelectTrigger className="h-8 w-36">
+                          <SelectValue placeholder="—">
+                            {(value) => roles.find((r) => r.id === value)?.name ?? "—"}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto px-2 py-0.5"
+                      onClick={() => handleStatusClick(user)}
+                    >
+                      <Badge variant={user.isActive ? "default" : "destructive"}>
+                        {user.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </Button>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    <FormattedDate date={user.createdAt} variant="date" />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

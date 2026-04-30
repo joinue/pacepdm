@@ -26,6 +26,22 @@ export async function POST(
     const { groupId } = await params;
     const db = getServiceClient();
 
+    // Tenant scoping: approval_group_members has no tenantId column, so
+    // the FK alone won't catch cross-tenant injection. Verify both the
+    // group and the target user belong to the caller's tenant before
+    // wiring them together — otherwise an admin in tenant A could add
+    // tenant-B users into tenant A's approver pools (or the reverse).
+    const [{ data: group }, { data: targetUser }] = await Promise.all([
+      db.from("approval_groups").select("id, tenantId").eq("id", groupId).single(),
+      db.from("tenant_users").select("id, tenantId").eq("id", userId).single(),
+    ]);
+    if (!group || group.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Group not found" }, { status: 404 });
+    }
+    if (!targetUser || targetUser.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     const { error } = await db.from("approval_group_members").insert({
       id: uuid(),
       groupId,
@@ -72,6 +88,18 @@ export async function DELETE(
 
     const { groupId } = await params;
     const db = getServiceClient();
+
+    // Tenant scoping: see POST. Verify the group belongs to the caller's
+    // tenant before deleting any membership rows — otherwise an admin
+    // could remove members from another tenant's groups.
+    const { data: group } = await db
+      .from("approval_groups")
+      .select("id, tenantId")
+      .eq("id", groupId)
+      .single();
+    if (!group || group.tenantId !== tenantUser.tenantId) {
+      return NextResponse.json({ error: "Group not found" }, { status: 404 });
+    }
 
     await db.from("approval_group_members").delete().eq("groupId", groupId).eq("userId", userId);
 

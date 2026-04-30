@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { recallRequest, resubmitAfterRework, getRequestTimeline } from "@/lib/approval-engine";
+import { requireFileAccess } from "@/lib/folder-access-guards";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 
 const RequestActionSchema = z.object({
@@ -19,10 +20,9 @@ export async function GET(request: NextRequest) {
     const requestId = searchParams.get("requestId");
 
     if (requestId) {
-      // Get timeline for a specific request
-      const timeline = await getRequestTimeline(requestId);
-
-      // Also get the full request with decisions
+      // Fetch the request first so we can authorize before exposing the
+      // timeline and decisions (which may include reviewer comments and
+      // rework reasons that aren't safe to leak tenant-wide).
       const { data: req } = await db.from("approval_requests").select(`
         *,
         requestedBy:tenant_users!approval_requests_requestedById_fkey(fullName, email),
@@ -37,6 +37,28 @@ export async function GET(request: NextRequest) {
 
       if (!req) return NextResponse.json({ error: "Request not found" }, { status: 404 });
 
+      // Visibility tracks the underlying entity. For file-transition
+      // requests, gate on folder ACL view access — a user who can't see
+      // the file shouldn't see who's reviewing it. For ECOs, tenant
+      // membership is enough (ECOs are tenant-wide change records and
+      // the audit trail is expected to be readable across engineering).
+      // The requester always sees their own request.
+      const isOwnRequest = req.requestedById === tenantUser.id;
+      if (!isOwnRequest && req.entityType === "file") {
+        const { data: file } = await db
+          .from("files")
+          .select("folderId")
+          .eq("id", req.entityId)
+          .eq("tenantId", tenantUser.tenantId)
+          .single();
+        if (!file) {
+          return NextResponse.json({ error: "Request not found" }, { status: 404 });
+        }
+        const access = await requireFileAccess(tenantUser, file, "view");
+        if (!access.ok) return access.response;
+      }
+
+      const timeline = await getRequestTimeline(requestId);
       return NextResponse.json({ ...req, timeline });
     }
 

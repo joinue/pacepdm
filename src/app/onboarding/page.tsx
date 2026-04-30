@@ -18,7 +18,6 @@ export default function OnboardingPage() {
   const [companyName, setCompanyName] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [authUserId, setAuthUserId] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -39,7 +38,6 @@ export default function OnboardingPage() {
       const company = meta.company_name || "";
       const userEmail = user.email || "";
 
-      setAuthUserId(user.id);
       setEmail(userEmail);
       setFullName(name);
       setCompanyName(company);
@@ -53,8 +51,6 @@ export default function OnboardingPage() {
           body: JSON.stringify({
             companyName: company,
             fullName: name,
-            email: userEmail,
-            authUserId: user.id,
           }),
         });
 
@@ -97,8 +93,6 @@ export default function OnboardingPage() {
         body: JSON.stringify({
           companyName,
           fullName,
-          email,
-          authUserId,
         }),
       });
 
