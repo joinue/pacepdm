@@ -15,7 +15,10 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { UserPlus, AlertTriangle } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { UserPlus, AlertTriangle, MoreHorizontal, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 
 interface User {
@@ -50,6 +53,11 @@ export function UsersClient({
 
   // Deactivation confirmation
   const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
+
+  // Removal confirmation — distinct from deactivation. Hard-deletes the
+  // tenant_users row and is irreversible (the admin has to re-invite).
+  const [removeTarget, setRemoveTarget] = useState<User | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -135,6 +143,30 @@ export function UsersClient({
     }
   }
 
+  async function confirmRemove() {
+    if (!removeTarget) return;
+    setRemoving(true);
+    try {
+      const res = await fetch(`/api/users/${removeTarget.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to remove user");
+        setRemoving(false);
+        return;
+      }
+      setUsers((prev) => prev.filter((u) => u.id !== removeTarget.id));
+      if (data.releasedCheckouts > 0) {
+        toast.success(`${removeTarget.fullName} removed. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`);
+      } else {
+        toast.success(`${removeTarget.fullName} removed from workspace`);
+      }
+      setRemoveTarget(null);
+    } catch {
+      toast.error("Failed to remove user");
+    }
+    setRemoving(false);
+  }
+
   async function changeRole(user: User, newRoleId: string) {
     if (user.role?.id === newRoleId) return;
     const newRole = roles.find((r) => r.id === newRoleId);
@@ -189,6 +221,9 @@ export function UsersClient({
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Joined</TableHead>
+              <TableHead className="w-12 text-right">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -209,7 +244,7 @@ export function UsersClient({
                         value={user.role?.id ?? ""}
                         onValueChange={(v) => v && changeRole(user, v)}
                       >
-                        <SelectTrigger className="h-8 w-36">
+                        <SelectTrigger className="w-44">
                           <SelectValue placeholder="—">
                             {(value) => roles.find((r) => r.id === value)?.name ?? "—"}
                           </SelectValue>
@@ -238,6 +273,29 @@ export function UsersClient({
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     <FormattedDate date={user.createdAt} variant="date" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {!isSelf && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Open actions</span>
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => setRemoveTarget(user)}
+                          >
+                            <UserMinus className="h-4 w-4" />
+                            Remove from workspace
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -335,6 +393,39 @@ export function UsersClient({
             </Button>
             <Button type="button" variant="destructive" onClick={confirmDeactivate}>
               Deactivate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Removal confirmation — irreversible. Distinct copy from
+          deactivation so admins don't conflate the two. */}
+      <Dialog open={!!removeTarget} onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove user from workspace</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove {removeTarget?.fullName}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <div className="text-sm space-y-1">
+                <p>This permanently removes their access to this workspace and cannot be undone.</p>
+                <p>Any files they have checked out will be released. To restore access, you&apos;ll need to invite them again.</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Their authored data (files, parts, BOMs, ECOs, approval decisions) is preserved, but the author field will show as unknown.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={removing} onClick={() => setRemoveTarget(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" disabled={removing} onClick={confirmRemove}>
+              {removing ? "Removing..." : "Remove"}
             </Button>
           </DialogFooter>
         </DialogContent>

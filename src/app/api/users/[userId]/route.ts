@@ -198,6 +198,121 @@ export async function PATCH(
   }
 }
 
+/**
+ * Hard-remove a tenant user. The auth.users row is preserved (the same
+ * person may belong to other workspaces), but the tenant_users
+ * membership row is deleted. Authored data — files, parts, BOMs, ECOs,
+ * approval decisions — survives with NULL author thanks to the
+ * SET NULL FKs established in migrations 035 and 038.
+ *
+ * Distinct from PATCH { isActive: false }: deactivation is reversible
+ * and keeps the user listed in the admin UI; remove is permanent and
+ * makes the row vanish. Both flows release the user's checkouts so
+ * other team members aren't blocked.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ userId: string }> }
+) {
+  try {
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const permissions = tenantUser.role.permissions as string[];
+
+    if (!hasPermission(permissions, PERMISSIONS.ADMIN_USERS)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { userId } = await params;
+    const db = getServiceClient();
+
+    if (userId === tenantUser.id) {
+      return NextResponse.json({ error: "You cannot remove yourself" }, { status: 400 });
+    }
+
+    const { data: targetUser } = await db
+      .from("tenant_users")
+      .select("id, fullName, tenantId, roleId, isActive")
+      .eq("id", userId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+
+    if (!targetUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Last-admin guard — same reasoning as deactivate. Removing the
+    // only "*" holder strands the tenant.
+    if (targetUser.isActive && (await isAdminRole(db, targetUser.roleId))) {
+      const remainingAdmins = await countOtherActiveAdmins(db, tenantUser.tenantId, userId);
+      if (remainingAdmins === 0) {
+        return NextResponse.json(
+          { error: "Cannot remove the last active admin in this workspace" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Release checkouts before delete. files.checkedOutById is
+    // SET NULL, so the FK alone wouldn't block the delete — but
+    // leaving isCheckedOut=true with a null owner produces a row
+    // nobody can check in. Clear the flag and audit the release the
+    // same way deactivate does.
+    let releasedCheckouts = 0;
+    const { data: checkedOut } = await db
+      .from("files")
+      .select("id, name")
+      .eq("tenantId", tenantUser.tenantId)
+      .eq("checkedOutById", userId)
+      .eq("isCheckedOut", true);
+
+    if (checkedOut && checkedOut.length > 0) {
+      const now = new Date().toISOString();
+      await db
+        .from("files")
+        .update({ isCheckedOut: false, checkedOutById: null, checkedOutAt: null, updatedAt: now })
+        .eq("tenantId", tenantUser.tenantId)
+        .eq("checkedOutById", userId)
+        .eq("isCheckedOut", true);
+      releasedCheckouts = checkedOut.length;
+
+      for (const file of checkedOut) {
+        await logAudit({
+          tenantId: tenantUser.tenantId,
+          userId: tenantUser.id,
+          action: "file.undo_checkout",
+          entityType: "file",
+          entityId: file.id,
+          details: { name: file.name, reason: "user_removed" },
+        });
+      }
+    }
+
+    const { error: deleteError } = await db
+      .from("tenant_users")
+      .delete()
+      .eq("id", userId)
+      .eq("tenantId", tenantUser.tenantId);
+
+    if (deleteError) throw deleteError;
+
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "user.remove",
+      entityType: "user",
+      entityId: userId,
+      details: { targetUser: targetUser.fullName, releasedCheckouts },
+    });
+
+    return NextResponse.json({ success: true, releasedCheckouts });
+  } catch (err) {
+    console.error("Failed to remove user:", err);
+    const message = err instanceof Error ? err.message : "Failed to remove user";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 type Db = ReturnType<typeof getServiceClient>;
 
 async function isAdminRole(db: Db, roleId: string): Promise<boolean> {
