@@ -35,23 +35,42 @@ export async function GET(
   { params }: { params: Promise<{ bomId: string }> }
 ) {
   try {
-    await getApiTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { bomId } = await params;
     const db = getServiceClient();
 
-    const { data: bom } = await db.from("boms").select("name").eq("id", bomId).single();
-    const items = await getItemsForBom(db, bomId);
+    const { data: bom } = await db
+      .from("boms")
+      .select("name")
+      .eq("id", bomId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
 
     if (!bom) {
       return NextResponse.json({ error: "BOM not found" }, { status: 404 });
     }
 
-    // Flatten sub-assemblies recursively (max 5 levels deep)
+    const items = await getItemsForBom(db, bomId);
+
+    // Flatten sub-assemblies recursively (max 5 levels deep). Each
+    // linkedBomId must be re-verified against the caller's tenant — a
+    // bom_item row could otherwise reference a foreign-tenant BOM and
+    // leak its contents through the export.
     const allRows: { prefix: string; item: BomItemRow; depth: number }[] = [];
     async function flatten(bomItems: BomItemRow[], prefix: string, depth: number) {
       for (const item of bomItems) {
         allRows.push({ prefix, item, depth });
         if (item.linkedBomId && depth < 5) {
+          const { data: linkedBom } = await db
+            .from("boms")
+            .select("id")
+            .eq("id", item.linkedBomId)
+            .eq("tenantId", tenantUser.tenantId)
+            .single();
+          if (!linkedBom) continue;
           const subItems = await getItemsForBom(db, item.linkedBomId);
           await flatten(subItems, `${prefix}${item.itemNumber}.`, depth + 1);
         }

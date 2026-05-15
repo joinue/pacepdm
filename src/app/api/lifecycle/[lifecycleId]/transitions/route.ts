@@ -19,7 +19,10 @@ export async function GET(
   { params }: { params: Promise<{ lifecycleId: string }> }
 ) {
   try {
-    await getApiTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { lifecycleId } = await params;
     const { searchParams } = new URL(request.url);
     const fromState = searchParams.get("fromState");
@@ -29,6 +32,18 @@ export async function GET(
     }
 
     const db = getServiceClient();
+
+    // Verify lifecycle belongs to caller's tenant before returning anything
+    // about it (including state names, transition names, etc.).
+    const { data: lifecycle } = await db
+      .from("lifecycles")
+      .select("id")
+      .eq("id", lifecycleId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+    if (!lifecycle) {
+      return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
+    }
 
     // Get the state ID for the current state name
     const { data: stateRow } = await db

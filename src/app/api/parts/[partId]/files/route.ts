@@ -32,6 +32,19 @@ export async function POST(
     const { partId } = await params;
     const db = getServiceClient();
 
+    // Verify the part belongs to the caller's tenant before mutating any
+    // part_files row keyed off it — without this, a user can attach their
+    // own file to a foreign-tenant part and pollute its where-used graph.
+    const { data: partRecord } = await db
+      .from("parts")
+      .select("id")
+      .eq("id", partId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+    if (!partRecord) {
+      return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
+
     // Snapshot the file name for the audit log — tenant-scoped lookup also
     // prevents linking a file from another tenant by guessing IDs.
     const { data: fileRecord } = await db
@@ -104,6 +117,19 @@ export async function DELETE(
 
     const { partId } = await params;
     const db = getServiceClient();
+
+    // Verify the part belongs to the caller's tenant before deleting any
+    // part_files row keyed off it. Without this, an attacker who knows
+    // a (foreign-tenant partId, any fileId) pair can delete the link.
+    const { data: partRecord } = await db
+      .from("parts")
+      .select("id")
+      .eq("id", partId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
+    if (!partRecord) {
+      return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
 
     // Snapshot the file name before the link is gone, so the audit entry
     // remains readable even if the file is later renamed or deleted.

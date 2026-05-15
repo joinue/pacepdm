@@ -43,12 +43,15 @@ function extractPermissions(role: { permissions: unknown }): string[] {
 /**
  * Call the get_folder_access_scope RPC and return a strongly-typed scope.
  *
- * Fallback behavior: if the RPC is missing (e.g. migration 012 hasn't been
- * run yet in this environment) or the call otherwise fails, we log loudly
- * and return a fully-open scope. This keeps the vault usable during
- * deployment instead of hard-failing every folder listing with a 500.
- * Once the migration lands, the RPC responds normally and the fallback
- * path is dead code.
+ * Fallback behavior:
+ *   - If the RPC is missing (PGRST202) — pre-migration environment —
+ *     we return a fully-open scope so a half-migrated dev/preview env
+ *     stays usable. Once migration 012 lands the path is dead code.
+ *   - For any other RPC error we fail closed: bypass-permission users
+ *     still see everything, but regular users are denied access until
+ *     the underlying problem is resolved. Better to lock the vault for
+ *     30 seconds during a Supabase blip than to expose every restricted
+ *     folder to every tenant member.
  */
 export async function getFolderAccessScope(
   tenantUser: TenantUserForAccess
@@ -70,14 +73,18 @@ export async function getFolderAccessScope(
     if (result.error) throw result.error;
     data = result.data;
   } catch (err) {
-    // PGRST202 / "function does not exist" is the expected pre-migration
-    // state. Any other error is probably a real problem, but failing
-    // closed would lock everyone out of the vault — so we log and open.
-    console.warn(
-      "[folder-access] get_folder_access_scope RPC unavailable — falling back to open scope. Run migration 012 to enable folder ACLs.",
+    if (isMissingFunctionError(err)) {
+      console.warn(
+        "[folder-access] get_folder_access_scope RPC missing — falling back to open scope. Run migration 012 to enable folder ACLs.",
+        err
+      );
+      return openScope();
+    }
+    console.error(
+      "[folder-access] get_folder_access_scope RPC failed — failing closed for non-bypass users.",
       err
     );
-    return openScope();
+    return closedScope(bypass);
   }
 
   const raw = (data ?? {}) as {
@@ -168,4 +175,29 @@ export function openScope(): FolderAccessScope {
     denied: new Set(),
     restricted: new Set(),
   };
+}
+
+/**
+ * Closed scope — nothing allowed unless the user holds bypass. Used as
+ * the fail-closed default when the access-resolver RPC errors. With
+ * `restrictedAny: true`, every predicate falls through to the empty
+ * allowed/editable/admin sets and returns false for non-bypass users.
+ */
+export function closedScope(bypass: boolean): FolderAccessScope {
+  return {
+    bypass,
+    restrictedAny: true,
+    allowed: new Set(),
+    editable: new Set(),
+    admin: new Set(),
+    denied: new Set(),
+    restricted: new Set(),
+  };
+}
+
+function isMissingFunctionError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "PGRST202" || e.code === "42883") return true;
+  return typeof e.message === "string" && /function .* does not exist/i.test(e.message);
 }

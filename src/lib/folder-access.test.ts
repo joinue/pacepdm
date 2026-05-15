@@ -6,6 +6,7 @@ import {
   isRestrictedFolder,
   filterViewable,
   openScope,
+  closedScope,
   type FolderAccessScope,
 } from "./folder-access";
 
@@ -157,5 +158,30 @@ describe("filterViewable", () => {
     const folders = [{ id: "f1" }, { id: "f2" }];
     const result = filterViewable(s, folders, (f) => f.id);
     expect(result).toEqual([{ id: "f1" }]);
+  });
+});
+
+describe("closedScope (fail-closed fallback)", () => {
+  it("denies all access for non-bypass users", () => {
+    const s = closedScope(false);
+    expect(canViewFolder(s, "any")).toBe(false);
+    expect(canEditFolder(s, "any")).toBe(false);
+    expect(canAdminFolder(s, "any")).toBe(false);
+  });
+
+  it("still grants full access to bypass users", () => {
+    const s = closedScope(true);
+    expect(canViewFolder(s, "any")).toBe(true);
+    expect(canEditFolder(s, "any")).toBe(true);
+    expect(canAdminFolder(s, "any")).toBe(true);
+  });
+
+  it("filters every item out for non-bypass users", () => {
+    const s = closedScope(false);
+    const files = [
+      { id: "1", folderId: "a" },
+      { id: "2", folderId: "b" },
+    ];
+    expect(filterViewable(s, files, (f) => f.folderId)).toEqual([]);
   });
 });

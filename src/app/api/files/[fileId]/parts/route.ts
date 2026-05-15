@@ -28,6 +28,7 @@ export async function GET(
       .select("id")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
@@ -69,6 +70,7 @@ export async function POST(
       .select("id, name, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
@@ -144,6 +146,7 @@ export async function DELETE(
       .select("id, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 

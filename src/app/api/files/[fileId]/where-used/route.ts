@@ -33,10 +33,10 @@ export async function GET(
 
     const { data: file } = await db
       .from("files")
-      .select("id, tenantId, folderId")
+      .select("id, tenantId, folderId, deletedAt")
       .eq("id", fileId)
       .single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
     const access = await requireFileAccess(tenantUser, file, "view");

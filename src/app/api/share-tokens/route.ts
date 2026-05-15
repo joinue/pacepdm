@@ -157,6 +157,13 @@ export async function GET(request: NextRequest) {
     if (!tenantUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    // Listing tokens exposes the public URL — same sensitivity as creating
+    // one, so gate it by the same permission. Without this, any tenant
+    // member can enumerate active share URLs for any resource ID.
+    const permissions = tenantUser.role.permissions as string[];
+    if (!hasPermission(permissions, PERMISSIONS.SHARE_CREATE)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const parsed = parseSearchParams(request, ListSchema);
     if (!parsed.ok) return parsed.response;
