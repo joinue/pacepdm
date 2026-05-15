@@ -161,14 +161,16 @@ describe("PUT /api/files/[fileId]/metadata", () => {
     expect(res.status).toBe(200);
   });
 
-  it("allows admin to edit metadata on checked-out file", async () => {
+  it("returns 423 even for admins when file is checked out by another user", async () => {
     mockTenantUser.current = admin;
     tableResults["files"] = {
       data: { ...wipFile, isCheckedOut: true, checkedOutById: "user-other" },
       error: null,
     };
     const res = await PUT(makeRequest({ description: "admin edit" }), { params });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(423);
+    const body = await res.json();
+    expect(body.error).toMatch(/checked out by another user/i);
   });
 
   it("succeeds for unlocked WIP file", async () => {
