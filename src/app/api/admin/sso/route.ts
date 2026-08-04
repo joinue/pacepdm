@@ -166,4 +166,3 @@ function normalizeDomain(raw: string): string | null {
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return null;
   return d;
 }
-

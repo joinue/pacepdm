@@ -35,11 +35,14 @@ const { tableResults, updateCalls, mockFrom } = vi.hoisted(() => {
           return updateChain;
         };
       }
-      updateChain.then = ((resolve: (v: unknown) => void) => resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
+      updateChain.then = ((resolve: (v: unknown) => void) =>
+        resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
       return updateChain;
     };
 
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (...args: unknown[]) => unknown;
+    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+      ...args: unknown[]
+    ) => unknown;
 
     return chain;
   }

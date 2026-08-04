@@ -5,16 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import {
-  KeyRound, Trash2, Loader2, Copy, CheckCircle2, AlertCircle, Clock,
-} from "lucide-react";
+import { KeyRound, Trash2, Loader2, Copy, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 
@@ -111,8 +111,8 @@ export default function SsoAdminPage() {
           Single Sign-On
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Self-serve SAML SSO. Add a domain, prove you own it via DNS, paste your
-          identity provider&rsquo;s metadata, and you&rsquo;re live — no support ticket.
+          Self-serve SAML SSO. Add a domain, prove you own it via DNS, paste your identity
+          provider&rsquo;s metadata, and you&rsquo;re live — no support ticket.
         </p>
       </div>
 
@@ -120,8 +120,8 @@ export default function SsoAdminPage() {
         <CardHeader>
           <CardTitle className="text-base">Add a domain</CardTitle>
           <CardDescription>
-            Users whose email ends in this domain will be redirected to your IdP
-            once setup is complete.
+            Users whose email ends in this domain will be redirected to your IdP once setup is
+            complete.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -157,8 +157,8 @@ export default function SsoAdminPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Users provisioned via SSO land in this role. You can change individual
-                users later in the Users admin page.
+                Users provisioned via SSO land in this role. You can change individual users later
+                in the Users admin page.
               </p>
             </div>
             <Button type="submit" disabled={adding || !newDomain.trim() || !newRoleId}>
@@ -242,7 +242,12 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
   }
 
   async function handleDelete() {
-    if (!confirm(`Remove SSO for ${domain.domain}? Existing sessions keep working, but new sign-ins from this domain will fall back to password auth.`)) return;
+    if (
+      !confirm(
+        `Remove SSO for ${domain.domain}? Existing sessions keep working, but new sign-ins from this domain will fall back to password auth.`
+      )
+    )
+      return;
     setBusy("delete");
     try {
       await fetchJson(`/api/admin/sso/${domain.id}`, { method: "DELETE" });
@@ -262,9 +267,13 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
   }
 
   const statusIcon =
-    domain.status === "active" ? <CheckCircle2 className="w-4 h-4 text-primary" />
-    : domain.status === "error" ? <AlertCircle className="w-4 h-4 text-destructive" />
-    : <Clock className="w-4 h-4 text-muted-foreground" />;
+    domain.status === "active" ? (
+      <CheckCircle2 className="w-4 h-4 text-primary" />
+    ) : domain.status === "error" ? (
+      <AlertCircle className="w-4 h-4 text-destructive" />
+    ) : (
+      <Clock className="w-4 h-4 text-muted-foreground" />
+    );
 
   return (
     <Card>
@@ -272,7 +281,7 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="font-mono text-sm font-semibold">{domain.domain}</p>
-            <Badge variant={STATUS_VARIANT[domain.status]} className="text-[10px]">
+            <Badge variant={STATUS_VARIANT[domain.status]} className="text-3xs">
               <span className="flex items-center gap-1">
                 {statusIcon}
                 {STATUS_LABEL[domain.status]}
@@ -290,7 +299,11 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
           disabled={busy === "delete"}
           aria-label={`Remove ${domain.domain}`}
         >
-          {busy === "delete" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          {busy === "delete" ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Trash2 className="w-4 h-4" />
+          )}
         </Button>
       </CardHeader>
 
@@ -300,8 +313,8 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
             <div>
               <p className="text-sm font-medium mb-2">Step 1 — Verify DNS</p>
               <p className="text-xs text-muted-foreground mb-3">
-                Add this TXT record at your DNS provider. Once it propagates (usually a
-                few minutes), click Verify.
+                Add this TXT record at your DNS provider. Once it propagates (usually a few
+                minutes), click Verify.
               </p>
               <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-xs font-mono">
                 <div className="flex items-center gap-2">
@@ -343,16 +356,13 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
         {(domain.status === "verified" || domain.status === "error") && (
           <>
             <div>
-              <p className="text-sm font-medium mb-2">
-                Step 2 — Add IdP metadata
-              </p>
+              <p className="text-sm font-medium mb-2">Step 2 — Add IdP metadata</p>
               <p className="text-xs text-muted-foreground mb-3">
-                Export the SAML metadata from your identity provider (Okta, Azure AD,
-                JumpCloud, etc.). Provide either a public URL Supabase can fetch, or
-                paste the XML directly.
+                Export the SAML metadata from your identity provider (Okta, Azure AD, JumpCloud,
+                etc.). Provide either a public URL Supabase can fetch, or paste the XML directly.
               </p>
               {domain.existingUserCount > 0 && (
-                <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900 dark:text-amber-200 flex gap-2">
+                <div className="mb-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-warning flex gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-medium">
@@ -360,9 +370,10 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
                       {domain.existingUserCount === 1 ? "user" : "users"} will be migrated
                     </p>
                     <p className="mt-0.5">
-                      On their next sign-in, users with an <span className="font-mono">@{domain.domain}</span>{" "}
-                      email will be redirected to your IdP instead of entering a password. Their
-                      history, approvals, and checkouts stay intact.
+                      On their next sign-in, users with an{" "}
+                      <span className="font-mono">@{domain.domain}</span> email will be redirected
+                      to your IdP instead of entering a password. Their history, approvals, and
+                      checkouts stay intact.
                     </p>
                   </div>
                 </div>
@@ -380,9 +391,7 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
                     onChange={(e) => setMetadataUrl(e.target.value)}
                   />
                 </div>
-                <div className="text-center text-xs text-muted-foreground">
-                  or
-                </div>
+                <div className="text-center text-xs text-muted-foreground">or</div>
                 <div className="space-y-1.5">
                   <Label htmlFor={`metadata-xml-${domain.id}`} className="text-xs">
                     Metadata XML
@@ -406,8 +415,8 @@ function DomainCard({ domain, onChange }: { domain: SsoDomain; onChange: () => v
         {domain.status === "active" && (
           <div className="text-xs text-muted-foreground space-y-1">
             <p>
-              Users from <span className="font-mono">{domain.domain}</span> will be
-              redirected to your IdP automatically on sign-in.
+              Users from <span className="font-mono">{domain.domain}</span> will be redirected to
+              your IdP automatically on sign-in.
             </p>
             {domain.providerId && (
               <p className="font-mono truncate">Supabase provider ID: {domain.providerId}</p>

@@ -1,9 +1,4 @@
-import {
-  randomBytes,
-  scrypt as scryptCb,
-  createHmac,
-  timingSafeEqual,
-} from "node:crypto";
+import { randomBytes, scrypt as scryptCb, createHmac, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { v4 as uuid } from "uuid";
 import { getServiceClient } from "@/lib/db";
@@ -81,10 +76,7 @@ export async function hashPassword(password: string): Promise<string> {
  * so incorrect passwords all take the same time to reject — no timing
  * oracle for attackers fishing for the first matching byte.
  */
-export async function verifyPassword(
-  password: string,
-  stored: string
-): Promise<boolean> {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(":");
   if (!saltHex || !hashHex) return false;
   try {
@@ -111,9 +103,7 @@ const UNLOCK_COOKIE_PREFIX = "share_unlock_";
 function getSigningKey(): string {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is required to sign share unlock cookies"
-    );
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required to sign share unlock cookies");
   }
   return key;
 }
@@ -132,10 +122,7 @@ export function unlockCookieValue(token: string): string {
   return signUnlock(token);
 }
 
-export function verifyUnlockCookie(
-  token: string,
-  cookieValue: string | undefined
-): boolean {
+export function verifyUnlockCookie(token: string, cookieValue: string | undefined): boolean {
   if (!cookieValue) return false;
   const expected = Buffer.from(signUnlock(token));
   const actual = Buffer.from(cookieValue);
@@ -156,9 +143,7 @@ export interface CreateShareTokenInput {
   label: string | null;
 }
 
-export async function createShareToken(
-  input: CreateShareTokenInput
-): Promise<ShareTokenRow> {
+export async function createShareToken(input: CreateShareTokenInput): Promise<ShareTokenRow> {
   const db = getServiceClient();
   const row = {
     id: uuid(),
@@ -176,11 +161,7 @@ export async function createShareToken(
     accessCount: 0,
     lastAccessedAt: null,
   };
-  const { data, error } = await db
-    .from("share_tokens")
-    .insert(row)
-    .select()
-    .single();
+  const { data, error } = await db.from("share_tokens").insert(row).select().single();
   if (error) throw error;
   return data as ShareTokenRow;
 }
@@ -227,15 +208,9 @@ export async function revokeShareToken(
  * `bumpAccessCount` after the caller decides the content is actually
  * being delivered (so unlock-screen hits don't inflate the counter).
  */
-export async function resolveToken(
-  token: string
-): Promise<ResolveResult | ResolveFailure> {
+export async function resolveToken(token: string): Promise<ResolveResult | ResolveFailure> {
   const db = getServiceClient();
-  const { data, error } = await db
-    .from("share_tokens")
-    .select("*")
-    .eq("token", token)
-    .single();
+  const { data, error } = await db.from("share_tokens").select("*").eq("token", token).single();
   if (error || !data) return { ok: false, reason: "not_found" };
   const row = data as ShareTokenRow;
   if (row.revokedAt) return { ok: false, reason: "revoked" };
@@ -254,11 +229,7 @@ export async function bumpAccessCount(tokenId: string): Promise<void> {
   // Read-modify-write — acceptable at expected share-link volumes.
   // If this becomes hot, swap for an atomic UPDATE ... SET accessCount
   // = accessCount + 1 via a Postgres RPC.
-  const { data } = await db
-    .from("share_tokens")
-    .select("accessCount")
-    .eq("id", tokenId)
-    .single();
+  const { data } = await db.from("share_tokens").select("accessCount").eq("id", tokenId).single();
   const current = (data?.accessCount as number | undefined) ?? 0;
   await db
     .from("share_tokens")
@@ -275,18 +246,9 @@ export async function bumpAccessCount(tokenId: string): Promise<void> {
 // the activity panel in the share dialog and gives security a forensic
 // trail. See migration-037-share-token-access-log.sql.
 
-export type ShareAccessAction =
-  | "resolve"
-  | "unlock"
-  | "view-content"
-  | "download"
-  | "zip-download";
+export type ShareAccessAction = "resolve" | "unlock" | "view-content" | "download" | "zip-download";
 
-export type ShareAccessFailureReason =
-  | "revoked"
-  | "expired"
-  | "wrong_password"
-  | "not_allowed";
+export type ShareAccessFailureReason = "revoked" | "expired" | "wrong_password" | "not_allowed";
 
 export interface ShareAccessRow {
   id: string;
@@ -389,26 +351,18 @@ export async function listShareTokenAccess(
   if (error) throw error;
   const rows = (data ?? []) as ShareAccessRow[];
 
-  const fileIds = Array.from(
-    new Set(rows.map((r) => r.fileId).filter((id): id is string => !!id))
-  );
+  const fileIds = Array.from(new Set(rows.map((r) => r.fileId).filter((id): id is string => !!id)));
   let fileNames: Map<string, string> = new Map();
   if (fileIds.length > 0) {
-    const { data: files } = await db
-      .from("files")
-      .select("id, name")
-      .in("id", fileIds);
+    const { data: files } = await db.from("files").select("id, name").in("id", fileIds);
     fileNames = new Map(
-      ((files ?? []) as Array<{ id: string; name: string }>).map((f) => [
-        f.id,
-        f.name,
-      ])
+      ((files ?? []) as Array<{ id: string; name: string }>).map((f) => [f.id, f.name])
     );
   }
 
   return rows.map((r) => ({
     ...r,
-    fileName: r.fileId ? fileNames.get(r.fileId) ?? null : null,
+    fileName: r.fileId ? (fileNames.get(r.fileId) ?? null) : null,
   }));
 }
 

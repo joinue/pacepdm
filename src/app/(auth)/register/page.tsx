@@ -94,7 +94,8 @@ export default function RegisterPage() {
             </p>
             <p className="text-sm sm:text-xs font-medium mb-4">{email}</p>
             <p className="text-sm sm:text-xs text-muted-foreground">
-              Click the link in the email to verify your account and finish setting up your workspace.
+              Click the link in the email to verify your account and finish setting up your
+              workspace.
             </p>
             <p className="text-sm sm:text-xs text-muted-foreground mt-6 sm:mt-4">
               Already confirmed?{" "}
@@ -133,7 +134,9 @@ export default function RegisterPage() {
             )}
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="companyName" className="text-sm sm:text-xs">Company Name</Label>
+              <Label htmlFor="companyName" className="text-sm sm:text-xs">
+                Company Name
+              </Label>
               <Input
                 id="companyName"
                 placeholder="PACE Technologies"
@@ -147,7 +150,9 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="fullName" className="text-sm sm:text-xs">Full Name</Label>
+              <Label htmlFor="fullName" className="text-sm sm:text-xs">
+                Full Name
+              </Label>
               <Input
                 id="fullName"
                 placeholder="John Smith"
@@ -160,7 +165,9 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
+              <Label htmlFor="email" className="text-sm sm:text-xs">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -174,7 +181,9 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="password" className="text-sm sm:text-xs">Password</Label>
+              <Label htmlFor="password" className="text-sm sm:text-xs">
+                Password
+              </Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -193,12 +202,20 @@ export default function RegisterPage() {
                   className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                   tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> : <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />}
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  )}
                 </button>
               </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+              disabled={loading}
+            >
               {loading ? "Creating..." : "Create Workspace"}
             </Button>
           </div>

@@ -67,7 +67,9 @@ export default function AcceptInvitePage() {
       <div className="flex-1 flex flex-col items-center justify-end pb-8 pt-16 sm:flex-none sm:pt-0 sm:pb-8">
         <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
         <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">Accept Invitation</h1>
-        <p className="text-sm sm:text-xs text-muted-foreground mt-1">Set a password to finish creating your account</p>
+        <p className="text-sm sm:text-xs text-muted-foreground mt-1">
+          Set a password to finish creating your account
+        </p>
       </div>
 
       <div className="shrink-0 sm:w-full sm:max-w-sm">
@@ -77,11 +79,15 @@ export default function AcceptInvitePage() {
         >
           <div className="space-y-5 sm:space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">{error}</div>
+              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
+                {error}
+              </div>
             )}
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="password" className="text-sm sm:text-xs">New Password</Label>
+              <Label htmlFor="password" className="text-sm sm:text-xs">
+                New Password
+              </Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -101,13 +107,19 @@ export default function AcceptInvitePage() {
                   className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                   tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> : <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />}
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  )}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="confirm" className="text-sm sm:text-xs">Confirm Password</Label>
+              <Label htmlFor="confirm" className="text-sm sm:text-xs">
+                Confirm Password
+              </Label>
               <Input
                 id="confirm"
                 type={showPassword ? "text" : "password"}
@@ -119,7 +131,11 @@ export default function AcceptInvitePage() {
               />
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading || !ready}>
+            <Button
+              type="submit"
+              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+              disabled={loading || !ready}
+            >
               {loading ? "Setting password..." : "Accept & Continue"}
             </Button>
           </div>

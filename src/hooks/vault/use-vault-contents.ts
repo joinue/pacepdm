@@ -11,14 +11,9 @@ import type { VaultViewMode } from "./use-vault-navigation";
  * the usual per-folder listing; other variants are flat cross-folder views
  * that don't have a folder tree and return files from many folders at once.
  */
-export type VaultContentSource =
-  | { kind: "folder"; folderId: string }
-  | { kind: "checkouts" };
+export type VaultContentSource = { kind: "folder"; folderId: string } | { kind: "checkouts" };
 
-function sourceFromViewMode(
-  viewMode: VaultViewMode,
-  folderId: string
-): VaultContentSource {
+function sourceFromViewMode(viewMode: VaultViewMode, folderId: string): VaultContentSource {
   if (viewMode === "checkouts") return { kind: "checkouts" };
   return { kind: "folder", folderId };
 }
@@ -31,40 +26,31 @@ function sourceFromViewMode(
  * flagged). In flat-view modes the folders array is always empty — flat
  * views show files from many folders at once, with no tree to navigate.
  */
-export function useVaultContents(
-  viewMode: VaultViewMode,
-  currentFolderId: string
-) {
+export function useVaultContents(viewMode: VaultViewMode, currentFolderId: string) {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadAbortRef = useRef<AbortController | null>(null);
 
-  const fetchForSource = useCallback(
-    async (source: VaultContentSource, signal: AbortSignal) => {
-      if (source.kind === "folder") {
-        const [foldersData, filesData] = await Promise.all([
-          fetchJson<FolderItem[]>(`/api/folders?parentId=${source.folderId}`, { signal }),
-          fetchJson<FileItem[]>(`/api/files?folderId=${source.folderId}`, { signal }),
-        ]);
-        return {
-          folders: Array.isArray(foldersData) ? foldersData : [],
-          files: Array.isArray(filesData) ? filesData : [],
-        };
-      }
-      // Flat mode — no folder tree, only the filtered file list.
-      const filesData = await fetchJson<FileItem[]>(
-        "/api/files?checkedOutByMe=1",
-        { signal }
-      );
+  const fetchForSource = useCallback(async (source: VaultContentSource, signal: AbortSignal) => {
+    if (source.kind === "folder") {
+      const [foldersData, filesData] = await Promise.all([
+        fetchJson<FolderItem[]>(`/api/folders?parentId=${source.folderId}`, { signal }),
+        fetchJson<FileItem[]>(`/api/files?folderId=${source.folderId}`, { signal }),
+      ]);
       return {
-        folders: [] as FolderItem[],
+        folders: Array.isArray(foldersData) ? foldersData : [],
         files: Array.isArray(filesData) ? filesData : [],
       };
-    },
-    []
-  );
+    }
+    // Flat mode — no folder tree, only the filtered file list.
+    const filesData = await fetchJson<FileItem[]>("/api/files?checkedOutByMe=1", { signal });
+    return {
+      folders: [] as FolderItem[],
+      files: Array.isArray(filesData) ? filesData : [],
+    };
+  }, []);
 
   const load = useCallback(
     async (source: VaultContentSource) => {

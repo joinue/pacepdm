@@ -1,19 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ── Mock setup ──────────────────────────────────────────────────────────
+/**
+ * Checkout is the vault's pessimistic lock, so the cases that matter are the
+ * refusals: another tenant's file, a frozen file, one already locked.
+ *
+ * The Supabase mock honours `.eq()` filters rather than returning a fixed row.
+ * That is what lets the cross-tenant case be a real test: the route runs on
+ * `withTenant`, whose scoped client applies `.eq("tenantId", caller)`, and the
+ * mock returns nothing when the tenant does not match. A mock that ignored
+ * filters would pass whether or not the scoping existed.
+ */
 
 const { tableResults, updateCalls, mockFrom } = vi.hoisted(() => {
   type QueryResult = { data: unknown; error: unknown };
+  type Handler = QueryResult | ((filters: Record<string, unknown>) => QueryResult);
 
-  const tableResults: Record<string, QueryResult> = {};
+  const tableResults: Record<string, Handler> = {};
   const updateCalls: Array<{ table: string; data: unknown; filters: Record<string, unknown> }> = [];
 
   function makeChain(table: string) {
     const filters: Record<string, unknown> = {};
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
 
-    const resolvable = () => tableResults[table] || { data: null, error: null };
+    const resolvable = (): QueryResult => {
+      const handler = tableResults[table];
+      if (typeof handler === "function") return handler(filters);
+      return handler ?? { data: null, error: null };
+    };
 
     for (const m of ["select", "eq", "in", "neq", "is", "order", "limit", "match"] as const) {
       chain[m] = (...args: unknown[]) => {
@@ -26,25 +40,21 @@ const { tableResults, updateCalls, mockFrom } = vi.hoisted(() => {
     chain.maybeSingle = () => resolvable();
 
     chain.update = (data: unknown) => {
-      const entry = { table, data, filters: { ...filters } };
-      updateCalls.push(entry);
-      // Return a chainable object that resolves to the same data
+      updateCalls.push({ table, data, filters: { ...filters } });
       const updateChain: Record<string, (...args: unknown[]) => unknown> = {};
-      for (const m of ["eq", "select"] as const) {
-        updateChain[m] = () => updateChain;
-      }
-      updateChain.single = () => ({ data: { id: "file-1", isCheckedOut: true }, error: null });
+      for (const m of ["eq", "select"] as const) updateChain[m] = () => updateChain;
+      updateChain.single = () => ({ data: { id: FILE_ID, isCheckedOut: true }, error: null });
       return updateChain;
     };
 
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (...args: unknown[]) => unknown;
+    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+      ...args: unknown[]
+    ) => unknown;
 
     return chain;
   }
 
-  const mockFrom = (table: string) => makeChain(table);
-
-  return { tableResults, updateCalls, mockFrom };
+  return { tableResults, updateCalls, mockFrom: (table: string) => makeChain(table) };
 });
 
 const mockTenantUser = vi.hoisted(() => ({
@@ -62,38 +72,29 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/auth", () => ({
   getApiTenantUser: () => Promise.resolve(mockTenantUser.current),
-  hasPermission: (perms: string[], required: string) =>
-    perms.includes("*") || perms.includes(required),
-  PERMISSIONS: {
-    FILE_CHECKOUT: "file.checkout",
-    FILE_CHECKIN: "file.checkin",
-  },
 }));
 
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/folder-access-guards", () => ({
-  requireFileAccess: vi.fn().mockResolvedValue({ ok: true }),
-}));
+// Only the ACL scope resolver is stubbed — `loadFile` itself runs for real, so
+// the tenant filter it applies is under test rather than mocked away.
+vi.mock("@/lib/folder-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/folder-access")>("@/lib/folder-access");
+  return { ...actual, getFolderAccessScope: vi.fn(async () => actual.openScope()) };
+});
 
 import { POST } from "./route";
 import { logAudit } from "@/lib/audit";
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function resetMockState() {
-  vi.clearAllMocks();
-  updateCalls.length = 0;
-  for (const key of Object.keys(tableResults)) delete tableResults[key];
-}
+const FILE_ID = "22222222-2222-4222-8222-222222222222";
 
 function makeRequest(): NextRequest {
-  return new NextRequest("http://localhost/api/files/file-1/checkout", { method: "POST" });
+  return new NextRequest(`http://localhost/api/files/${FILE_ID}/checkout`, { method: "POST" });
 }
 
-const params = Promise.resolve({ fileId: "file-1" });
+const params = Promise.resolve({ fileId: FILE_ID });
 
 const engineer = {
   id: "user-1",
@@ -110,7 +111,7 @@ const viewer = {
 };
 
 const wipFile = {
-  id: "file-1",
+  id: FILE_ID,
   tenantId: "tenant-1",
   name: "bracket.sldprt",
   isFrozen: false,
@@ -119,64 +120,63 @@ const wipFile = {
   folderId: "folder-1",
 };
 
-// ── Tests ───────────────────────────────────────────────────────────────
+/** Serve `row` only to the tenant that actually owns it. */
+function ownedBy(tenantId: string, row: Record<string, unknown>) {
+  tableResults["files"] = (filters) =>
+    filters.tenantId === tenantId ? { data: row, error: null } : { data: null, error: null };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  updateCalls.length = 0;
+  for (const key of Object.keys(tableResults)) delete tableResults[key];
+});
 
 describe("POST /api/files/[fileId]/checkout", () => {
-  beforeEach(resetMockState);
-
   it("returns 401 when not authenticated", async () => {
     mockTenantUser.current = null;
-    const res = await POST(makeRequest(), { params });
-    expect(res.status).toBe(401);
+    expect((await POST(makeRequest(), { params })).status).toBe(401);
   });
 
   it("returns 403 without FILE_CHECKOUT permission", async () => {
     mockTenantUser.current = viewer;
-    const res = await POST(makeRequest(), { params });
-    expect(res.status).toBe(403);
+    expect((await POST(makeRequest(), { params })).status).toBe(403);
   });
 
-  it("returns 404 for file in another tenant", async () => {
+  it("returns 400 for a malformed file id, before touching the database", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = {
-      data: { ...wipFile, tenantId: "tenant-OTHER" },
-      error: null,
-    };
-    const res = await POST(makeRequest(), { params });
-    expect(res.status).toBe(404);
+    const res = await POST(makeRequest(), { params: Promise.resolve({ fileId: "file-1" }) });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for a file in another tenant", async () => {
+    mockTenantUser.current = engineer;
+    ownedBy("tenant-OTHER", { ...wipFile, tenantId: "tenant-OTHER" });
+    expect((await POST(makeRequest(), { params })).status).toBe(404);
   });
 
   it("returns 409 for frozen/released files", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = {
-      data: { ...wipFile, isFrozen: true },
-      error: null,
-    };
+    ownedBy("tenant-1", { ...wipFile, isFrozen: true });
     const res = await POST(makeRequest(), { params });
     expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toMatch(/frozen/i);
+    expect((await res.json()).error).toMatch(/frozen/i);
   });
 
   it("returns 409 if already checked out", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = {
-      data: { ...wipFile, isCheckedOut: true, checkedOutById: "user-other" },
-      error: null,
-    };
+    ownedBy("tenant-1", { ...wipFile, isCheckedOut: true, checkedOutById: "user-other" });
     const res = await POST(makeRequest(), { params });
     expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toMatch(/already checked out/i);
+    expect((await res.json()).error).toMatch(/already checked out/i);
   });
 
   it("succeeds for a WIP file and logs audit", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = { data: { ...wipFile }, error: null };
+    ownedBy("tenant-1", { ...wipFile });
     const res = await POST(makeRequest(), { params });
     expect(res.status).toBe(200);
 
-    // Verify the update was called with checkout fields
     expect(updateCalls.length).toBe(1);
     expect(updateCalls[0].table).toBe("files");
     expect(updateCalls[0].data).toMatchObject({
@@ -184,13 +184,12 @@ describe("POST /api/files/[fileId]/checkout", () => {
       checkedOutById: "user-1",
     });
 
-    // Verify audit log
     expect(logAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         tenantId: "tenant-1",
         userId: "user-1",
         action: "file.checkout",
-        entityId: "file-1",
+        entityId: FILE_ID,
       })
     );
   });

@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PACE PDM
 
-## Getting Started
+Product data management for small and medium hardware teams. A file vault with revision control and check-in/check-out, multi-level BOMs with cost and quantity rollup, engineering change orders with configurable approval workflows, releases, vendor records, and a complete audit trail.
 
-First, run the development server:
+Multi-tenant SaaS on Next.js 16 and Supabase.
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # then fill in the values below
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+There is no local database. The app talks to whichever Supabase project `.env.local` points at.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable                        | Purpose                                                        |
+| ------------------------------- | -------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase project URL                                           |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key. **Ships in the JS bundle** — treat as public. |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Server-only. Bypasses RLS. Never expose to the client.         |
+| `NEXT_PUBLIC_APP_URL`           | Canonical app origin, used in share links and emails           |
+| `NEXT_PUBLIC_MARKETING_URL`     | Marketing site origin                                          |
+| `APP_URL`                       | Server-side app origin                                         |
+| `RESEND_API_KEY`                | Transactional email                                            |
+| `EMAIL_FROM`                    | Sender address for notification email                          |
+| `CRON_SECRET`                   | Shared secret authenticating the Vercel cron invocation        |
 
-## Learn More
+### Database
 
-To learn more about Next.js, take a look at the following resources:
+Migrations are raw SQL in `supabase/migrations/`, applied **by hand** through the Supabase SQL editor in numeric order. There is no migration runner, and the files are not a ledger of what is live. Read [`docs/decisions/hand-applied-migrations.md`](docs/decisions/hand-applied-migrations.md) before touching them.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Documentation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**New here? Read [`docs/ENGINEERING.md`](docs/ENGINEERING.md) first.** It is the fifteen-minute tour of how the pieces fit and which conventions will surprise you.
 
-## Deploy on Vercel
+|                                              |                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| [`AGENTS.md`](AGENTS.md)                     | The rulebook. Concise, imperative, loaded by AI tools each session. |
+| [`docs/ENGINEERING.md`](docs/ENGINEERING.md) | The engineering tour                                                |
+| [`docs/decisions/`](docs/decisions/)         | Standing decisions and the reasoning behind them                    |
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md)       | PDM vocabulary, and where each concept lives in the code            |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Commands
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command                    | What it does                                                      |
+| -------------------------- | ----------------------------------------------------------------- |
+| `npm run dev`              | Dev server                                                        |
+| `npm run build`            | Production build                                                  |
+| `npm test`                 | Vitest unit suite                                                 |
+| `npm run test:watch`       | Vitest, watching                                                  |
+| `npm run test:coverage`    | Coverage report                                                   |
+| `npm run e2e`              | Playwright journeys                                               |
+| `npm run typecheck`        | `tsc --noEmit`                                                    |
+| `npm run lint`             | ESLint                                                            |
+| `npm run lint:tokens`      | Design-token discipline (no raw palette classes, no arbitrary px) |
+| `npm run lint:conventions` | Data-fetching, import, and route-wrapper discipline               |
+| `npm run check`            | Everything above. Run before you push; CI runs the same.          |
+| `npm run probe:rls`        | Hits live PostgREST as `anon`; fails on any leaked row            |
+| `npm run format`           | Prettier                                                          |
+
+A pre-commit hook formats and lints staged files and typechecks the project.
+
+## Architecture in brief
+
+- **`src/app/`** — App Router. `(dashboard)` is the signed-in app, `(auth)` is login, `share/[token]` is the public share viewer, `marketing` is the public site. `api/` holds ~98 route handlers.
+- **`src/features/<feature>/`** — feature code, imported through each feature's `index.ts`.
+- **`src/components/ui/`** — shared primitives. **`src/components/layout/`** — app chrome.
+- **`src/lib/`** — the route wrapper, the API client, and the engines (approvals, BOM rollup, folder access, permissions, status flows).
+
+Two conventions carry more weight than the rest:
+
+1. **Every API route is wrapped in `withTenant`**, which resolves the session, checks the declared permission, validates the body, and hands the handler a **tenant-scoped** database client. You never write a tenant filter, so you cannot forget one. → [`docs/decisions/api-route-contract.md`](docs/decisions/api-route-contract.md)
+
+2. **Every new table gets RLS enabled in the migration that creates it.** The anon key is public, so a table without RLS is readable by anyone with `curl`. → [`docs/decisions/rls-new-tables.md`](docs/decisions/rls-new-tables.md)
+
+## Deployment
+
+Vercel. `vercel.json` registers one cron (`/api/cron/approval-reminders`, every 30 minutes), authenticated with `CRON_SECRET`.
+
+`@napi-rs/canvas`, `pdfjs-dist`, and `sharp` are declared as `serverExternalPackages` in `next.config.ts` because they load platform-specific native bindings that the bundler cannot resolve. Server-side thumbnail generation breaks if that changes.

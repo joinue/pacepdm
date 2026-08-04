@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, permissionsExceedingActor, PERMISSIONS } from "@/lib/auth";
+import {
+  getApiTenantUser,
+  hasPermission,
+  permissionsExceedingActor,
+  PERMISSIONS,
+} from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 
@@ -71,7 +76,9 @@ export async function PATCH(
 
       // Privilege ceiling — same as role authoring. You can't promote
       // someone to a role whose permissions exceed your own.
-      const newRolePerms = Array.isArray(newRole.permissions) ? (newRole.permissions as string[]) : [];
+      const newRolePerms = Array.isArray(newRole.permissions)
+        ? (newRole.permissions as string[])
+        : [];
       const excess = permissionsExceedingActor(newRolePerms, permissions);
       if (excess.length > 0) {
         return NextResponse.json(
@@ -108,6 +115,7 @@ export async function PATCH(
         .from("files")
         .select("id, name")
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .eq("checkedOutById", userId)
         .eq("isCheckedOut", true);
 
@@ -263,6 +271,7 @@ export async function DELETE(
       .from("files")
       .select("id, name")
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .eq("checkedOutById", userId)
       .eq("isCheckedOut", true);
 
@@ -327,11 +336,12 @@ async function isAdminRole(db: Db, roleId: string): Promise<boolean> {
  * change. The two-step query (find admin role IDs first, then count
  * users) keeps this readable and avoids a join PostgREST won't infer.
  */
-async function countOtherActiveAdmins(db: Db, tenantId: string, excludeUserId: string): Promise<number> {
-  const { data: roles } = await db
-    .from("roles")
-    .select("id, permissions")
-    .eq("tenantId", tenantId);
+async function countOtherActiveAdmins(
+  db: Db,
+  tenantId: string,
+  excludeUserId: string
+): Promise<number> {
+  const { data: roles } = await db.from("roles").select("id, permissions").eq("tenantId", tenantId);
   const adminRoleIds = (roles || [])
     .filter((r) => Array.isArray(r.permissions) && (r.permissions as string[]).includes("*"))
     .map((r) => r.id);

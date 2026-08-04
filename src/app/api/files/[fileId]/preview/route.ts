@@ -10,12 +10,7 @@ const PREVIEWABLE_TEXT = ["txt", "csv", "md", "json", "xml"];
 // through occt-import-js (WASM port of OpenCascade) which is lazy-
 // loaded client-side only when the user actually opens a CAD file.
 const PREVIEWABLE_CAD = ["stl", "obj", "step", "stp", "iges", "igs"];
-const PREVIEWABLE_TYPES = [
-  "pdf",
-  ...PREVIEWABLE_IMAGES,
-  ...PREVIEWABLE_TEXT,
-  ...PREVIEWABLE_CAD,
-];
+const PREVIEWABLE_TYPES = ["pdf", ...PREVIEWABLE_IMAGES, ...PREVIEWABLE_TEXT, ...PREVIEWABLE_CAD];
 const SW_EXTENSIONS = ["sldprt", "sldasm", "slddrw"];
 
 export async function GET(
@@ -29,7 +24,7 @@ export async function GET(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -70,9 +65,7 @@ export async function GET(
       return NextResponse.json({ canPreview: false, fileType: ext });
     }
 
-    const { data, error } = await db.storage
-      .from("vault")
-      .createSignedUrl(version.storageKey, 300);
+    const { data, error } = await db.storage.from("vault").createSignedUrl(version.storageKey, 300);
 
     if (error || !data) {
       console.error("Signed URL error:", error);

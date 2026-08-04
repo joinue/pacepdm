@@ -54,7 +54,10 @@ export async function POST(request: NextRequest) {
 
     if (activeElsewhere) {
       return NextResponse.json(
-        { error: "This user is active in another workspace. They must be deactivated there before they can join yours." },
+        {
+          error:
+            "This user is active in another workspace. They must be deactivated there before they can join yours.",
+        },
         { status: 409 }
       );
     }
@@ -94,7 +97,9 @@ export async function POST(request: NextRequest) {
         authError.message.toLowerCase().includes("already exists")
       ) {
         // Look up existing auth user
-        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+        const {
+          data: { users },
+        } = await supabaseAdmin.auth.admin.listUsers();
         const existingAuthUser = users.find((u) => u.email === email);
 
         if (existingAuthUser) {

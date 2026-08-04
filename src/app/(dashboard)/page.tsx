@@ -1,12 +1,6 @@
 import { getCurrentTenantUser } from "@/lib/auth";
 import { getServiceClient } from "@/lib/db";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   FileText,
@@ -22,6 +16,8 @@ import Link from "next/link";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { EmptyState } from "@/components/ui/empty-state";
 import { GettingStarted } from "./components/getting-started";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 // Checkouts older than this are surfaced as "stale" — long-held checkouts
 // block teammates, so the dashboard nudges the owner to check them back in.
@@ -83,9 +79,7 @@ export default async function DashboardPage() {
   const pendingDecisionsPromise = groupIds.length
     ? db
         .from("approval_decisions")
-        .select(
-          "createdAt, request:approval_requests!approval_decisions_requestId_fkey(status)"
-        )
+        .select("createdAt, request:approval_requests!approval_decisions_requestId_fkey(status)")
         .in("groupId", groupIds)
         .eq("status", "PENDING")
         .order("createdAt", { ascending: true })
@@ -105,10 +99,9 @@ export default async function DashboardPage() {
     pendingDecisionsPromise,
     db
       .from("files")
-      .select(
-        "id, name, checkedOutAt, folder:folders!files_folderId_fkey(name)"
-      )
+      .select("id, name, checkedOutAt, folder:folders!files_folderId_fkey(name)")
       .eq("tenantId", tenantId)
+      .is("deletedAt", null)
       .eq("checkedOutById", tenantUser.id)
       .eq("isCheckedOut", true)
       .order("checkedOutAt", { ascending: true }),
@@ -116,6 +109,7 @@ export default async function DashboardPage() {
       .from("ecos")
       .select("updatedAt", { count: "exact" })
       .eq("tenantId", tenantId)
+      .is("deletedAt", null)
       .eq("createdById", tenantUser.id)
       .in("status", OPEN_ECO_STATUSES)
       .order("updatedAt", { ascending: false })
@@ -133,17 +127,34 @@ export default async function DashboardPage() {
       .order("createdAt", { ascending: false })
       .limit(10),
     // Getting-started counts — head-only queries (no row data transferred)
-    db.from("files").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
-    db.from("parts").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
-    db.from("boms").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
-    db.from("ecos").select("*", { count: "exact", head: true }).eq("tenantId", tenantId),
+    db
+      .from("files")
+      .select("*", { count: "exact", head: true })
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null),
+    db
+      .from("parts")
+      .select("*", { count: "exact", head: true })
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null),
+    db
+      .from("boms")
+      .select("*", { count: "exact", head: true })
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null),
+    db
+      .from("ecos")
+      .select("*", { count: "exact", head: true })
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null),
   ]);
 
   // Mirror the /api/approvals filter: only surface decisions whose parent
   // request is still PENDING (the decision row alone can outlive the
   // request when a sibling step rejects or recalls it).
-  const myPending = ((rawPendingDecisions ?? []) as PendingDecisionRow[])
-    .filter((d) => d.request?.status === "PENDING");
+  const myPending = ((rawPendingDecisions ?? []) as PendingDecisionRow[]).filter(
+    (d) => d.request?.status === "PENDING"
+  );
   const pendingApprovalsCount = myPending.length;
   const oldestPendingApprovalAge = daysSince(myPending[0]?.createdAt ?? null);
 
@@ -157,13 +168,8 @@ export default async function DashboardPage() {
   const latestEcoUpdate = latestEco?.[0]?.updatedAt ?? null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">Dashboard</h2>
-        <p className="text-muted-foreground">
-          Welcome back, {tenantUser.fullName}
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader title="Dashboard" />
 
       <GettingStarted
         hasFiles={(totalFiles ?? 0) > 0}
@@ -181,11 +187,7 @@ export default async function DashboardPage() {
           title="Approvals waiting on me"
           count={pendingApprovalsCount}
           emptyLabel="All caught up"
-          subtitle={
-            pendingApprovalsCount > 0
-              ? oldestAgeSubtitle(oldestPendingApprovalAge)
-              : null
-          }
+          subtitle={pendingApprovalsCount > 0 ? oldestAgeSubtitle(oldestPendingApprovalAge) : null}
           highlight={pendingApprovalsCount > 0}
         />
         <ForYouCard
@@ -210,9 +212,11 @@ export default async function DashboardPage() {
           count={openEcoCount ?? 0}
           emptyLabel="No open ECOs"
           subtitle={
-            (openEcoCount ?? 0) > 0 && latestEcoUpdate
-              ? <>Updated <FormattedDate date={latestEcoUpdate} variant="date" /></>
-              : null
+            (openEcoCount ?? 0) > 0 && latestEcoUpdate ? (
+              <>
+                Updated <FormattedDate date={latestEcoUpdate} variant="date" />
+              </>
+            ) : null
           }
         />
         <ForYouCard
@@ -255,9 +259,7 @@ export default async function DashboardPage() {
                         <FileText className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">
-                          {file.name}
-                        </div>
+                        <div className="text-sm font-medium truncate">{file.name}</div>
                         {folderName && (
                           <div className="text-xs text-muted-foreground flex items-center gap-1 truncate">
                             <FolderIcon className="w-3 h-3 shrink-0" />
@@ -268,7 +270,7 @@ export default async function DashboardPage() {
                       {age !== null && (
                         <Badge
                           variant={isStale ? "warning" : "muted"}
-                          className="text-[10px] shrink-0"
+                          className="text-3xs shrink-0"
                         >
                           {isStale && <AlertTriangle className="w-3 h-3 mr-0.5" />}
                           {ageLabel(age)}
@@ -314,9 +316,7 @@ export default async function DashboardPage() {
                   className="flex items-center justify-between text-sm border-b pb-2 last:border-0"
                 >
                   <div>
-                    <span className="font-medium">
-                      {log.user?.fullName ?? "System"}
-                    </span>{" "}
+                    <span className="font-medium">{log.user?.fullName ?? "System"}</span>{" "}
                     <span className="text-muted-foreground">{log.action}</span>{" "}
                     <span className="text-muted-foreground">{log.entityType}</span>
                   </div>
@@ -329,7 +329,7 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }
 
@@ -357,7 +357,7 @@ function ForYouCard({
   warn,
 }: ForYouCardProps) {
   const accent = warn
-    ? "text-amber-600 dark:text-amber-500"
+    ? "text-warning"
     : highlight && count > 0
       ? "text-foreground"
       : "text-muted-foreground";
@@ -366,9 +366,7 @@ function ForYouCard({
     <Link href={href}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {title}
-          </CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
           <Icon className={`w-4 h-4 ${accent}`} />
         </CardHeader>
         <CardContent>

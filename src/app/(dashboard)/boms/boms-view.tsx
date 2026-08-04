@@ -4,14 +4,28 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Download, Upload, Trash2, Package, Loader2,
-  MoreHorizontal, Pencil, Check, ChevronDown, X, ArrowRight,
+  Plus,
+  Download,
+  Upload,
+  Trash2,
+  Package,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Check,
+  ChevronDown,
+  X,
+  ArrowRight,
   Link as LinkIcon,
 } from "lucide-react";
 import { ShareDialog } from "@/components/share/share-dialog";
@@ -23,13 +37,15 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { useNotifications } from "@/components/providers/notification-provider";
 
 import type { BOM, BOMItem } from "./types";
-import { statusVariants, statusLabels } from "./constants";
+import { statusLabels } from "./constants";
 import { CreateBomDialog } from "./components/create-bom-dialog";
 import { CompareBomDialog } from "./components/compare-bom-dialog";
 import { AddItemDialog } from "./components/add-item-dialog";
 import { BomItemsTable } from "./components/bom-items-table";
 import { BomRollupPanel } from "./components/bom-rollup-panel";
 import { BomBaselinesPanel } from "./components/bom-baselines-panel";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 /**
  * BOMs view — list + optional detail. The currently-selected BOM lives in
@@ -125,7 +141,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
   // Load the BOM list once on mount
   useEffect(() => {
-    void (async () => { await loadBoms(); })();
+    void (async () => {
+      await loadBoms();
+    })();
   }, [loadBoms]);
 
   // Load items whenever the selected BOM (from the URL) changes. Unlike
@@ -141,9 +159,12 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
   // Navigate to a BOM's dedicated URL. The re-render from the route
   // change is what triggers the items load above.
-  const selectBom = useCallback((bomId: string) => {
-    router.push(`/boms/${bomId}`);
-  }, [router]);
+  const selectBom = useCallback(
+    (bomId: string) => {
+      router.push(`/boms/${bomId}`);
+    },
+    [router]
+  );
 
   const clearSelection = useCallback(() => {
     router.push("/boms");
@@ -227,14 +248,18 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
     const rowsToImport: Record<string, unknown>[] = [];
     let skipped = 0;
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].match(/(".*?"|[^",]+|(?<=,)(?=,)|(?<=,)$)/g)?.map((c) => c.replace(/^"|"$/g, "").trim()) || [];
+      const cols =
+        lines[i]
+          .match(/(".*?"|[^",]+|(?<=,)(?=,)|(?<=,)$)/g)
+          ?.map((c) => c.replace(/^"|"$/g, "").trim()) || [];
       const name = cols[nameIdx];
       if (!name) {
         skipped++;
         continue;
       }
       rowsToImport.push({
-        itemNumber: cols[itemNumIdx] || String(items.length + rowsToImport.length + 1).padStart(3, "0"),
+        itemNumber:
+          cols[itemNumIdx] || String(items.length + rowsToImport.length + 1).padStart(3, "0"),
         partNumber: pnIdx >= 0 ? cols[pnIdx] || null : null,
         name,
         quantity: qtyIdx >= 0 ? parseFloat(cols[qtyIdx]) || 1 : 1,
@@ -253,10 +278,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
     }
 
     try {
-      const result = await fetchJson<{ inserted: number }>(
-        `/api/boms/${selectedBomId}/items`,
-        { method: "POST", body: { items: rowsToImport } }
-      );
+      const result = await fetchJson<{ inserted: number }>(`/api/boms/${selectedBomId}/items`, {
+        method: "POST",
+        body: { items: rowsToImport },
+      });
       const summary = `Imported ${result.inserted} item${result.inserted !== 1 ? "s" : ""}`;
       toast.success(skipped > 0 ? `${summary} (${skipped} skipped — missing name)` : summary);
     } catch (err) {
@@ -269,7 +294,8 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   // ─── Derived state ───────────────────────────────────────────────────
   const totalCost = items.reduce((sum, i) => sum + (i.unitCost || 0) * i.quantity, 0);
   const selectedBomData = boms.find((b) => b.id === selectedBomId);
-  const isEditable = canEdit && (selectedBomData?.status === "DRAFT" || selectedBomData?.status === "IN_REVIEW");
+  const isEditable =
+    canEdit && (selectedBomData?.status === "DRAFT" || selectedBomData?.status === "IN_REVIEW");
 
   // The URL can point at a BOM that doesn't exist (stale bookmark, deleted
   // BOM, guessed id). Surface that once the list has loaded instead of
@@ -284,29 +310,36 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
     return String(next).padStart(3, "0");
   }
 
-  const handleBomCreated = useCallback((created?: { id: string }) => {
-    loadBoms();
-    if (created?.id) selectBom(created.id);
-  }, [loadBoms, selectBom]);
+  const handleBomCreated = useCallback(
+    (created?: { id: string }) => {
+      loadBoms();
+      if (created?.id) selectBom(created.id);
+    },
+    [loadBoms, selectBom]
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Bill of Materials</h2>
-        <div className="flex gap-2">
-          {boms.length >= 2 && (
-            <Button variant="outline" size="sm" onClick={() => setShowCompare(true)}>
-              Compare
-            </Button>
-          )}
-          {canEdit && (
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              New BOM
-            </Button>
-          )}
-        </div>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Bill of Materials"
+        actions={
+          <>
+            <div className="flex gap-2">
+              {boms.length >= 2 && (
+                <Button variant="outline" size="sm" onClick={() => setShowCompare(true)}>
+                  Compare
+                </Button>
+              )}
+              {canEdit && (
+                <Button size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  New BOM
+                </Button>
+              )}
+            </div>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
@@ -316,7 +349,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         <Card>
           <CardContent className="py-12 text-center">
             <Package className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="text-muted-foreground">No BOMs yet. Click &ldquo;New BOM&rdquo; to create one.</p>
+            <p className="text-muted-foreground">
+              No BOMs yet. Click &ldquo;New BOM&rdquo; to create one.
+            </p>
             <p className="text-xs text-muted-foreground mt-1">
               A BOM is a list of parts and materials needed to build something.
             </p>
@@ -343,17 +378,15 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                     {unread > 0 && (
                       <span
                         aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
-                        className="bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
+                        className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
                       >
                         {unread > 9 ? "9+" : unread}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <Badge variant={statusVariants[bom.status] || "secondary"} className="text-[9px] px-1.5 py-0">
-                      {statusLabels[bom.status] || bom.status}
-                    </Badge>
-                    <span className="text-[10px] text-muted-foreground">Rev {bom.revision}</span>
+                    <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
+                    <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
                   </div>
                 </button>
               );
@@ -393,7 +426,11 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                           if (e.key === "Escape") setRenamingBom(null);
                         }}
                       />
-                      <Button variant="ghost" size="icon-sm" onClick={() => handleRenameBom(selectedBomId)}>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleRenameBom(selectedBomId)}
+                      >
                         <Check className="w-4 h-4" />
                       </Button>
                       <Button variant="ghost" size="icon-sm" onClick={() => setRenamingBom(null)}>
@@ -406,7 +443,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => { setRenamingBom(selectedBomId); setRenameValue(selectedBomData.name); }}
+                        onClick={() => {
+                          setRenamingBom(selectedBomId);
+                          setRenameValue(selectedBomData.name);
+                        }}
                         className="text-muted-foreground hover:text-foreground"
                       >
                         <Pencil className="w-3 h-3" />
@@ -414,11 +454,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                     </div>
                   )}
                   <div className="flex items-center gap-3 mt-1">
-                    <Badge variant={statusVariants[selectedBomData.status] || "secondary"}>
-                      {statusLabels[selectedBomData.status] || selectedBomData.status}
-                    </Badge>
+                    <StatusBadge status={selectedBomData.status} kind="bom" />
                     <span className="text-sm text-muted-foreground">
-                      Rev {selectedBomData.revision} &middot; {items.length} item{items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
+                      Rev {selectedBomData.revision} &middot; {items.length} item
+                      {items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -432,12 +471,14 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                       trigger width. */}
                   {(BOM_STATUS_FLOW[selectedBomData.status] || []).length > 0 && canEdit && (
                     <DropdownMenu>
-                      <DropdownMenuTrigger render={
-                        <Button variant="outline" size="sm">
-                          Change status
-                          <ChevronDown className="w-3 h-3 ml-1" />
-                        </Button>
-                      } />
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="outline" size="sm">
+                            Change status
+                            <ChevronDown className="w-3 h-3 ml-1" />
+                          </Button>
+                        }
+                      />
                       <DropdownMenuContent align="end" className="w-auto min-w-44">
                         {(BOM_STATUS_FLOW[selectedBomData.status] || []).map((s) => (
                           <DropdownMenuItem
@@ -461,7 +502,12 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                       <label className="inline-flex items-center justify-center rounded-full border border-border bg-background hover:bg-muted text-sm font-medium h-8 gap-1.5 px-2.5 cursor-pointer transition-all">
                         <Upload className="w-4 h-4" />
                         <span className="hidden sm:inline">Import CSV</span>
-                        <input type="file" accept=".csv" className="hidden" onChange={handleCsvImport} />
+                        <input
+                          type="file"
+                          accept=".csv"
+                          className="hidden"
+                          onChange={handleCsvImport}
+                        />
                       </label>
                       <Button size="sm" onClick={() => setShowAddItem(true)}>
                         <Plus className="w-4 h-4 mr-1" />
@@ -471,11 +517,13 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                   )}
                   {(canEdit || canShare) && (
                     <DropdownMenu>
-                      <DropdownMenuTrigger render={
-                        <Button variant="ghost" size="icon-sm">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      } />
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="ghost" size="icon-sm">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        }
+                      />
                       <DropdownMenuContent align="end">
                         {canShare && (
                           <DropdownMenuItem onClick={() => setShowShare(true)}>
@@ -484,7 +532,12 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                         )}
                         {canShare && canEdit && <DropdownMenuSeparator />}
                         {canEdit && (
-                          <DropdownMenuItem onClick={() => { setRenamingBom(selectedBomId); setRenameValue(selectedBomData.name); }}>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setRenamingBom(selectedBomId);
+                              setRenameValue(selectedBomData.name);
+                            }}
+                          >
                             <Pencil className="w-3.5 h-3.5 mr-2" /> Rename
                           </DropdownMenuItem>
                         )}
@@ -522,7 +575,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
               {items.length > 0 && (
                 <div className="flex justify-end text-sm">
                   <div className="bg-muted/50 rounded-lg px-4 py-2 text-right">
-                    <span className="text-muted-foreground mr-3">Flat total ({items.length} items)</span>
+                    <span className="text-muted-foreground mr-3">
+                      Flat total ({items.length} items)
+                    </span>
                     <span className="font-mono font-semibold">${totalCost.toFixed(2)}</span>
                   </div>
                 </div>
@@ -560,11 +615,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
           onAdded={refreshItems}
         />
       )}
-      <CompareBomDialog
-        open={showCompare}
-        onOpenChange={setShowCompare}
-        boms={boms}
-      />
+      <CompareBomDialog open={showCompare} onOpenChange={setShowCompare} boms={boms} />
       {selectedBomId && selectedBomData && (
         <ShareDialog
           open={showShare}
@@ -574,6 +625,6 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
           resourceName={selectedBomData.name}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

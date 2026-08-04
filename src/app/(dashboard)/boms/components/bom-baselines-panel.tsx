@@ -87,9 +87,7 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchJson<BaselineListRow[]>(
-        `/api/boms/${bomId}/baselines`
-      );
+      const data = await fetchJson<BaselineListRow[]>(`/api/boms/${bomId}/baselines`);
       setBaselines(Array.isArray(data) ? data : []);
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to load baselines");
@@ -123,9 +121,9 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
   // The list endpoint comes back with `createdBy` shaped as either an
   // object or a single-element array (Supabase PostgREST join quirk).
   // Normalize for rendering.
-  function displayCreator(
-    row: { createdBy: { fullName: string } | { fullName: string }[] | null }
-  ): string | null {
+  function displayCreator(row: {
+    createdBy: { fullName: string } | { fullName: string }[] | null;
+  }): string | null {
     const c = row.createdBy;
     if (!c) return null;
     if (Array.isArray(c)) return c[0]?.fullName ?? null;
@@ -157,10 +155,9 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Baselines are immutable snapshots of the BOM&rsquo;s exact state at a
-          moment in time. One is captured automatically whenever the BOM is
-          released, and additional snapshots can be taken manually for key
-          handoffs.
+          Baselines are immutable snapshots of the BOM&rsquo;s exact state at a moment in time. One
+          is captured automatically whenever the BOM is released, and additional snapshots can be
+          taken manually for key handoffs.
         </p>
 
         {loading ? (
@@ -182,7 +179,7 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge
                       variant={TRIGGER_VARIANTS[b.trigger] || "muted"}
-                      className="text-[9px] px-1.5 py-0 shrink-0"
+                      className="text-4xs px-1.5 py-0 shrink-0"
                     >
                       {TRIGGER_LABELS[b.trigger] || b.trigger}
                     </Badge>
@@ -201,7 +198,9 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
                     {displayCreator(b) && <span>&middot; {displayCreator(b)}</span>}
                   </div>
                   {b.note && (
-                    <p className="text-xs text-muted-foreground italic mt-1">&ldquo;{b.note}&rdquo;</p>
+                    <p className="text-xs text-muted-foreground italic mt-1">
+                      &ldquo;{b.note}&rdquo;
+                    </p>
                   )}
                 </div>
                 <Button
@@ -224,9 +223,8 @@ export function BomBaselinesPanel({ bomId, canCapture }: BomBaselinesPanelProps)
           <DialogHeader>
             <DialogTitle>Capture baseline</DialogTitle>
             <DialogDescription>
-              Saves an immutable snapshot of the current BOM items. Add an
-              optional note to explain why (e.g. &ldquo;pre-pilot freeze&rdquo;,
-              &ldquo;handed off to CM&rdquo;).
+              Saves an immutable snapshot of the current BOM items. Add an optional note to explain
+              why (e.g. &ldquo;pre-pilot freeze&rdquo;, &ldquo;handed off to CM&rdquo;).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
@@ -304,14 +302,12 @@ function BaselineViewerDialog({
     <Dialog open={!!baselineId} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>
-            Baseline {detail ? `(Rev ${detail.bomRevision})` : ""}
-          </DialogTitle>
+          <DialogTitle>Baseline {detail ? `(Rev ${detail.bomRevision})` : ""}</DialogTitle>
           <DialogDescription>
             {detail ? (
               <>
-                Captured <FormattedDate date={detail.snapshotAt} variant="datetime" />{" "}
-                &middot; {detail.metrics.itemCount} item
+                Captured <FormattedDate date={detail.snapshotAt} variant="datetime" /> &middot;{" "}
+                {detail.metrics.itemCount} item
                 {detail.metrics.itemCount === 1 ? "" : "s"} &middot; $
                 {detail.metrics.flatTotalCost.toFixed(2)}
                 {detail.note && <> &middot; &ldquo;{detail.note}&rdquo;</>}
@@ -343,10 +339,7 @@ function BaselineViewerDialog({
                 {detail.items.map((item) => {
                   const effectiveCost = item.part?.unitCost ?? item.unitCost ?? null;
                   const rev =
-                    item.part?.revision ||
-                    item.file?.revision ||
-                    item.linkedBom?.revision ||
-                    "";
+                    item.part?.revision || item.file?.revision || item.linkedBom?.revision || "";
                   const identifier =
                     item.part?.partNumber ||
                     item.partNumber ||
@@ -356,19 +349,13 @@ function BaselineViewerDialog({
                   return (
                     <tr key={item.id} className="border-b last:border-0">
                       <td className="py-1.5 pr-2 font-mono">{item.itemNumber}</td>
-                      <td className="py-1.5 pr-2 font-mono truncate max-w-[10rem]">
-                        {identifier}
-                      </td>
+                      <td className="py-1.5 pr-2 font-mono truncate max-w-[10rem]">{identifier}</td>
                       <td className="py-1.5 pr-2 truncate max-w-[14rem]">
                         {item.part?.name || item.name}
                       </td>
-                      <td className="py-1.5 pr-2 text-right font-mono">
-                        {item.quantity}
-                      </td>
+                      <td className="py-1.5 pr-2 text-right font-mono">{item.quantity}</td>
                       <td className="py-1.5 pr-2">{item.unit}</td>
-                      <td className="py-1.5 pr-2 font-mono text-muted-foreground">
-                        {rev}
-                      </td>
+                      <td className="py-1.5 pr-2 font-mono text-muted-foreground">{rev}</td>
                       <td className="py-1.5 pr-2 text-right font-mono">
                         {effectiveCost != null ? `$${effectiveCost.toFixed(2)}` : "—"}
                       </td>

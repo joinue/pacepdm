@@ -70,7 +70,7 @@ export async function extractThumbnail(
     if (!thumbnail) {
       console.warn(
         `[thumbnail] SolidWorks extraction returned null for ${filename}: ${report.reason || "(no reason)"} ` +
-        `— streams inspected: ${report.streams.length}`
+          `— streams inspected: ${report.streams.length}`
       );
       return null;
     }
@@ -122,9 +122,7 @@ export async function extractThumbnail(
  *     latency to the request. Move to a background job if it becomes a UX
  *     problem; the dispatcher itself doesn't need to change.
  */
-async function generatePdfThumbnail(
-  buffer: ArrayBuffer
-): Promise<ThumbnailResult | null> {
+async function generatePdfThumbnail(buffer: ArrayBuffer): Promise<ThumbnailResult | null> {
   try {
     // Dynamic imports keep these modules out of the client bundle. Next
     // 16 traces dynamic imports during build and moves them to a
@@ -225,9 +223,11 @@ async function generatePdfThumbnail(
       }).promise;
 
       // @napi-rs/canvas returns a Buffer with image/png encoding.
-      const pngBuffer = (canvasAndContext.canvas as unknown as {
-        toBuffer: (mime: "image/png") => Buffer;
-      }).toBuffer("image/png");
+      const pngBuffer = (
+        canvasAndContext.canvas as unknown as {
+          toBuffer: (mime: "image/png") => Buffer;
+        }
+      ).toBuffer("image/png");
 
       return {
         data: new Uint8Array(pngBuffer),
@@ -249,9 +249,7 @@ async function generatePdfThumbnail(
  * file-list thumbnail of uploaded image files — much smaller to serve than
  * the full original (a 5 MB drawing JPEG becomes a ~30 KB PNG).
  */
-async function generateImageThumbnail(
-  buffer: ArrayBuffer
-): Promise<ThumbnailResult | null> {
+async function generateImageThumbnail(buffer: ArrayBuffer): Promise<ThumbnailResult | null> {
   try {
     const png = await sharp(Buffer.from(buffer))
       .resize(THUMBNAIL_MAX_DIMENSION, THUMBNAIL_MAX_DIMENSION, {
@@ -312,26 +310,12 @@ function isRawDib(data: Uint8Array): boolean {
 function isEmf(data: Uint8Array): boolean {
   if (data.length < 44) return false;
   // EMF signature " EMF" at offset 40
-  return (
-    data[40] === 0x20 &&
-    data[41] === 0x45 &&
-    data[42] === 0x4d &&
-    data[43] === 0x46
-  );
+  return data[40] === 0x20 && data[41] === 0x45 && data[42] === 0x4d && data[43] === 0x46;
 }
 
-/**
- * Convert image data to PNG using sharp, handling BMP, EMF-free formats, etc.
- */
-async function toPng(data: Uint8Array, mimeType: string): Promise<{ data: Uint8Array; mimeType: string }> {
-  try {
-    const pngBuffer = await sharp(Buffer.from(data)).png().toBuffer();
-    return { data: new Uint8Array(pngBuffer), mimeType: "image/png" };
-  } catch {
-    // If sharp can't handle it, return original
-    return { data, mimeType };
-  }
-}
+// (toPng helper removed — convertCandidate now validates via sharp inline
+// and returns null on any decode failure, rather than silently returning
+// the unconverted bytes as a thumbnail.)
 
 /**
  * Diagnostic information about a single CFB stream that the extractor
@@ -389,9 +373,7 @@ export async function extractSolidWorksThumbnail(
  * of every stream the extractor inspected. Used by the debug CLI to
  * diagnose files where extraction returns null.
  */
-export async function extractSolidWorksThumbnailWithReport(
-  buffer: ArrayBuffer
-): Promise<{
+export async function extractSolidWorksThumbnailWithReport(buffer: ArrayBuffer): Promise<{
   thumbnail: { data: Uint8Array; mimeType: string } | null;
   report: ExtractionReport;
 }> {
@@ -406,7 +388,10 @@ export async function extractSolidWorksThumbnailWithReport(
   // instead of trying CFB first and catching the confusing error.
   const isLegacyCfb =
     bytes.length >= 8 &&
-    bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0;
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0;
 
   if (!isLegacyCfb) {
     return scanRawBytesForImage(bytes, report);
@@ -441,10 +426,7 @@ export async function extractSolidWorksThumbnailWithReport(
     // cfb's typings declare `content` as Uint8Array but at runtime older
     // releases hand back a plain number[] for some streams. Normalize.
     const raw = entry.content as unknown;
-    const content =
-      raw instanceof Uint8Array
-        ? raw
-        : new Uint8Array(raw as ArrayLike<number>);
+    const content = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>);
     const detected = detectImageType(content);
     const info: CfbStreamInfo = {
       name: entry.name || "(unnamed)",
@@ -476,13 +458,15 @@ export async function extractSolidWorksThumbnailWithReport(
   }
 
   // Sort candidates by size descending — the actual preview is almost
-  // always the largest image in the file.
+  // always the largest image in the file. Walk from biggest down,
+  // taking the first one that decodes as a real image (see
+  // pickFirstDecodableCandidate for why we don't just trust magic bytes).
   candidates.sort((a, b) => b.size - a.size);
-  const winner = candidates[0];
-
-  const converted = await convertCandidate(winner.content, winner.detected);
-  if (!converted) {
-    report.reason = `Largest candidate (${winner.name}, ${winner.size}b, ${winner.detected}) failed to convert to PNG.`;
+  const { winner, converted, rejected } = await pickFirstDecodableCandidate(candidates);
+  if (!converted || !winner) {
+    report.reason =
+      `All ${candidates.length} image candidates failed to decode through sharp. ` +
+      `Rejected: ${formatRejected(rejected)}.`;
     return { thumbnail: null, report };
   }
 
@@ -530,19 +514,87 @@ function hexBytes(content: Uint8Array, n: number): string {
   return out.join(" ");
 }
 
-/** Convert a recognized image candidate to a normalized PNG. */
+/**
+ * Convert a recognized image candidate to a thumbnail-ready blob, or
+ * return null if the bytes don't actually decode as a real image.
+ *
+ * Magic-byte detection is enough to identify a CANDIDATE, but the
+ * modern-SolidWorks path inflates zlib at every plausible offset and
+ * scans raw bytes — both routinely produce blobs that *start* with
+ * PNG/JPEG signatures but aren't valid streams (truncated, corrupt,
+ * or coincidental matches inside compressed/encrypted regions). The
+ * old code returned those bytes unverified, which is how broken
+ * thumbnails got persisted: the file row had a thumbnailKey, the UI
+ * trusted it, and the user saw a broken-img icon they couldn't replace.
+ *
+ * sharp.metadata() decodes the header and throws on invalid input —
+ * cheap enough to run on every candidate. sharp.png().toBuffer() does
+ * a full decode-and-re-encode for BMP/DIB, where we need the output
+ * to be PNG anyway.
+ */
 async function convertCandidate(
   content: Uint8Array,
   detected: CfbStreamInfo["detected"]
 ): Promise<{ data: Uint8Array; mimeType: string } | null> {
-  if (detected === "png") return { data: content, mimeType: "image/png" };
-  if (detected === "jpeg") return { data: content, mimeType: "image/jpeg" };
-  if (detected === "bmp") return toPng(content, "image/bmp");
-  if (detected === "dib") {
-    const bmp = dibToBmp(content);
-    return toPng(bmp, "image/bmp");
+  try {
+    if (detected === "png" || detected === "jpeg") {
+      await sharp(Buffer.from(content)).metadata();
+      return {
+        data: content,
+        mimeType: detected === "png" ? "image/png" : "image/jpeg",
+      };
+    }
+    if (detected === "bmp") {
+      const pngBuffer = await sharp(Buffer.from(content)).png().toBuffer();
+      return { data: new Uint8Array(pngBuffer), mimeType: "image/png" };
+    }
+    if (detected === "dib") {
+      const bmp = dibToBmp(content);
+      const pngBuffer = await sharp(Buffer.from(bmp)).png().toBuffer();
+      return { data: new Uint8Array(pngBuffer), mimeType: "image/png" };
+    }
+  } catch {
+    return null;
   }
   return null;
+}
+
+/**
+ * Walk candidates from largest to smallest, returning the first one that
+ * actually decodes. The previous behavior — try only the largest and give
+ * up if it fails — let a single false-positive blob (a zlib inflate that
+ * happened to start with `89 50 4e 47` but wasn't a real PNG) shadow a
+ * smaller-but-valid embedded preview lower in the same file.
+ */
+async function pickFirstDecodableCandidate<
+  C extends {
+    name: string;
+    size: number;
+    detected: CfbStreamInfo["detected"];
+    content: Uint8Array;
+  },
+>(
+  candidates: C[]
+): Promise<{
+  winner: C | null;
+  converted: { data: Uint8Array; mimeType: string } | null;
+  rejected: { name: string; size: number; detected: string }[];
+}> {
+  const rejected: { name: string; size: number; detected: string }[] = [];
+  for (const c of candidates) {
+    const converted = await convertCandidate(c.content, c.detected);
+    if (converted) return { winner: c, converted, rejected };
+    rejected.push({ name: c.name, size: c.size, detected: c.detected });
+  }
+  return { winner: null, converted: null, rejected };
+}
+
+function formatRejected(rejected: { name: string; size: number; detected: string }[]): string {
+  const shown = rejected
+    .slice(0, 5)
+    .map((r) => `${r.name} (${r.size}b ${r.detected})`)
+    .join(", ");
+  return rejected.length > 5 ? `${shown}, +${rejected.length - 5} more` : shown;
 }
 
 // ─── Raw-byte + zlib scanning for non-CFB SolidWorks formats ──────────────
@@ -651,17 +703,22 @@ async function scanRawBytesForImage(
     report.reason = hasEmf
       ? "Only EMF (vector metafile) previews found — pure-JS rasterization isn't supported."
       : "No raster image found in the raw bytes or in any of the inflated zlib streams. " +
-        "This file likely has no embedded preview at all — SolidWorks' \"Save preview picture\" " +
+        'This file likely has no embedded preview at all — SolidWorks\' "Save preview picture" ' +
         "option was off when it was saved. The only fix is to upload a thumbnail manually or " +
         "re-save the file in SolidWorks with that option enabled.";
     return { thumbnail: null, report };
   }
 
+  // Walk candidates largest-first, taking the first one that actually
+  // decodes. The raw-byte / zlib-scan strategy produces a high rate of
+  // false positives (random binary that happens to start with image
+  // magic bytes), so iterating past the largest is mandatory here.
   candidates.sort((a, b) => b.size - a.size);
-  const winner = candidates[0];
-  const converted = await convertCandidate(winner.content, winner.detected);
-  if (!converted) {
-    report.reason = `Largest candidate (${winner.name}, ${winner.size}b, ${winner.detected}) failed to convert to PNG.`;
+  const { winner, converted, rejected } = await pickFirstDecodableCandidate(candidates);
+  if (!converted || !winner) {
+    report.reason =
+      `All ${candidates.length} image candidates failed to decode through sharp. ` +
+      `Rejected: ${formatRejected(rejected)}.`;
     return { thumbnail: null, report };
   }
 

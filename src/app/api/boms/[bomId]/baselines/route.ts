@@ -29,10 +29,10 @@ export async function GET(
     // list so a cross-tenant request can't be used to probe for BOM ids.
     const { data: bom } = await db
       .from("boms")
-      .select("id, tenantId")
+      .select("id, tenantId, deletedAt")
       .eq("id", bomId)
       .maybeSingle();
-    if (!bom || bom.tenantId !== tenantUser.tenantId) {
+    if (!bom || bom.tenantId !== tenantUser.tenantId || bom.deletedAt) {
       return NextResponse.json({ error: "BOM not found" }, { status: 404 });
     }
 
@@ -48,10 +48,7 @@ export async function GET(
 
     if (error) {
       console.error(`[boms/${bomId}/baselines] GET failed:`, error);
-      return NextResponse.json(
-        { error: `Query failed: ${error.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Query failed: ${error.message}` }, { status: 500 });
     }
 
     return NextResponse.json(snapshots ?? []);
@@ -96,10 +93,10 @@ export async function POST(
 
     const { data: bom } = await db
       .from("boms")
-      .select("id, tenantId, name")
+      .select("id, tenantId, name, deletedAt")
       .eq("id", bomId)
       .maybeSingle();
-    if (!bom || bom.tenantId !== tenantUser.tenantId) {
+    if (!bom || bom.tenantId !== tenantUser.tenantId || bom.deletedAt) {
       return NextResponse.json({ error: "BOM not found" }, { status: 404 });
     }
 

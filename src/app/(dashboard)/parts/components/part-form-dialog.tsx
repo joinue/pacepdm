@@ -6,25 +6,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import {
-  Upload, Search, X, FileText, ImageIcon, Loader2,
-} from "lucide-react";
+import { Upload, Search, X, FileText, ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Part } from "../parts-types";
 import { CATEGORIES, FILE_ROLE_LABELS } from "../parts-types";
 
 function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback((...args: Parameters<T>) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => fn(...args), delay);
-  }, [fn, delay]) as T;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => fn(...args), delay);
+    },
+    [fn, delay]
+  ) as T;
 }
 
 interface PartFormDialogProps {
@@ -43,8 +53,14 @@ export function PartFormDialog({
   onSaved,
 }: PartFormDialogProps) {
   const [formData, setFormData] = useState({
-    partNumber: "", name: "", description: "", category: "MANUFACTURED",
-    material: "", unitCost: "", unit: "EA", notes: "",
+    partNumber: "",
+    name: "",
+    description: "",
+    category: "MANUFACTURED",
+    material: "",
+    unitCost: "",
+    unit: "EA",
+    notes: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -63,7 +79,9 @@ export function PartFormDialog({
   const [attachLinkFileId, setAttachLinkFileId] = useState<string | null>(null);
   const [attachLinkFileName, setAttachLinkFileName] = useState<string>("");
   const [attachLinkSearch, setAttachLinkSearch] = useState("");
-  const [attachLinkResults, setAttachLinkResults] = useState<{ id: string; name: string; partNumber: string | null }[]>([]);
+  const [attachLinkResults, setAttachLinkResults] = useState<
+    { id: string; name: string; partNumber: string | null }[]
+  >([]);
   const [attachLinkSearching, setAttachLinkSearching] = useState(false);
 
   const resetThumbnail = useCallback(() => {
@@ -83,13 +101,27 @@ export function PartFormDialog({
     queueMicrotask(() => {
       if (editingPart) {
         setFormData({
-          partNumber: editingPart.partNumber, name: editingPart.name, description: editingPart.description || "",
-          category: editingPart.category, material: editingPart.material || "",
-          unitCost: editingPart.unitCost != null ? String(editingPart.unitCost) : "", unit: editingPart.unit, notes: editingPart.notes || "",
+          partNumber: editingPart.partNumber,
+          name: editingPart.name,
+          description: editingPart.description || "",
+          category: editingPart.category,
+          material: editingPart.material || "",
+          unitCost: editingPart.unitCost != null ? String(editingPart.unitCost) : "",
+          unit: editingPart.unit,
+          notes: editingPart.notes || "",
         });
         setDialogThumbnailExistingUrl(editingPart.thumbnailUrl || null);
       } else {
-        setFormData({ partNumber: "", name: "", description: "", category: "MANUFACTURED", material: "", unitCost: "", unit: "EA", notes: "" });
+        setFormData({
+          partNumber: "",
+          name: "",
+          description: "",
+          category: "MANUFACTURED",
+          material: "",
+          unitCost: "",
+          unit: "EA",
+          notes: "",
+        });
         resetThumbnail();
       }
     });
@@ -106,14 +138,20 @@ export function PartFormDialog({
   }
 
   const doAttachLinkSearch = useCallback(async (q: string) => {
-    if (q.length < 2) { setAttachLinkResults([]); setAttachLinkSearching(false); return; }
+    if (q.length < 2) {
+      setAttachLinkResults([]);
+      setAttachLinkSearching(false);
+      return;
+    }
     setAttachLinkSearching(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       const files = Array.isArray(data) ? data : (data.files ?? []);
       setAttachLinkResults(files.slice(0, 8));
-    } catch { setAttachLinkResults([]); }
+    } catch {
+      setAttachLinkResults([]);
+    }
     setAttachLinkSearching(false);
   }, []);
 
@@ -158,8 +196,17 @@ export function PartFormDialog({
     const url = editingPart ? `/api/parts/${editingPart.id}` : "/api/parts";
     const method = editingPart ? "PUT" : "POST";
 
-    const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); setSaving(false); return; }
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      setSaving(false);
+      return;
+    }
 
     const partData = await res.json();
 
@@ -168,7 +215,10 @@ export function PartFormDialog({
       try {
         const fd = new FormData();
         fd.append("file", dialogThumbnailFile);
-        const tRes = await fetch(`/api/parts/${partData.id}/thumbnail`, { method: "POST", body: fd });
+        const tRes = await fetch(`/api/parts/${partData.id}/thumbnail`, {
+          method: "POST",
+          body: fd,
+        });
         if (!tRes.ok) {
           const d = await tRes.json().catch(() => ({}));
           toast.error(d.error || "Thumbnail upload failed");
@@ -179,7 +229,9 @@ export function PartFormDialog({
     } else if (editingPart && dialogThumbnailRemoved) {
       try {
         await fetch(`/api/parts/${partData.id}/thumbnail`, { method: "DELETE" });
-      } catch { /* non-fatal */ }
+      } catch {
+        /* non-fatal */
+      }
     }
 
     // Attach file on create
@@ -193,7 +245,8 @@ export function PartFormDialog({
           fd.append("file", attachFile);
           fd.append("folderId", rootFolder.id);
           fd.append("partNumber", partData.partNumber);
-          if (typeof payload.description === "string") fd.append("description", payload.description);
+          if (typeof payload.description === "string")
+            fd.append("description", payload.description);
           const fileRes = await fetch("/api/files", { method: "POST", body: fd });
           if (fileRes.ok) {
             const fileData = await fileRes.json();
@@ -217,7 +270,9 @@ export function PartFormDialog({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileId: attachLinkFileId, role: attachFileRole, isPrimary: true }),
         });
-        toast.success(linkRes.ok ? "Part created with file linked" : "Part created, but file linking failed");
+        toast.success(
+          linkRes.ok ? "Part created with file linked" : "Part created, but file linking failed"
+        );
       } catch {
         toast.success("Part created, but file linking failed");
       }
@@ -235,7 +290,16 @@ export function PartFormDialog({
   const previewSrc = dialogThumbnailPreview || dialogThumbnailExistingUrl;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { resetThumbnail(); resetAttach(); onOpenChange(false); } }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          resetThumbnail();
+          resetAttach();
+          onOpenChange(false);
+        }
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editingPart ? "Edit Part" : "New Part"}</DialogTitle>
@@ -250,7 +314,11 @@ export function PartFormDialog({
               <label className="cursor-pointer shrink-0 group relative">
                 {previewSrc ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewSrc} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                  <img
+                    src={previewSrc}
+                    alt=""
+                    className="w-16 h-16 rounded-lg object-cover border"
+                  />
                 ) : (
                   <div className="w-16 h-16 rounded-lg bg-muted border border-dashed flex items-center justify-center">
                     <ImageIcon className="w-5 h-5 text-muted-foreground/40" />
@@ -259,13 +327,28 @@ export function PartFormDialog({
                 <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <Upload className="w-4 h-4 text-white" />
                 </div>
-                <input ref={dialogThumbnailRef} type="file" accept="image/*" className="hidden" onChange={handleThumbnailPick} />
+                <input
+                  ref={dialogThumbnailRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleThumbnailPick}
+                />
               </label>
               <div className="flex-1 min-w-0 space-y-1">
                 <Label className="text-xs">Thumbnail</Label>
-                <p className="text-[11px] text-muted-foreground">Click the image to {previewSrc ? "replace" : "upload"}. Stored in Supabase Storage on save.</p>
+                <p className="text-2xs text-muted-foreground">
+                  Click the image to {previewSrc ? "replace" : "upload"}. Stored in Supabase Storage
+                  on save.
+                </p>
                 {previewSrc && (
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleThumbnailRemove}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={handleThumbnailRemove}
+                  >
                     Remove
                   </Button>
                 )}
@@ -284,48 +367,95 @@ export function PartFormDialog({
                 <Input
                   value={formData.partNumber}
                   onChange={(e) => setFormData({ ...formData, partNumber: e.target.value })}
-                  placeholder={!editingPart && partNumberMode === "AUTO" ? "Auto-generated" : "PACE-1001"}
+                  placeholder={
+                    !editingPart && partNumberMode === "AUTO" ? "Auto-generated" : "PACE-1001"
+                  }
                   className="h-8 text-sm"
                   required={editingPart != null || partNumberMode === "MANUAL"}
                 />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Category</Label>
-                <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v ?? "MANUFACTURED" })}>
+                <Select
+                  value={formData.category}
+                  onValueChange={(v) => setFormData({ ...formData, category: v ?? "MANUFACTURED" })}
+                >
                   <SelectTrigger className="h-8 text-sm">
-                    <SelectValue>{(v) => CATEGORIES.find((c) => c.value === v)?.label ?? ""}</SelectValue>
+                    <SelectValue>
+                      {(v) => CATEGORIES.find((c) => c.value === v)?.label ?? ""}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                    {CATEGORIES.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Name</Label>
-              <Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Motor Housing" className="h-8 text-sm" required />
+              <Input
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Motor Housing"
+                className="h-8 text-sm"
+                required
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Description</Label>
-              <Textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Optional description..." className="text-sm" rows={2} />
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Optional description..."
+                className="text-sm"
+                rows={2}
+              />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Material</Label>
-                <Input value={formData.material} onChange={(e) => setFormData({ ...formData, material: e.target.value })} placeholder="304 SS" className="h-8 text-sm" />
+                <Input
+                  value={formData.material}
+                  onChange={(e) => setFormData({ ...formData, material: e.target.value })}
+                  placeholder="304 SS"
+                  className="h-8 text-sm"
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Unit Cost ($)</Label>
-                <Input type="number" value={formData.unitCost} onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })} placeholder="0.00" className="h-8 text-sm" min="0" step="0.01" />
+                <Input
+                  type="number"
+                  value={formData.unitCost}
+                  onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
+                  placeholder="0.00"
+                  className="h-8 text-sm"
+                  min="0"
+                  step="0.01"
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Unit</Label>
-                <Input value={formData.unit} onChange={(e) => setFormData({ ...formData, unit: e.target.value })} placeholder="EA" className="h-8 text-sm" />
+                <Input
+                  value={formData.unit}
+                  onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                  placeholder="EA"
+                  className="h-8 text-sm"
+                />
               </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Notes</Label>
-              <Textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} placeholder="Internal notes..." className="text-sm" rows={2} />
+              <Textarea
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Internal notes..."
+                className="text-sm"
+                rows={2}
+              />
             </div>
 
             {/* Attach file on create */}
@@ -334,18 +464,29 @@ export function PartFormDialog({
                 <Separator />
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase">Attach File (optional)</Label>
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase">
+                      Attach File (optional)
+                    </Label>
                     <div className="flex rounded-md border overflow-hidden text-xs">
                       <button
                         type="button"
-                        onClick={() => { setAttachMode("upload"); setAttachLinkFileId(null); setAttachLinkFileName(""); setAttachLinkSearch(""); setAttachLinkResults([]); }}
+                        onClick={() => {
+                          setAttachMode("upload");
+                          setAttachLinkFileId(null);
+                          setAttachLinkFileName("");
+                          setAttachLinkSearch("");
+                          setAttachLinkResults([]);
+                        }}
                         className={`px-2 py-1 transition-colors ${attachMode === "upload" ? "bg-primary text-primary-foreground" : "hover:bg-muted/50"}`}
                       >
                         Upload
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setAttachMode("link"); setAttachFile(null); }}
+                        onClick={() => {
+                          setAttachMode("link");
+                          setAttachFile(null);
+                        }}
                         className={`px-2 py-1 transition-colors ${attachMode === "link" ? "bg-primary text-primary-foreground" : "hover:bg-muted/50"}`}
                       >
                         Link from Vault
@@ -360,11 +501,18 @@ export function PartFormDialog({
                           <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium truncate">{attachFile.name}</p>
-                            <p className="text-xs text-muted-foreground">{(attachFile.size / 1048576).toFixed(2)} MB</p>
+                            <p className="text-xs text-muted-foreground">
+                              {(attachFile.size / 1048576).toFixed(2)} MB
+                            </p>
                           </div>
-                          <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
+                          <Select
+                            value={attachFileRole}
+                            onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}
+                          >
                             <SelectTrigger className="h-7 text-xs w-28">
-                              <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                              <SelectValue>
+                                {(v) => FILE_ROLE_LABELS[v as string] ?? ""}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="DRAWING">Drawing</SelectItem>
@@ -374,7 +522,13 @@ export function PartFormDialog({
                               <SelectItem value="OTHER">Other</SelectItem>
                             </SelectContent>
                           </Select>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => setAttachFile(null)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 shrink-0"
+                            onClick={() => setAttachFile(null)}
+                          >
                             <X className="w-3.5 h-3.5" />
                           </Button>
                         </div>
@@ -384,21 +538,37 @@ export function PartFormDialog({
                           onClick={() => attachFileRef.current?.click()}
                         >
                           <Upload className="w-5 h-5 mx-auto text-muted-foreground mb-1" />
-                          <p className="text-xs text-muted-foreground">Click to attach a file from your computer</p>
-                          <p className="text-[10px] text-muted-foreground/60 mt-0.5">Uploads to vault root and links to this part</p>
+                          <p className="text-xs text-muted-foreground">
+                            Click to attach a file from your computer
+                          </p>
+                          <p className="text-3xs text-muted-foreground/60 mt-0.5">
+                            Uploads to vault root and links to this part
+                          </p>
                         </div>
                       )}
-                      <input ref={attachFileRef} type="file" className="hidden" onChange={(e) => setAttachFile(e.target.files?.[0] || null)} />
+                      <input
+                        ref={attachFileRef}
+                        type="file"
+                        className="hidden"
+                        onChange={(e) => setAttachFile(e.target.files?.[0] || null)}
+                      />
                     </>
                   ) : (
                     <div>
                       {attachLinkFileId ? (
                         <div className="flex items-center gap-2 border rounded-lg p-2.5">
                           <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                          <p className="text-sm font-medium truncate flex-1">{attachLinkFileName}</p>
-                          <Select value={attachFileRole} onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}>
+                          <p className="text-sm font-medium truncate flex-1">
+                            {attachLinkFileName}
+                          </p>
+                          <Select
+                            value={attachFileRole}
+                            onValueChange={(v) => setAttachFileRole(v ?? "DRAWING")}
+                          >
                             <SelectTrigger className="h-7 text-xs w-28">
-                              <SelectValue>{(v) => FILE_ROLE_LABELS[v as string] ?? ""}</SelectValue>
+                              <SelectValue>
+                                {(v) => FILE_ROLE_LABELS[v as string] ?? ""}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="DRAWING">Drawing</SelectItem>
@@ -408,7 +578,16 @@ export function PartFormDialog({
                               <SelectItem value="OTHER">Other</SelectItem>
                             </SelectContent>
                           </Select>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={() => { setAttachLinkFileId(null); setAttachLinkFileName(""); }}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 shrink-0"
+                            onClick={() => {
+                              setAttachLinkFileId(null);
+                              setAttachLinkFileName("");
+                            }}
+                          >
                             <X className="w-3.5 h-3.5" />
                           </Button>
                         </div>
@@ -418,7 +597,10 @@ export function PartFormDialog({
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                             <Input
                               value={attachLinkSearch}
-                              onChange={(e) => { setAttachLinkSearch(e.target.value); debouncedAttachLinkSearch(e.target.value); }}
+                              onChange={(e) => {
+                                setAttachLinkSearch(e.target.value);
+                                debouncedAttachLinkSearch(e.target.value);
+                              }}
                               placeholder="Search vault files..."
                               className="pl-8 h-8 text-sm"
                             />
@@ -435,18 +617,31 @@ export function PartFormDialog({
                                   key={f.id}
                                   type="button"
                                   className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 transition-colors flex items-center gap-2"
-                                  onClick={() => { setAttachLinkFileId(f.id); setAttachLinkFileName(f.name); setAttachLinkSearch(""); setAttachLinkResults([]); }}
+                                  onClick={() => {
+                                    setAttachLinkFileId(f.id);
+                                    setAttachLinkFileName(f.name);
+                                    setAttachLinkSearch("");
+                                    setAttachLinkResults([]);
+                                  }}
                                 >
                                   <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                                   <span className="truncate flex-1">{f.name}</span>
-                                  {f.partNumber && <span className="text-xs text-muted-foreground shrink-0">{f.partNumber}</span>}
+                                  {f.partNumber && (
+                                    <span className="text-xs text-muted-foreground shrink-0">
+                                      {f.partNumber}
+                                    </span>
+                                  )}
                                 </button>
                               ))}
                             </div>
                           )}
-                          {attachLinkSearch.length >= 2 && !attachLinkSearching && attachLinkResults.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-2">No files found</p>
-                          )}
+                          {attachLinkSearch.length >= 2 &&
+                            !attachLinkSearching &&
+                            attachLinkResults.length === 0 && (
+                              <p className="text-xs text-muted-foreground text-center py-2">
+                                No files found
+                              </p>
+                            )}
                         </div>
                       )}
                     </div>
@@ -456,13 +651,16 @@ export function PartFormDialog({
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
             <Button
               type="submit"
               disabled={
                 saving ||
                 !formData.name.trim() ||
-                ((editingPart != null || partNumberMode === "MANUAL") && !formData.partNumber.trim())
+                ((editingPart != null || partNumberMode === "MANUAL") &&
+                  !formData.partNumber.trim())
               }
             >
               {saving ? "Saving..." : editingPart ? "Save Changes" : "Create Part"}

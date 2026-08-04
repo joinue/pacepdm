@@ -9,13 +9,24 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Plus, Trash2, GitBranch, ArrowDown, Clock, Shield, Link2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 interface ApprovalGroup {
   id: string;
@@ -107,7 +118,9 @@ export default function WorkflowsPage() {
   }, []);
 
   useEffect(() => {
-    void (async () => { await loadData(); })();
+    void (async () => {
+      await loadData();
+    })();
   }, [loadData]);
 
   async function handleCreate(e: React.FormEvent) {
@@ -118,15 +131,27 @@ export default function WorkflowsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: wfName, description: wfDesc }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); setCreating(false); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      setCreating(false);
+      return;
+    }
     toast.success("Workflow created");
-    setShowCreate(false); setWfName(""); setWfDesc(""); setCreating(false);
+    setShowCreate(false);
+    setWfName("");
+    setWfDesc("");
+    setCreating(false);
     loadData();
   }
 
   async function handleDeleteWorkflow(id: string) {
     const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Workflow deleted");
     loadData();
   }
@@ -144,9 +169,17 @@ export default function WorkflowsPage() {
         deadlineHours: stepDeadline ? parseInt(stepDeadline) : null,
       }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Step added");
-    setAddStepTo(null); setStepGroupId(""); setStepMode("ANY"); setStepLabel("Approved"); setStepDeadline("");
+    setAddStepTo(null);
+    setStepGroupId("");
+    setStepMode("ANY");
+    setStepLabel("Approved");
+    setStepDeadline("");
     loadData();
   }
 
@@ -187,9 +220,16 @@ export default function WorkflowsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Assignment added");
-    setAddAssignTo(null); setAssignTransitionId(""); setAssignEcoTrigger(""); setAssignType("transition");
+    setAddAssignTo(null);
+    setAssignTransitionId("");
+    setAssignEcoTrigger("");
+    setAssignType("transition");
     loadData();
   }
 
@@ -214,28 +254,35 @@ export default function WorkflowsPage() {
     return t ? `${t.lifecycleName} · ${t.name}` : "";
   }
 
-  if (loading) return <div className="flex justify-center py-12"><div className="w-5 h-5 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" /></div>;
+  if (loading)
+    return (
+      <div className="flex justify-center py-12">
+        <div className="w-5 h-5 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Approval Workflows</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Define reusable approval sequences with ordered steps, modes, and deadlines
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Workflow
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Approval Workflows"
+        description="Define reusable approval sequences with ordered steps, modes, and deadlines"
+        actions={
+          <>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Workflow
+            </Button>
+          </>
+        }
+      />
 
       {groups.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             <Shield className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Create approval groups first (Admin &gt; Approval Groups), then build workflows here.</p>
+            <p className="text-sm">
+              Create approval groups first (Admin &gt; Approval Groups), then build workflows here.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -258,15 +305,31 @@ export default function WorkflowsPage() {
                   <CardTitle className="text-base flex items-center gap-2">
                     <GitBranch className="w-4 h-4 text-primary" />
                     {wf.name}
-                    {!wf.isActive && <Badge variant="muted" className="text-[10px]">Inactive</Badge>}
+                    {!wf.isActive && (
+                      <Badge variant="muted" className="text-3xs">
+                        Inactive
+                      </Badge>
+                    )}
                   </CardTitle>
-                  {wf.description && <CardDescription className="mt-1">{wf.description}</CardDescription>}
+                  {wf.description && (
+                    <CardDescription className="mt-1">{wf.description}</CardDescription>
+                  )}
                 </div>
                 <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleToggleActive(wf.id, wf.isActive)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => handleToggleActive(wf.id, wf.isActive)}
+                  >
                     {wf.isActive ? "Deactivate" : "Activate"}
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteWorkflow(wf.id)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-destructive"
+                    onClick={() => handleDeleteWorkflow(wf.id)}
+                  >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
@@ -276,14 +339,24 @@ export default function WorkflowsPage() {
               {/* Steps */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Steps</p>
-                  <Button variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => setAddStepTo(wf.id)}>
-                    <Plus className="w-3 h-3 mr-1" />Add Step
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Steps
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-xs px-2"
+                    onClick={() => setAddStepTo(wf.id)}
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Step
                   </Button>
                 </div>
 
                 {wf.steps.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic py-2">No steps — add at least one approval step</p>
+                  <p className="text-xs text-muted-foreground italic py-2">
+                    No steps — add at least one approval step
+                  </p>
                 ) : (
                   <div className="space-y-1">
                     {wf.steps.map((step, idx) => (
@@ -291,7 +364,7 @@ export default function WorkflowsPage() {
                         {idx > 0 && (
                           <div className="flex items-center gap-2 pl-4 py-0.5">
                             <ArrowDown className="w-3 h-3 text-muted-foreground" />
-                            <span className="text-[10px] text-muted-foreground">then</span>
+                            <span className="text-3xs text-muted-foreground">then</span>
                           </div>
                         )}
                         <div className="flex items-center gap-3 p-2 rounded-md border bg-muted/20 group">
@@ -301,8 +374,9 @@ export default function WorkflowsPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium">{step.group.name}</span>
-                              <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                                {MODES.find((m) => m.value === step.approvalMode)?.label || step.approvalMode}
+                              <Badge variant="secondary" className="text-4xs px-1.5 py-0">
+                                {MODES.find((m) => m.value === step.approvalMode)?.label ||
+                                  step.approvalMode}
                               </Badge>
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
@@ -315,7 +389,12 @@ export default function WorkflowsPage() {
                               )}
                             </div>
                           </div>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 text-destructive" onClick={() => handleRemoveStep(wf.id, step.id)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 text-destructive"
+                            onClick={() => handleRemoveStep(wf.id, step.id)}
+                          >
                             <Trash2 className="w-3 h-3" />
                           </Button>
                         </div>
@@ -330,40 +409,72 @@ export default function WorkflowsPage() {
               {/* Assignments */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Trigger Assignments</p>
-                  <Button variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => { setAddAssignTo(wf.id); setAssignType("transition"); setAssignTransitionId(""); setAssignEcoTrigger(""); }}>
-                    <Plus className="w-3 h-3 mr-1" />Assign
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Trigger Assignments
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-xs px-2"
+                    onClick={() => {
+                      setAddAssignTo(wf.id);
+                      setAssignType("transition");
+                      setAssignTransitionId("");
+                      setAssignEcoTrigger("");
+                    }}
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Assign
                   </Button>
                 </div>
 
                 {wf.assignments.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic py-2">No triggers — assign this workflow to transitions or ECO events</p>
+                  <p className="text-xs text-muted-foreground italic py-2">
+                    No triggers — assign this workflow to transitions or ECO events
+                  </p>
                 ) : (
                   <div className="space-y-1">
                     {wf.assignments.map((a) => (
-                      <div key={a.id} className="flex items-center gap-3 p-2 rounded-md border bg-muted/20 group">
+                      <div
+                        key={a.id}
+                        className="flex items-center gap-3 p-2 rounded-md border bg-muted/20 group"
+                      >
                         <Link2 className="w-4 h-4 text-muted-foreground shrink-0" />
                         <div className="flex-1 min-w-0">
                           {a.transitionId ? (
                             <div>
                               <div className="flex items-center gap-2">
-                                <Badge variant="info" className="text-[9px]">File Transition</Badge>
-                                <span className="text-sm font-medium">{getTransitionLabel(a.transitionId)}</span>
+                                <Badge variant="info" className="text-4xs">
+                                  File Transition
+                                </Badge>
+                                <span className="text-sm font-medium">
+                                  {getTransitionLabel(a.transitionId)}
+                                </span>
                               </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">{getTransitionSublabel(a.transitionId)}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {getTransitionSublabel(a.transitionId)}
+                              </p>
                             </div>
                           ) : a.ecoTrigger ? (
                             <div className="flex items-center gap-2">
-                              <Badge variant="warning" className="text-[9px]">ECO</Badge>
+                              <Badge variant="warning" className="text-4xs">
+                                ECO
+                              </Badge>
                               <span className="text-sm font-medium">
-                                {ECO_TRIGGERS.find((t) => t.value === a.ecoTrigger)?.label || a.ecoTrigger}
+                                {ECO_TRIGGERS.find((t) => t.value === a.ecoTrigger)?.label ||
+                                  a.ecoTrigger}
                               </span>
                             </div>
                           ) : (
                             <span className="text-sm text-muted-foreground">Unknown trigger</span>
                           )}
                         </div>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 text-destructive" onClick={() => handleRemoveAssignment(a.id)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 text-destructive"
+                          onClick={() => handleRemoveAssignment(a.id)}
+                        >
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
@@ -381,22 +492,38 @@ export default function WorkflowsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Approval Workflow</DialogTitle>
-            <DialogDescription>Create a reusable approval sequence. Add steps after creating it.</DialogDescription>
+            <DialogDescription>
+              Create a reusable approval sequence. Add steps after creating it.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate}>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Name</Label>
-                <Input value={wfName} onChange={(e) => setWfName(e.target.value)} placeholder='e.g., "Full Release Review"' required />
+                <Input
+                  value={wfName}
+                  onChange={(e) => setWfName(e.target.value)}
+                  placeholder='e.g., "Full Release Review"'
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label>Description (optional)</Label>
-                <Textarea value={wfDesc} onChange={(e) => setWfDesc(e.target.value)} placeholder="When should this workflow be used?" rows={2} />
+                <Textarea
+                  value={wfDesc}
+                  onChange={(e) => setWfDesc(e.target.value)}
+                  placeholder="When should this workflow be used?"
+                  rows={2}
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              <Button type="submit" disabled={creating || !wfName.trim()}>{creating ? "Creating..." : "Create"}</Button>
+              <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creating || !wfName.trim()}>
+                {creating ? "Creating..." : "Create"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -408,7 +535,8 @@ export default function WorkflowsPage() {
           <DialogHeader>
             <DialogTitle>Add Approval Step</DialogTitle>
             <DialogDescription>
-              Steps run in order. Each step requires an approval group to sign off before the next step activates.
+              Steps run in order. Each step requires an approval group to sign off before the next
+              step activates.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddStep}>
@@ -422,7 +550,11 @@ export default function WorkflowsPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -430,7 +562,9 @@ export default function WorkflowsPage() {
                 <Label>Approval Mode</Label>
                 <Select value={stepMode} onValueChange={(v) => setStepMode(v ?? "ANY")}>
                   <SelectTrigger>
-                    <SelectValue>{(v) => MODES.find((m) => m.value === v)?.label ?? ""}</SelectValue>
+                    <SelectValue>
+                      {(v) => MODES.find((m) => m.value === v)?.label ?? ""}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {MODES.map((m) => (
@@ -446,30 +580,59 @@ export default function WorkflowsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Signature Label</Label>
-                <Input value={stepLabel} onChange={(e) => setStepLabel(e.target.value)} placeholder='e.g., "Design Verified"' />
-                <p className="text-xs text-muted-foreground">This label appears on the approval record, like a sign-off block on a drawing.</p>
+                <Input
+                  value={stepLabel}
+                  onChange={(e) => setStepLabel(e.target.value)}
+                  placeholder='e.g., "Design Verified"'
+                />
+                <p className="text-xs text-muted-foreground">
+                  This label appears on the approval record, like a sign-off block on a drawing.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Deadline (hours, optional)</Label>
-                <Input type="number" value={stepDeadline} onChange={(e) => setStepDeadline(e.target.value)} placeholder="e.g., 72" min="1" />
-                <p className="text-xs text-muted-foreground">Recorded on the request for reference and SLA reporting. Automatic reminders are not yet sent.</p>
+                <Input
+                  type="number"
+                  value={stepDeadline}
+                  onChange={(e) => setStepDeadline(e.target.value)}
+                  placeholder="e.g., 72"
+                  min="1"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Recorded on the request for reference and SLA reporting. Automatic reminders are
+                  not yet sent.
+                </p>
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAddStepTo(null)}>Cancel</Button>
-              <Button type="submit" disabled={!stepGroupId}>Add Step</Button>
+              <Button type="button" variant="outline" onClick={() => setAddStepTo(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!stepGroupId}>
+                Add Step
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
       {/* Add Assignment Dialog */}
-      <Dialog open={!!addAssignTo} onOpenChange={(open) => { if (!open) { setAddAssignTo(null); setAssignTransitionId(""); setAssignEcoTrigger(""); } }}>
+      <Dialog
+        open={!!addAssignTo}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddAssignTo(null);
+            setAssignTransitionId("");
+            setAssignEcoTrigger("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Assign Workflow Trigger</DialogTitle>
             <DialogDescription>
-              Choose when this workflow should be activated. It will start automatically when the selected trigger occurs.
+              Choose when this workflow should be activated. It will start automatically when the
+              selected trigger occurs.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddAssignment}>
@@ -481,18 +644,28 @@ export default function WorkflowsPage() {
                   <button
                     type="button"
                     className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      assignType === "transition" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                      assignType === "transition"
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground"
                     }`}
-                    onClick={() => { setAssignType("transition"); setAssignEcoTrigger(""); }}
+                    onClick={() => {
+                      setAssignType("transition");
+                      setAssignEcoTrigger("");
+                    }}
                   >
                     File Transition
                   </button>
                   <button
                     type="button"
                     className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      assignType === "eco" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"
+                      assignType === "eco"
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground"
                     }`}
-                    onClick={() => { setAssignType("eco"); setAssignTransitionId(""); }}
+                    onClick={() => {
+                      setAssignType("eco");
+                      setAssignTransitionId("");
+                    }}
                   >
                     ECO Event
                   </button>
@@ -502,12 +675,17 @@ export default function WorkflowsPage() {
               {assignType === "transition" ? (
                 <div className="space-y-2">
                   <Label>Lifecycle Transition</Label>
-                  <Select value={assignTransitionId} onValueChange={(v) => setAssignTransitionId(v ?? "")}>
+                  <Select
+                    value={assignTransitionId}
+                    onValueChange={(v) => setAssignTransitionId(v ?? "")}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select transition...">
                         {(v) => {
                           const t = transitions.find((x) => x.id === v);
-                          return t ? `${t.fromState} → ${t.toState} (${t.lifecycleName})` : "Select transition...";
+                          return t
+                            ? `${t.fromState} → ${t.toState} (${t.lifecycleName})`
+                            : "Select transition...";
                         }}
                       </SelectValue>
                     </SelectTrigger>
@@ -515,22 +693,33 @@ export default function WorkflowsPage() {
                       {transitions.map((t) => (
                         <SelectItem key={t.id} value={t.id}>
                           <div className="flex items-center gap-2">
-                            <span>{t.fromState} → {t.toState}</span>
-                            <span className="text-xs text-muted-foreground">({t.lifecycleName})</span>
+                            <span>
+                              {t.fromState} → {t.toState}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              ({t.lifecycleName})
+                            </span>
                           </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">This workflow will start when a file undergoes this lifecycle transition.</p>
+                  <p className="text-xs text-muted-foreground">
+                    This workflow will start when a file undergoes this lifecycle transition.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <Label>ECO Trigger</Label>
-                  <Select value={assignEcoTrigger} onValueChange={(v) => setAssignEcoTrigger(v ?? "")}>
+                  <Select
+                    value={assignEcoTrigger}
+                    onValueChange={(v) => setAssignEcoTrigger(v ?? "")}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select trigger...">
-                        {(v) => ECO_TRIGGERS.find((t) => t.value === v)?.label ?? "Select trigger..."}
+                        {(v) =>
+                          ECO_TRIGGERS.find((t) => t.value === v)?.label ?? "Select trigger..."
+                        }
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -544,12 +733,16 @@ export default function WorkflowsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">This workflow will start when an ECO status changes to this value.</p>
+                  <p className="text-xs text-muted-foreground">
+                    This workflow will start when an ECO status changes to this value.
+                  </p>
                 </div>
               )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAddAssignTo(null)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setAddAssignTo(null)}>
+                Cancel
+              </Button>
               <Button
                 type="submit"
                 disabled={assignType === "transition" ? !assignTransitionId : !assignEcoTrigger}
@@ -560,6 +753,6 @@ export default function WorkflowsPage() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

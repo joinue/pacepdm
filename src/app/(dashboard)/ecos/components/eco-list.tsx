@@ -1,9 +1,8 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { ClipboardList, Loader2 } from "lucide-react";
-import { statusVariants, priorityVariants } from "../constants";
 import type { ECO } from "../types";
 
 interface EcoListProps {
@@ -52,21 +51,17 @@ export function EcoList({ ecos, loading, selectedEcoId, onSelect }: EcoListProps
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[11px] font-mono text-muted-foreground">{eco.ecoNumber}</span>
-                <Badge variant={statusVariants[eco.status] || "muted"} className="text-[10px]">
-                  {eco.status.replace("_", " ")}
-                </Badge>
+                <span className="text-2xs font-mono text-muted-foreground">{eco.ecoNumber}</span>
+                <StatusBadge status={eco.status} kind="eco" className="text-3xs" />
               </div>
               <p className="font-medium text-sm leading-snug">{eco.title}</p>
               {eco.description && (
                 <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{eco.description}</p>
               )}
             </div>
-            <Badge variant={priorityVariants[eco.priority] || "muted"} className="text-[10px] shrink-0">
-              {eco.priority}
-            </Badge>
+            <StatusBadge status={eco.priority} kind="priority" className="text-3xs shrink-0" />
           </div>
-          <p className="text-[10px] text-muted-foreground/60 mt-2">
+          <p className="text-3xs text-muted-foreground/60 mt-2">
             <FormattedDate date={eco.createdAt} variant="date" />
           </p>
         </div>

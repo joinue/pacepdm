@@ -8,21 +8,52 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
 } from "@/components/ui/sheet";
 import {
-  Plus, Search, Loader2, Building2, MoreHorizontal, Pencil, Trash2, ExternalLink, Mail, Phone, User, Package, ArrowUpRight,
+  Plus,
+  Search,
+  Loader2,
+  Building2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Mail,
+  Phone,
+  User,
+  Package,
+  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 interface Vendor {
   id: string;
@@ -90,7 +121,9 @@ export default function VendorsPage() {
   // Also handles the initial load (searchQuery starts as "", which fetches
   // all vendors), so a separate "load on mount" effect would be redundant.
   useEffect(() => {
-    const id = setTimeout(() => { void loadVendors(searchQuery); }, 250);
+    const id = setTimeout(() => {
+      void loadVendors(searchQuery);
+    }, 250);
     return () => clearTimeout(id);
   }, [searchQuery, loadVendors]);
 
@@ -162,14 +195,18 @@ export default function VendorsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Vendors</h2>
-        <Button size="sm" onClick={openCreate}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Vendor
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Vendors"
+        actions={
+          <>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Vendor
+            </Button>
+          </>
+        }
+      />
 
       <div className="relative max-w-md">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -207,7 +244,11 @@ export default function VendorsPage() {
             </TableHeader>
             <TableBody>
               {vendors.map((v) => (
-                <TableRow key={v.id} className="cursor-pointer hover:bg-muted/40" onClick={() => openDetail(v)}>
+                <TableRow
+                  key={v.id}
+                  className="cursor-pointer hover:bg-muted/40"
+                  onClick={() => openDetail(v)}
+                >
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
@@ -219,7 +260,13 @@ export default function VendorsPage() {
                   </TableCell>
                   <TableCell className="text-sm">
                     {v.website ? (
-                      <a href={v.website} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-primary hover:underline inline-flex items-center gap-1">
+                      <a
+                        href={v.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-primary hover:underline inline-flex items-center gap-1"
+                      >
                         Link <ExternalLink className="w-3 h-3" />
                       </a>
                     ) : (
@@ -228,21 +275,30 @@ export default function VendorsPage() {
                   </TableCell>
                   <TableCell>
                     {v.partCount && v.partCount > 0 ? (
-                      <Badge variant="info">{v.partCount} part{v.partCount === 1 ? "" : "s"}</Badge>
+                      <Badge variant="info">
+                        {v.partCount} part{v.partCount === 1 ? "" : "s"}
+                      </Badge>
                     ) : (
                       <span className="text-xs text-muted-foreground">0</span>
                     )}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
-                      <DropdownMenuTrigger render={
-                        <Button variant="ghost" size="icon-xs"><MoreHorizontal className="w-4 h-4" /></Button>
-                      } />
+                      <DropdownMenuTrigger
+                        render={
+                          <Button variant="ghost" size="icon-xs">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        }
+                      />
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => openEdit(v)}>
                           <Pencil className="w-3.5 h-3.5 mr-2" /> Edit
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDelete(v)} className="text-destructive">
+                        <DropdownMenuItem
+                          onClick={() => handleDelete(v)}
+                          className="text-destructive"
+                        >
                           <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -262,9 +318,7 @@ export default function VendorsPage() {
               <Building2 className="w-4 h-4 text-muted-foreground" />
               {detailVendor?.name || "Vendor"}
             </SheetTitle>
-            <SheetDescription>
-              Contact details and parts sourced from this vendor.
-            </SheetDescription>
+            <SheetDescription>Contact details and parts sourced from this vendor.</SheetDescription>
           </SheetHeader>
 
           {detailLoading || !detailVendor ? (
@@ -275,7 +329,12 @@ export default function VendorsPage() {
             <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-5">
               <div className="space-y-2 text-sm">
                 {detailVendor.website && (
-                  <a href={detailVendor.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-primary hover:underline">
+                  <a
+                    href={detailVendor.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-primary hover:underline"
+                  >
                     <ExternalLink className="w-3.5 h-3.5" />
                     {detailVendor.website}
                   </a>
@@ -287,7 +346,10 @@ export default function VendorsPage() {
                   </div>
                 )}
                 {detailVendor.contactEmail && (
-                  <a href={`mailto:${detailVendor.contactEmail}`} className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
+                  <a
+                    href={`mailto:${detailVendor.contactEmail}`}
+                    className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                  >
                     <Mail className="w-3.5 h-3.5" />
                     {detailVendor.contactEmail}
                   </a>
@@ -299,11 +361,19 @@ export default function VendorsPage() {
                   </div>
                 )}
                 {detailVendor.notes && (
-                  <p className="text-muted-foreground whitespace-pre-wrap pt-1">{detailVendor.notes}</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap pt-1">
+                    {detailVendor.notes}
+                  </p>
                 )}
-                {!detailVendor.website && !detailVendor.contactName && !detailVendor.contactEmail && !detailVendor.contactPhone && !detailVendor.notes && (
-                  <p className="text-xs text-muted-foreground italic">No contact details on file.</p>
-                )}
+                {!detailVendor.website &&
+                  !detailVendor.contactName &&
+                  !detailVendor.contactEmail &&
+                  !detailVendor.contactPhone &&
+                  !detailVendor.notes && (
+                    <p className="text-xs text-muted-foreground italic">
+                      No contact details on file.
+                    </p>
+                  )}
               </div>
 
               <div>
@@ -341,26 +411,46 @@ export default function VendorsPage() {
                                 <div className="flex flex-col">
                                   <span className="flex items-center gap-1.5">
                                     {link.part.partNumber}
-                                    {link.isPrimary && <Badge variant="info" className="text-[10px] px-1 py-0">Primary</Badge>}
+                                    {link.isPrimary && (
+                                      <Badge variant="info" className="text-3xs px-1 py-0">
+                                        Primary
+                                      </Badge>
+                                    )}
                                   </span>
-                                  <span className="text-xs text-muted-foreground truncate max-w-45">{link.part.name}</span>
+                                  <span className="text-xs text-muted-foreground truncate max-w-45">
+                                    {link.part.name}
+                                  </span>
                                 </div>
                               ) : (
                                 <span className="text-muted-foreground italic">Unknown part</span>
                               )}
                             </TableCell>
                             <TableCell className="text-xs">
-                              {link.vendorPartNumber || <span className="text-muted-foreground">—</span>}
+                              {link.vendorPartNumber || (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell className="text-xs text-right">
-                              {link.unitCost != null ? `${link.currency || ""} ${Number(link.unitCost).toFixed(2)}`.trim() : <span className="text-muted-foreground">—</span>}
+                              {link.unitCost != null ? (
+                                `${link.currency || ""} ${Number(link.unitCost).toFixed(2)}`.trim()
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell className="text-xs text-right">
-                              {link.leadTimeDays != null ? `${link.leadTimeDays}d` : <span className="text-muted-foreground">—</span>}
+                              {link.leadTimeDays != null ? (
+                                `${link.leadTimeDays}d`
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell>
                               {link.part && (
-                                <Link href={`/parts?partId=${link.part.id}`} className="text-muted-foreground hover:text-foreground inline-flex" aria-label="Open part">
+                                <Link
+                                  href={`/parts?partId=${link.part.id}`}
+                                  className="text-muted-foreground hover:text-foreground inline-flex"
+                                  aria-label="Open part"
+                                >
                                   <ArrowUpRight className="w-3.5 h-3.5" />
                                 </Link>
                               )}
@@ -374,7 +464,14 @@ export default function VendorsPage() {
               </div>
 
               <div className="flex gap-2 pt-2">
-                <Button size="sm" variant="outline" onClick={() => { setDetailOpen(false); if (detailVendor) openEdit(detailVendor); }}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailOpen(false);
+                    if (detailVendor) openEdit(detailVendor);
+                  }}
+                >
                   <Pencil className="w-3.5 h-3.5 mr-2" /> Edit vendor
                 </Button>
               </div>
@@ -388,47 +485,80 @@ export default function VendorsPage() {
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Vendor" : "New Vendor"}</DialogTitle>
             <DialogDescription>
-              {editingId ? "Update vendor details. Renaming affects everywhere this vendor is used." : "Add a vendor that can be linked to parts."}
+              {editingId
+                ? "Update vendor details. Renaming affects everywhere this vendor is used."
+                : "Add a vendor that can be linked to parts."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSave}>
             <div className="space-y-4 py-4">
               <div className="space-y-1">
                 <Label className="text-xs">Name</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="McMaster-Carr" required />
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="McMaster-Carr"
+                  required
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Website</Label>
-                <Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://..." />
+                <Input
+                  value={form.website}
+                  onChange={(e) => setForm({ ...form, website: e.target.value })}
+                  placeholder="https://..."
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Contact Name</Label>
-                  <Input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
+                  <Input
+                    value={form.contactName}
+                    onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Contact Email</Label>
-                  <Input type="email" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} />
+                  <Input
+                    type="email"
+                    value={form.contactEmail}
+                    onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+                  />
                 </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Contact Phone</Label>
-                <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} />
+                <Input
+                  value={form.contactPhone}
+                  onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Notes</Label>
-                <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional notes..." />
+                <Input
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Optional notes..."
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setShowDialog(false)}>
+                Cancel
+              </Button>
               <Button type="submit" disabled={saving || !form.name.trim()}>
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingId ? "Save" : "Create")}
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : editingId ? (
+                  "Save"
+                ) : (
+                  "Create"
+                )}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

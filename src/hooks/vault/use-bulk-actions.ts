@@ -79,14 +79,12 @@ export function useBulkActions({
     }
 
     setBulkDownloading(true);
-    const toastId = toast.loading(
-      `Preparing ${selectedFiles.size} files for download...`
-    );
+    const toastId = toast.loading(`Preparing ${selectedFiles.size} files for download...`);
     try {
-      const prep = await fetchJson<PrepareResponse>(
-        "/api/files/bulk-download/prepare",
-        { method: "POST", body: { fileIds: [...selectedFiles] } }
-      );
+      const prep = await fetchJson<PrepareResponse>("/api/files/bulk-download/prepare", {
+        method: "POST",
+        body: { fileIds: [...selectedFiles] },
+      });
 
       const sizeLabel = formatBytes(prep.totalBytes);
       if (prep.totalBytes >= WARN_BYTES) {
@@ -100,6 +98,12 @@ export function useBulkActions({
 
       // Native browser download — no JS memory pressure, native progress
       // bar, native save dialog. The signed token in the URL is the auth.
+      //
+      // no-location-assign-relative-destination is a false positive here:
+      // this is a download, not a navigation. router.push() would try to
+      // client-side route to an API path and never hand off to the
+      // browser's download manager.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = `/api/files/bulk-download/zip/${prep.token}`;
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to prepare download", { id: toastId });
@@ -129,6 +133,8 @@ export function useBulkActions({
         toast.success(`Starting download — ${head}`, { id: toastId });
       }
 
+      // Download, not navigation — see the note in the bulk-download path.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = `/api/files/bulk-download/zip/${prep.token}`;
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to prepare folder download", { id: toastId });

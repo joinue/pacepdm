@@ -39,10 +39,7 @@ export const PERMISSIONS = {
   SHARE_CREATE: "share.create",
 } as const;
 
-export function hasPermission(
-  userPermissions: string[],
-  required: string
-): boolean {
+export function hasPermission(userPermissions: string[], required: string): boolean {
   if (userPermissions.includes("*")) return true;
   return userPermissions.includes(required);
 }
@@ -55,10 +52,7 @@ export function hasPermission(
  * themselves to it. Wildcard "*" can only be granted by someone who
  * already holds "*".
  */
-export function permissionsExceedingActor(
-  requested: string[],
-  actor: string[]
-): string[] {
+export function permissionsExceedingActor(requested: string[], actor: string[]): string[] {
   if (actor.includes("*")) return [];
   return requested.filter((p) => !actor.includes(p));
 }
@@ -107,6 +101,11 @@ export const DEFAULT_METADATA_FIELDS = [
   { name: "Unit Cost", fieldType: "NUMBER", sortOrder: 9 },
   { name: "Lead Time (days)", fieldType: "NUMBER", sortOrder: 10 },
   { name: "Project", fieldType: "TEXT", sortOrder: 11 },
-  { name: "Department", fieldType: "SELECT", options: ["Engineering", "Manufacturing", "Quality"], sortOrder: 12 },
+  {
+    name: "Department",
+    fieldType: "SELECT",
+    options: ["Engineering", "Manufacturing", "Quality"],
+    sortOrder: 12,
+  },
   { name: "Notes", fieldType: "TEXT", sortOrder: 13 },
 ];

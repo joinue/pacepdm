@@ -48,9 +48,7 @@ const FEATURES = [
   },
 ] as const;
 
-const FILE_TYPES = [
-  "STEP", "IGES", "STL", "OBJ", "PDF", "PNG", "DWG", "SLDPRT",
-] as const;
+const FILE_TYPES = ["STEP", "IGES", "STL", "OBJ", "PDF", "PNG", "DWG", "SLDPRT"] as const;
 
 export default function MarketingPage() {
   return (
@@ -64,7 +62,10 @@ export default function MarketingPage() {
             <span className="font-semibold text-sm tracking-tight">PACE PDM</span>
           </Link>
           <div className="flex items-center gap-3">
-            <a href={LOGIN_URL} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <a
+              href={LOGIN_URL}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Sign in
             </a>
             <a
@@ -96,9 +97,9 @@ export default function MarketingPage() {
               </span>
             </h1>
             <p className="text-lg text-muted-foreground leading-relaxed max-w-2xl">
-              Revision control, routed ECO approvals, and an in-browser CAD
-              viewer. Built for hardware teams that have outgrown the spreadsheet
-              but don&apos;t need an enterprise PLM rollout.
+              Revision control, routed ECO approvals, and an in-browser CAD viewer. Built for
+              hardware teams that have outgrown the spreadsheet but don&apos;t need an enterprise
+              PLM rollout.
             </p>
             <div className="flex items-center gap-3 pt-3">
               <a
@@ -106,7 +107,13 @@ export default function MarketingPage() {
                 className="group inline-flex h-11 items-center rounded-full bg-primary px-7 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40"
               >
                 Start free
-                <svg className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
               </a>
@@ -128,7 +135,10 @@ export default function MarketingPage() {
       <section className="max-w-6xl mx-auto px-6 pb-28 lg:pb-36">
         <div className="relative group">
           {/* Glow behind the screenshot */}
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-b from-primary/20 via-primary/5 to-transparent opacity-60 blur-xl pointer-events-none" aria-hidden="true" />
+          <div
+            className="absolute -inset-1 rounded-2xl bg-gradient-to-b from-primary/20 via-primary/5 to-transparent opacity-60 blur-xl pointer-events-none"
+            aria-hidden="true"
+          />
           <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-2xl shadow-black/40">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -144,7 +154,9 @@ export default function MarketingPage() {
       <section className="border-t border-white/[0.06]">
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
           <div className="text-center mb-14">
-            <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">Capabilities</p>
+            <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">
+              Capabilities
+            </p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
               Everything you need. Nothing you don&apos;t.
             </h2>
@@ -156,9 +168,7 @@ export default function MarketingPage() {
                 className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 space-y-2.5 hover:border-white/[0.12] hover:bg-white/[0.04] transition-all duration-200"
               >
                 <h3 className="font-semibold text-sm">{f.title}</h3>
-                <p className="text-[13px] text-muted-foreground leading-relaxed">
-                  {f.desc}
-                </p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -170,20 +180,22 @@ export default function MarketingPage() {
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
           <div className="grid lg:grid-cols-2 gap-14 items-center">
             <div className="space-y-5">
-              <p className="text-sm font-medium text-primary tracking-wide uppercase">Browser-native</p>
+              <p className="text-sm font-medium text-primary tracking-wide uppercase">
+                Browser-native
+              </p>
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
                 Open a STEP file in a browser tab.
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                Click any CAD file in the vault and it renders instantly. Works
-                for the engineer who created it, the reviewer approving the ECO,
-                and the machinist on the shop floor with nothing but a laptop.
+                Click any CAD file in the vault and it renders instantly. Works for the engineer who
+                created it, the reviewer approving the ECO, and the machinist on the shop floor with
+                nothing but a laptop.
               </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {FILE_TYPES.map((ft) => (
                   <span
                     key={ft}
-                    className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 text-[11px] font-mono text-muted-foreground"
+                    className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-white/[0.03] px-2.5 text-2xs font-mono text-muted-foreground"
                   >
                     .{ft.toLowerCase()}
                   </span>
@@ -191,10 +203,17 @@ export default function MarketingPage() {
               </div>
             </div>
             <div className="relative">
-              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none" aria-hidden="true" />
+              <div
+                className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none"
+                aria-hidden="true"
+              />
               <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-xl shadow-black/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/images/screenshots/dashboard.png" alt="PACE PDM dashboard showing approvals, checked-out files, and open ECOs" className="w-full" />
+                <img
+                  src="/images/screenshots/dashboard.png"
+                  alt="PACE PDM dashboard showing approvals, checked-out files, and open ECOs"
+                  className="w-full"
+                />
               </div>
             </div>
           </div>
@@ -206,21 +225,30 @@ export default function MarketingPage() {
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
           <div className="grid lg:grid-cols-2 gap-14 items-center">
             <div className="order-2 lg:order-1 relative">
-              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-bl from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none" aria-hidden="true" />
+              <div
+                className="absolute -inset-1 rounded-2xl bg-gradient-to-bl from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none"
+                aria-hidden="true"
+              />
               <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-xl shadow-black/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/images/screenshots/lifecycle-management-preview.png" alt="Configurable lifecycle states with per-transition approval gates" className="w-full" />
+                <img
+                  src="/images/screenshots/lifecycle-management-preview.png"
+                  alt="Configurable lifecycle states with per-transition approval gates"
+                  className="w-full"
+                />
               </div>
             </div>
             <div className="order-1 lg:order-2 space-y-5">
-              <p className="text-sm font-medium text-primary tracking-wide uppercase">Configurable</p>
+              <p className="text-sm font-medium text-primary tracking-wide uppercase">
+                Configurable
+              </p>
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
                 Your workflow, defined in minutes.
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                WIP, In Review, Released, Obsolete. Or whatever your team
-                actually uses. Set which transitions require approval and
-                change the workflow later without migrating anything.
+                WIP, In Review, Released, Obsolete. Or whatever your team actually uses. Set which
+                transitions require approval and change the workflow later without migrating
+                anything.
               </p>
             </div>
           </div>
@@ -237,16 +265,23 @@ export default function MarketingPage() {
                 Route changes through the right people.
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                Define multi-step approval workflows with deadlines. Assign them
-                to lifecycle transitions so the right reviewers sign off before
-                anything gets released. No more chasing signatures over email.
+                Define multi-step approval workflows with deadlines. Assign them to lifecycle
+                transitions so the right reviewers sign off before anything gets released. No more
+                chasing signatures over email.
               </p>
             </div>
             <div className="relative">
-              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none" aria-hidden="true" />
+              <div
+                className="absolute -inset-1 rounded-2xl bg-gradient-to-br from-primary/15 to-transparent opacity-50 blur-xl pointer-events-none"
+                aria-hidden="true"
+              />
               <div className="relative rounded-xl border border-white/[0.08] bg-card overflow-hidden shadow-xl shadow-black/20">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/images/screenshots/approval-workflows.png" alt="Configurable approval workflows with multi-step sequences and trigger assignments" className="w-full" />
+                <img
+                  src="/images/screenshots/approval-workflows.png"
+                  alt="Configurable approval workflows with multi-step sequences and trigger assignments"
+                  className="w-full"
+                />
               </div>
             </div>
           </div>
@@ -257,7 +292,9 @@ export default function MarketingPage() {
       <section className="border-t border-white/[0.06]">
         <div className="max-w-6xl mx-auto px-6 py-24 lg:py-32">
           <div className="text-center mb-14">
-            <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">How it compares</p>
+            <p className="text-sm font-medium text-primary tracking-wide uppercase mb-3">
+              How it compares
+            </p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
               More than a spreadsheet. Less than a rollout.
             </h2>
@@ -267,9 +304,13 @@ export default function MarketingPage() {
               <thead>
                 <tr className="border-b border-white/[0.08]">
                   <th className="text-left py-3 px-4 font-medium text-muted-foreground" />
-                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Spreadsheet</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">
+                    Spreadsheet
+                  </th>
                   <th className="text-left py-3 px-4 font-medium text-primary">PACE PDM</th>
-                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Enterprise PLM</th>
+                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">
+                    Enterprise PLM
+                  </th>
                 </tr>
               </thead>
               <tbody className="text-muted-foreground">
@@ -330,9 +371,8 @@ export default function MarketingPage() {
               Live by the end of the week.
             </h2>
             <p className="text-muted-foreground leading-relaxed">
-              Import parts from a CSV, upload your files to the vault, invite
-              your team. A small hardware team can be running on PACE PDM the
-              same week they sign up.
+              Import parts from a CSV, upload your files to the vault, invite your team. A small
+              hardware team can be running on PACE PDM the same week they sign up.
             </p>
           </div>
         </div>
@@ -346,8 +386,8 @@ export default function MarketingPage() {
             Free while in beta.
           </h2>
           <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
-            Full access. No credit card. No feature gates. We&apos;ll introduce
-            paid plans down the road and give beta users a permanent discount.
+            Full access. No credit card. No feature gates. We&apos;ll introduce paid plans down the
+            road and give beta users a permanent discount.
           </p>
         </div>
       </section>
@@ -359,9 +399,7 @@ export default function MarketingPage() {
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-primary/[0.06] rounded-full blur-[100px]" />
           </div>
           <div className="relative max-w-6xl mx-auto px-6 py-28 lg:py-36 text-center space-y-6">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              Start free.
-            </h2>
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">Start free.</h2>
             <p className="text-muted-foreground max-w-md mx-auto">
               No credit card required. Get your parts imported in under ten minutes.
             </p>
@@ -371,7 +409,13 @@ export default function MarketingPage() {
                 className="group inline-flex h-11 items-center rounded-full bg-primary px-7 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40"
               >
                 Start free
-                <svg className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
               </a>
@@ -392,7 +436,11 @@ export default function MarketingPage() {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/images/ppdm-logo-white.png" alt="PACE PDM" className="h-5 w-5 opacity-40" />
+              <img
+                src="/images/ppdm-logo-white.png"
+                alt="PACE PDM"
+                className="h-5 w-5 opacity-40"
+              />
               <span className="text-xs text-muted-foreground/70">
                 &copy; {new Date().getFullYear()} Joinue LLC
               </span>

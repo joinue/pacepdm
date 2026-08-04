@@ -39,13 +39,18 @@ export async function POST(
       .select("id, name, isCheckedOut, checkedOutById")
       .eq("id", body.fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
     // Checked-out files can only have links changed by the checkout owner (or admins)
-    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+    if (
+      fileRecord.isCheckedOut &&
+      fileRecord.checkedOutById !== tenantUser.id &&
+      !permissions.includes("*")
+    ) {
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
@@ -54,18 +59,25 @@ export async function POST(
       await db.from("part_files").update({ isPrimary: false }).eq("partId", partId);
     }
 
-    const { data: pf, error } = await db.from("part_files").insert({
-      id: uuid(),
-      partId,
-      fileId: body.fileId,
-      role: body.role || "DRAWING",
-      isPrimary: body.isPrimary || false,
-      createdAt: new Date().toISOString(),
-    }).select().single();
+    const { data: pf, error } = await db
+      .from("part_files")
+      .insert({
+        id: uuid(),
+        partId,
+        fileId: body.fileId,
+        role: body.role || "DRAWING",
+        isPrimary: body.isPrimary || false,
+        createdAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "This file is already linked to this part" }, { status: 409 });
+        return NextResponse.json(
+          { error: "This file is already linked to this part" },
+          { status: 409 }
+        );
       }
       throw error;
     }
@@ -112,10 +124,15 @@ export async function DELETE(
       .select("name, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     // Checked-out files can only have links changed by the checkout owner (or admins)
-    if (fileRecord?.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+    if (
+      fileRecord?.isCheckedOut &&
+      fileRecord.checkedOutById !== tenantUser.id &&
+      !permissions.includes("*")
+    ) {
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 

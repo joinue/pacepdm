@@ -32,12 +32,24 @@ describe("hasPermission", () => {
 describe("PERMISSIONS constants", () => {
   it("has all expected permission keys", () => {
     const expectedKeys = [
-      "FILE_VIEW", "FILE_UPLOAD", "FILE_EDIT", "FILE_DELETE",
-      "FILE_CHECKOUT", "FILE_CHECKIN", "FILE_TRANSITION",
-      "FOLDER_CREATE", "FOLDER_EDIT", "FOLDER_DELETE",
-      "ECO_CREATE", "ECO_EDIT", "ECO_APPROVE",
-      "ADMIN_USERS", "ADMIN_ROLES", "ADMIN_SETTINGS",
-      "ADMIN_LIFECYCLE", "ADMIN_METADATA",
+      "FILE_VIEW",
+      "FILE_UPLOAD",
+      "FILE_EDIT",
+      "FILE_DELETE",
+      "FILE_CHECKOUT",
+      "FILE_CHECKIN",
+      "FILE_TRANSITION",
+      "FOLDER_CREATE",
+      "FOLDER_EDIT",
+      "FOLDER_DELETE",
+      "ECO_CREATE",
+      "ECO_EDIT",
+      "ECO_APPROVE",
+      "ADMIN_USERS",
+      "ADMIN_ROLES",
+      "ADMIN_SETTINGS",
+      "ADMIN_LIFECYCLE",
+      "ADMIN_METADATA",
     ];
     for (const key of expectedKeys) {
       expect(PERMISSIONS).toHaveProperty(key);

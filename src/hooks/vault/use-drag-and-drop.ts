@@ -39,24 +39,27 @@ export function useDragAndDrop({ files, refresh }: UseDragAndDropOptions) {
     setDropTargetId(null);
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent, folderId: string) => {
-    e.preventDefault();
-    setDropTargetId(null);
-    setDragFileId(null);
-    const fileId = e.dataTransfer.getData("text/plain");
-    if (!fileId) return;
-    try {
-      await fetchJson(`/api/files/${fileId}/move`, {
-        method: "PUT",
-        body: { folderId },
-      });
-      const file = files.find((f) => f.id === fileId);
-      toast.success(`Moved "${file?.name || "file"}" to folder`);
-      refresh();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  }, [files, refresh]);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent, folderId: string) => {
+      e.preventDefault();
+      setDropTargetId(null);
+      setDragFileId(null);
+      const fileId = e.dataTransfer.getData("text/plain");
+      if (!fileId) return;
+      try {
+        await fetchJson(`/api/files/${fileId}/move`, {
+          method: "PUT",
+          body: { folderId },
+        });
+        const file = files.find((f) => f.id === fileId);
+        toast.success(`Moved "${file?.name || "file"}" to folder`);
+        refresh();
+      } catch (err) {
+        toast.error(errorMessage(err));
+      }
+    },
+    [files, refresh]
+  );
 
   return {
     dragFileId,

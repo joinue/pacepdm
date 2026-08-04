@@ -17,7 +17,7 @@ export async function GET(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -35,9 +35,7 @@ export async function GET(
       return NextResponse.json({ error: "Version not found" }, { status: 404 });
     }
 
-    const { data, error } = await db.storage
-      .from("vault")
-      .createSignedUrl(version.storageKey, 60);
+    const { data, error } = await db.storage.from("vault").createSignedUrl(version.storageKey, 60);
 
     if (error || !data) {
       return NextResponse.json({ error: "Failed to generate download URL" }, { status: 500 });

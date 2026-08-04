@@ -61,6 +61,7 @@ export async function GET(
       .select("id")
       .eq("id", ecoId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!eco) {
       return NextResponse.json({ error: "ECO not found" }, { status: 404 });
@@ -95,11 +96,13 @@ export async function GET(
     // Join through to the BOM header and the part row for display fields.
     const { data: bomItemRows, error: biErr } = await db
       .from("bom_items")
-      .select(`
+      .select(
+        `
         itemNumber, quantity, unitCost,
-        part:parts!bom_items_partId_fkey(id, partNumber, name, revision),
-        bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId)
-      `)
+        part:parts!bom_items_partId_fkey(id, partNumber, name, revision, deletedAt),
+        bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId, deletedAt)
+      `
+      )
       .in("partId", affectedPartIds);
     if (biErr) throw biErr;
 
@@ -110,12 +113,22 @@ export async function GET(
 
     for (const row of bomItemRows ?? []) {
       const bom = (Array.isArray(row.bom) ? row.bom[0] : row.bom) as {
-        id: string; name: string; revision: string | null; status: string; tenantId: string;
+        id: string;
+        name: string;
+        revision: string | null;
+        status: string;
+        tenantId: string;
+        deletedAt: string | null;
       } | null;
       const part = (Array.isArray(row.part) ? row.part[0] : row.part) as {
-        id: string; partNumber: string; name: string; revision: string;
+        id: string;
+        partNumber: string;
+        name: string;
+        revision: string;
+        deletedAt: string | null;
       } | null;
-      if (!bom || !part || bom.tenantId !== tenantUser.tenantId) continue;
+      if (!bom || !part || bom.tenantId !== tenantUser.tenantId || bom.deletedAt || part.deletedAt)
+        continue;
 
       const revInfo = partRevMap.get(part.id);
       if (!revInfo) continue;
@@ -148,15 +161,9 @@ export async function GET(
     // "3 of 15 items affected." Done in one query for all affected BOMs.
     if (bomMap.size > 0) {
       const bomIds = Array.from(bomMap.keys());
-      const { data: countRows } = await db
-        .from("bom_items")
-        .select("bomId")
-        .in("bomId", bomIds);
+      const { data: countRows } = await db.from("bom_items").select("bomId").in("bomId", bomIds);
       for (const r of countRows ?? []) {
-        bomTotalItems.set(
-          r.bomId as string,
-          (bomTotalItems.get(r.bomId as string) ?? 0) + 1
-        );
+        bomTotalItems.set(r.bomId as string, (bomTotalItems.get(r.bomId as string) ?? 0) + 1);
       }
       for (const [bomId, entry] of bomMap) {
         entry.totalItems = bomTotalItems.get(bomId) ?? 0;

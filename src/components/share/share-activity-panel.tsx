@@ -104,26 +104,17 @@ export function ShareActivityPanel({ tokenId }: ShareActivityPanelProps) {
   }, [loadPage]);
 
   if (loading && !loadedOnce) {
-    return (
-      <div className="text-xs text-muted-foreground py-3 text-center">
-        Loading activity…
-      </div>
-    );
+    return <div className="text-xs text-muted-foreground py-3 text-center">Loading activity…</div>;
   }
 
   if (loadedOnce && rows.length === 0) {
-    return (
-      <div className="text-xs text-muted-foreground py-3 text-center">
-        No accesses yet.
-      </div>
-    );
+    return <div className="text-xs text-muted-foreground py-3 text-center">No accesses yet.</div>;
   }
 
   return (
     <div className="space-y-1">
-      <div className="text-[10px] text-muted-foreground/80 italic">
-        Includes link previews from chat apps (Slack, iMessage), which can
-        inflate counts.
+      <div className="text-3xs text-muted-foreground/80 italic">
+        Includes link previews from chat apps (Slack, iMessage), which can inflate counts.
       </div>
       <ul className="space-y-1">
         {rows.map((r) => {
@@ -149,22 +140,15 @@ export function ShareActivityPanel({ tokenId }: ShareActivityPanelProps) {
                 )}
               </span>
               {r.fileName && (
-                <span className="text-muted-foreground truncate max-w-40">
-                  {r.fileName}
-                </span>
+                <span className="text-muted-foreground truncate max-w-40">{r.fileName}</span>
               )}
               <span className="text-muted-foreground ml-auto whitespace-nowrap">
                 <FormattedDate date={r.createdAt} variant="datetime" />
               </span>
               {r.ipAddress && (
-                <span className="text-muted-foreground font-mono text-[10px]">
-                  {r.ipAddress}
-                </span>
+                <span className="text-muted-foreground font-mono text-3xs">{r.ipAddress}</span>
               )}
-              <span
-                className="text-muted-foreground text-[10px]"
-                title={r.userAgent ?? undefined}
-              >
+              <span className="text-muted-foreground text-3xs" title={r.userAgent ?? undefined}>
                 {shortBrowser(r.userAgent)}
               </span>
             </li>

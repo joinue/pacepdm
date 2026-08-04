@@ -95,7 +95,7 @@ export function BomRollupPanel({
           <Layers className="w-4 h-4 text-muted-foreground" />
           <span className="font-medium text-sm">Rollup (with sub-assemblies)</span>
           {data && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="text-3xs px-1.5 py-0">
               ${data.totalCost.toFixed(2)}
             </Badge>
           )}
@@ -117,7 +117,9 @@ export function BomRollupPanel({
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="space-y-2">
                 <p>{error}</p>
-                <Button variant="outline" size="sm" onClick={load}>Retry</Button>
+                <Button variant="outline" size="sm" onClick={load}>
+                  Retry
+                </Button>
               </div>
             </div>
           )}
@@ -136,9 +138,10 @@ export function BomRollupPanel({
               </div>
 
               {data.itemsMissingCost > 0 && (
-                <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded p-2">
+                <div className="flex items-center gap-2 text-xs text-warning bg-warning/10 rounded p-2">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  {data.itemsMissingCost} item{data.itemsMissingCost !== 1 ? "s" : ""} missing unit cost — totals may be understated.
+                  {data.itemsMissingCost} item{data.itemsMissingCost !== 1 ? "s" : ""} missing unit
+                  cost — totals may be understated.
                 </div>
               )}
 
@@ -165,10 +168,16 @@ export function BomRollupPanel({
                             <span style={{ paddingLeft: `${line.depth * 12}px` }}>{line.path}</span>
                           </td>
                           <td className="px-2 py-1">
-                            {line.partNumber && <span className="font-mono text-muted-foreground mr-1.5">{line.partNumber}</span>}
+                            {line.partNumber && (
+                              <span className="font-mono text-muted-foreground mr-1.5">
+                                {line.partNumber}
+                              </span>
+                            )}
                             {line.name}
                             {line.isSubAssembly && (
-                              <Badge variant="outline" className="text-[9px] ml-1.5 px-1 py-0">sub</Badge>
+                              <Badge variant="outline" className="text-4xs ml-1.5 px-1 py-0">
+                                sub
+                              </Badge>
                             )}
                           </td>
                           <td className="px-2 py-1 text-right font-mono">
@@ -197,7 +206,7 @@ export function BomRollupPanel({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-muted/30 rounded px-3 py-2">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-3xs uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="font-mono font-semibold">{value}</p>
     </div>
   );

@@ -5,7 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Plus, X, Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -13,10 +18,13 @@ import type { VendorSearchResult } from "../parts-types";
 
 function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback((...args: Parameters<T>) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => fn(...args), delay);
-  }, [fn, delay]) as T;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => fn(...args), delay);
+    },
+    [fn, delay]
+  ) as T;
 }
 
 interface AddVendorDialogProps {
@@ -28,7 +36,11 @@ interface AddVendorDialogProps {
 
 export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVendorDialogProps) {
   const [vendorForm, setVendorForm] = useState({
-    vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "",
+    vendorPartNumber: "",
+    unitCost: "",
+    leadTimeDays: "",
+    isPrimary: false,
+    notes: "",
   });
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [selectedVendorName, setSelectedVendorName] = useState("");
@@ -37,7 +49,13 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
   const [vendorSearching, setVendorSearching] = useState(false);
 
   function reset() {
-    setVendorForm({ vendorPartNumber: "", unitCost: "", leadTimeDays: "", isPrimary: false, notes: "" });
+    setVendorForm({
+      vendorPartNumber: "",
+      unitCost: "",
+      leadTimeDays: "",
+      isPrimary: false,
+      notes: "",
+    });
     setSelectedVendorId(null);
     setSelectedVendorName("");
     setVendorSearch("");
@@ -45,13 +63,19 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
   }
 
   const doVendorSearch = useCallback(async (q: string) => {
-    if (q.length < 1) { setVendorResults([]); setVendorSearching(false); return; }
+    if (q.length < 1) {
+      setVendorResults([]);
+      setVendorSearching(false);
+      return;
+    }
     setVendorSearching(true);
     try {
       const res = await fetch(`/api/vendors?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setVendorResults(Array.isArray(data) ? data.slice(0, 8) : []);
-    } catch { setVendorResults([]); }
+    } catch {
+      setVendorResults([]);
+    }
     setVendorSearching(false);
   }, []);
 
@@ -78,7 +102,11 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     const created = await res.json();
     selectVendor({ id: created.id, name: created.name });
     toast.success(`Created vendor "${created.name}"`);
@@ -99,7 +127,11 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
         notes: vendorForm.notes,
       }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Vendor added");
     onOpenChange(false);
     reset();
@@ -107,11 +139,21 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { onOpenChange(false); reset(); } }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          onOpenChange(false);
+          reset();
+        }
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add Vendor</DialogTitle>
-          <DialogDescription>Link an approved vendor to this part. Pick from existing or create new.</DialogDescription>
+          <DialogDescription>
+            Link an approved vendor to this part. Pick from existing or create new.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
@@ -121,7 +163,15 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
                 <div className="flex items-center gap-2 border rounded-md px-2 py-1.5 text-sm bg-muted/30">
                   <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="flex-1 truncate">{selectedVendorName}</span>
-                  <button type="button" onClick={() => { setSelectedVendorId(null); setSelectedVendorName(""); setVendorSearch(""); }} className="text-muted-foreground hover:text-destructive">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVendorId(null);
+                      setSelectedVendorName("");
+                      setVendorSearch("");
+                    }}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -152,30 +202,55 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
                       ))}
                     </div>
                   )}
-                  {vendorSearch.trim().length > 0 && !vendorSearching && !vendorResults.some((v) => v.name.toLowerCase() === vendorSearch.trim().toLowerCase()) && (
-                    <button
-                      type="button"
-                      onClick={handleCreateInlineVendor}
-                      className="mt-1 text-xs text-primary hover:underline flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3" /> Create &ldquo;{vendorSearch.trim()}&rdquo; as new vendor
-                    </button>
-                  )}
+                  {vendorSearch.trim().length > 0 &&
+                    !vendorSearching &&
+                    !vendorResults.some(
+                      (v) => v.name.toLowerCase() === vendorSearch.trim().toLowerCase()
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={handleCreateInlineVendor}
+                        className="mt-1 text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> Create &ldquo;{vendorSearch.trim()}&rdquo; as
+                        new vendor
+                      </button>
+                    )}
                 </div>
               )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Vendor Part #</Label>
-              <Input value={vendorForm.vendorPartNumber} onChange={(e) => setVendorForm({ ...vendorForm, vendorPartNumber: e.target.value })} placeholder="91290A197" className="h-8 text-sm" />
+              <Input
+                value={vendorForm.vendorPartNumber}
+                onChange={(e) => setVendorForm({ ...vendorForm, vendorPartNumber: e.target.value })}
+                placeholder="91290A197"
+                className="h-8 text-sm"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Unit Cost ($)</Label>
-                <Input type="number" value={vendorForm.unitCost} onChange={(e) => setVendorForm({ ...vendorForm, unitCost: e.target.value })} placeholder="0.00" className="h-8 text-sm" min="0" step="0.01" />
+                <Input
+                  type="number"
+                  value={vendorForm.unitCost}
+                  onChange={(e) => setVendorForm({ ...vendorForm, unitCost: e.target.value })}
+                  placeholder="0.00"
+                  className="h-8 text-sm"
+                  min="0"
+                  step="0.01"
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Lead Time (days)</Label>
-                <Input type="number" value={vendorForm.leadTimeDays} onChange={(e) => setVendorForm({ ...vendorForm, leadTimeDays: e.target.value })} placeholder="14" className="h-8 text-sm" min="0" />
+                <Input
+                  type="number"
+                  value={vendorForm.leadTimeDays}
+                  onChange={(e) => setVendorForm({ ...vendorForm, leadTimeDays: e.target.value })}
+                  placeholder="14"
+                  className="h-8 text-sm"
+                  min="0"
+                />
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -186,16 +261,34 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
                 onChange={(e) => setVendorForm({ ...vendorForm, isPrimary: e.target.checked })}
                 className="h-3.5 w-3.5"
               />
-              <Label htmlFor="isPrimaryVendor" className="text-xs cursor-pointer">Primary vendor (used for BOM cost rollup)</Label>
+              <Label htmlFor="isPrimaryVendor" className="text-xs cursor-pointer">
+                Primary vendor (used for BOM cost rollup)
+              </Label>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Notes</Label>
-              <Input value={vendorForm.notes} onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })} placeholder="Optional notes..." className="h-8 text-sm" />
+              <Input
+                value={vendorForm.notes}
+                onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })}
+                placeholder="Optional notes..."
+                className="h-8 text-sm"
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset(); }}>Cancel</Button>
-            <Button type="submit" disabled={!selectedVendorId}>Add Vendor</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onOpenChange(false);
+                reset();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!selectedVendorId}>
+              Add Vendor
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

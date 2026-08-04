@@ -59,7 +59,9 @@ function ConfirmInner() {
       <div className="flex-1 flex flex-col items-center justify-end pb-8 pt-16 sm:flex-none sm:pt-0 sm:pb-8">
         <Logo size={52} className="sm:size-11 mb-4 sm:mb-3" />
         <h1 className="text-2xl sm:text-xl font-semibold tracking-tight">{heading}</h1>
-        <p className="text-sm sm:text-xs text-muted-foreground mt-1 text-center px-6 max-w-sm">{body}</p>
+        <p className="text-sm sm:text-xs text-muted-foreground mt-1 text-center px-6 max-w-sm">
+          {body}
+        </p>
       </div>
 
       <div className="shrink-0 sm:w-full sm:max-w-sm">

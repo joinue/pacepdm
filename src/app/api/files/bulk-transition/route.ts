@@ -29,12 +29,14 @@ export async function POST(request: NextRequest) {
 
     const { data: transition } = await db
       .from("lifecycle_transitions")
-      .select(`
+      .select(
+        `
         *,
         fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name),
         toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name),
         lifecycle:lifecycles!lifecycle_transitions_lifecycleId_fkey(tenantId)
-      `)
+      `
+      )
       .eq("id", transitionId)
       .single();
 
@@ -62,9 +64,12 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (workflowAssignment && workflowAssignment.length > 0) {
-      return NextResponse.json({
-        error: "This transition requires approval. Transition files individually.",
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "This transition requires approval. Transition files individually.",
+        },
+        { status: 400 }
+      );
     }
 
     const now = new Date().toISOString();
@@ -74,7 +79,7 @@ export async function POST(request: NextRequest) {
     for (const fileId of fileIds) {
       const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
 
-      if (!file || file.tenantId !== tenantUser.tenantId) {
+      if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
         errors.push(`File ${fileId}: not found`);
         continue;
       }

@@ -3,27 +3,22 @@ import { parseMentionNames } from "./mentions";
 
 describe("parseMentionNames", () => {
   it("extracts a single @FirstName LastName mention", () => {
-    expect(parseMentionNames("Hey @John Smith please review")).toEqual([
-      "John Smith",
-    ]);
+    expect(parseMentionNames("Hey @John Smith please review")).toEqual(["John Smith"]);
   });
 
   it("extracts multiple mentions", () => {
-    expect(
-      parseMentionNames("@Alice Johnson and @Bob Williams need to approve")
-    ).toEqual(["Alice Johnson", "Bob Williams"]);
-  });
-
-  it("handles three-word names", () => {
-    expect(parseMentionNames("CC @Mary Jane Watson on this")).toEqual([
-      "Mary Jane Watson",
+    expect(parseMentionNames("@Alice Johnson and @Bob Williams need to approve")).toEqual([
+      "Alice Johnson",
+      "Bob Williams",
     ]);
   });
 
+  it("handles three-word names", () => {
+    expect(parseMentionNames("CC @Mary Jane Watson on this")).toEqual(["Mary Jane Watson"]);
+  });
+
   it("deduplicates repeated mentions", () => {
-    expect(
-      parseMentionNames("@John Smith mentioned @John Smith again")
-    ).toEqual(["John Smith"]);
+    expect(parseMentionNames("@John Smith mentioned @John Smith again")).toEqual(["John Smith"]);
   });
 
   it("returns empty array when no mentions", () => {

@@ -48,6 +48,7 @@ export async function GET(
       .select("id, name, revision, tenantId")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     if (!rootBom) {
@@ -79,6 +80,7 @@ export async function GET(
           .from("boms")
           .select("id, name, revision")
           .eq("tenantId", tenantUser.tenantId)
+          .is("deletedAt", null)
           .in("id", ids),
         db
           .from("bom_items")
@@ -129,10 +131,7 @@ export async function GET(
       });
     } catch (err) {
       if (err instanceof BomCycleError) {
-        return NextResponse.json(
-          { error: err.message, cyclePath: err.cyclePath },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: err.message, cyclePath: err.cyclePath }, { status: 400 });
       }
       if (err instanceof BomNotFoundError) {
         return NextResponse.json({ error: err.message }, { status: 404 });

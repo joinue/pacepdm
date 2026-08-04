@@ -5,17 +5,28 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Pencil, Check, X, ChevronRight, ChevronDown, Trash2,
-  FileText, Cpu, Package,
+  Pencil,
+  Check,
+  X,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  FileText,
+  Cpu,
+  Package,
 } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { buildTree } from "../utils";
-import { statusVariants, statusLabels, stateVariants, categoryVariants } from "../constants";
 import type { BOMItem } from "../types";
 
 interface BomItemsTableProps {
@@ -34,12 +45,7 @@ interface BomItemsTableProps {
  * raw items, the BOM id, and a refresh callback. This keeps the BOMs
  * page from carrying ~200 lines of table-row JSX inline.
  */
-export function BomItemsTable({
-  items,
-  bomId,
-  isEditable,
-  onItemsChanged,
-}: BomItemsTableProps) {
+export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomItemsTableProps) {
   const router = useRouter();
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
@@ -150,9 +156,12 @@ export function BomItemsTable({
         <TableBody>
           {items.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={isEditable ? 11 : 10} className="text-center py-12 text-muted-foreground">
+              <TableCell
+                colSpan={isEditable ? 11 : 10}
+                className="text-center py-12 text-muted-foreground"
+              >
                 <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                No items yet. {isEditable ? "Click \"Add Item\" to add parts." : ""}
+                No items yet. {isEditable ? 'Click "Add Item" to add parts.' : ""}
               </TableCell>
             </TableRow>
           ) : (
@@ -168,31 +177,63 @@ export function BomItemsTable({
                 <TableRow key={item.id} className={item.level > 0 ? "bg-muted/20" : ""}>
                   {/* Item # with tree indent */}
                   <TableCell className="font-mono text-xs">
-                    <div className="flex items-center" style={{ paddingLeft: `${item.level * 16}px` }}>
+                    <div
+                      className="flex items-center"
+                      style={{ paddingLeft: `${item.level * 16}px` }}
+                    >
                       {hasKids ? (
-                        <button onClick={() => toggleCollapse(item.id)} className="mr-1 p-0.5 hover:bg-muted rounded">
-                          {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        <button
+                          onClick={() => toggleCollapse(item.id)}
+                          className="mr-1 p-0.5 hover:bg-muted rounded"
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
                         </button>
                       ) : item.level > 0 ? (
-                        <span className="w-4 mr-1 inline-block text-center text-muted-foreground">·</span>
+                        <span className="w-4 mr-1 inline-block text-center text-muted-foreground">
+                          ·
+                        </span>
                       ) : null}
                       {isEditing ? (
-                        <Input value={editValues.itemNumber} onChange={(e) => setEditValues({ ...editValues, itemNumber: e.target.value })} className="h-6 w-14 text-xs px-1" />
-                      ) : item.itemNumber}
+                        <Input
+                          value={editValues.itemNumber}
+                          onChange={(e) =>
+                            setEditValues({ ...editValues, itemNumber: e.target.value })
+                          }
+                          className="h-6 w-14 text-xs px-1"
+                        />
+                      ) : (
+                        item.itemNumber
+                      )}
                     </div>
                   </TableCell>
 
                   {/* Name */}
                   <TableCell className="font-medium text-sm">
                     {isEditing ? (
-                      <Input value={editValues.name} onChange={(e) => setEditValues({ ...editValues, name: e.target.value })} className="h-6 text-xs px-1" />
-                    ) : display.name}
+                      <Input
+                        value={editValues.name}
+                        onChange={(e) => setEditValues({ ...editValues, name: e.target.value })}
+                        className="h-6 text-xs px-1"
+                      />
+                    ) : (
+                      display.name
+                    )}
                   </TableCell>
 
                   {/* Part # */}
                   <TableCell className="text-sm">
                     {isEditing ? (
-                      <Input value={editValues.partNumber} onChange={(e) => setEditValues({ ...editValues, partNumber: e.target.value })} className="h-6 text-xs px-1" />
+                      <Input
+                        value={editValues.partNumber}
+                        onChange={(e) =>
+                          setEditValues({ ...editValues, partNumber: e.target.value })
+                        }
+                        className="h-6 text-xs px-1"
+                      />
                     ) : (
                       display.partNumber || "—"
                     )}
@@ -201,27 +242,52 @@ export function BomItemsTable({
                   {/* Qty */}
                   <TableCell className="text-sm">
                     {isEditing ? (
-                      <Input type="number" value={editValues.quantity} onChange={(e) => setEditValues({ ...editValues, quantity: e.target.value })} className="h-6 w-16 text-xs px-1" min="0" step="any" />
-                    ) : item.quantity}
+                      <Input
+                        type="number"
+                        value={editValues.quantity}
+                        onChange={(e) => setEditValues({ ...editValues, quantity: e.target.value })}
+                        className="h-6 w-16 text-xs px-1"
+                        min="0"
+                        step="any"
+                      />
+                    ) : (
+                      item.quantity
+                    )}
                   </TableCell>
 
                   {/* Unit */}
                   <TableCell className="text-xs">
                     {isEditing ? (
-                      <Input value={editValues.unit} onChange={(e) => setEditValues({ ...editValues, unit: e.target.value })} className="h-6 w-12 text-xs px-1" />
-                    ) : display.unit}
+                      <Input
+                        value={editValues.unit}
+                        onChange={(e) => setEditValues({ ...editValues, unit: e.target.value })}
+                        className="h-6 w-12 text-xs px-1"
+                      />
+                    ) : (
+                      display.unit
+                    )}
                   </TableCell>
 
                   {/* Source: part / sub-assembly / file */}
                   <TableCell className="text-sm">
-                    <ItemSourceCell item={item} onNavigateToVault={(fid) => router.push(`/vault?fileId=${fid}`)} onNavigateToParts={() => router.push("/parts")} />
+                    <ItemSourceCell
+                      item={item}
+                      onNavigateToVault={(fid) => router.push(`/vault?fileId=${fid}`)}
+                      onNavigateToParts={() => router.push("/parts")}
+                    />
                   </TableCell>
 
                   {/* Material */}
                   <TableCell className="text-sm">
                     {isEditing ? (
-                      <Input value={editValues.material} onChange={(e) => setEditValues({ ...editValues, material: e.target.value })} className="h-6 text-xs px-1" />
-                    ) : display.material || "—"}
+                      <Input
+                        value={editValues.material}
+                        onChange={(e) => setEditValues({ ...editValues, material: e.target.value })}
+                        className="h-6 text-xs px-1"
+                      />
+                    ) : (
+                      display.material || "—"
+                    )}
                   </TableCell>
 
                   {/* Vendor — stays on the snapshot: parts don't have a
@@ -229,15 +295,32 @@ export function BomItemsTable({
                       relation), so there's nothing live to prefer. */}
                   <TableCell className="text-sm">
                     {isEditing ? (
-                      <Input value={editValues.vendor} onChange={(e) => setEditValues({ ...editValues, vendor: e.target.value })} className="h-6 text-xs px-1" />
-                    ) : item.vendor || "—"}
+                      <Input
+                        value={editValues.vendor}
+                        onChange={(e) => setEditValues({ ...editValues, vendor: e.target.value })}
+                        className="h-6 text-xs px-1"
+                      />
+                    ) : (
+                      item.vendor || "—"
+                    )}
                   </TableCell>
 
                   {/* Unit Cost */}
                   <TableCell className="font-mono text-sm">
                     {isEditing ? (
-                      <Input type="number" value={editValues.unitCost} onChange={(e) => setEditValues({ ...editValues, unitCost: e.target.value })} className="h-6 w-20 text-xs px-1" min="0" step="0.01" />
-                    ) : display.unitCost != null ? `$${display.unitCost.toFixed(2)}` : "—"}
+                      <Input
+                        type="number"
+                        value={editValues.unitCost}
+                        onChange={(e) => setEditValues({ ...editValues, unitCost: e.target.value })}
+                        className="h-6 w-20 text-xs px-1"
+                        min="0"
+                        step="0.01"
+                      />
+                    ) : display.unitCost != null ? (
+                      `$${display.unitCost.toFixed(2)}`
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
 
                   {/* Ext. Cost */}
@@ -251,13 +334,30 @@ export function BomItemsTable({
                       <div className="flex items-center gap-0.5">
                         {isEditing ? (
                           <>
-                            <Button variant="ghost" size="icon-xs" onClick={saveEdit}><Check className="w-3.5 h-3.5 text-green-600" /></Button>
-                            <Button variant="ghost" size="icon-xs" onClick={() => setEditingItemId(null)}><X className="w-3.5 h-3.5" /></Button>
+                            <Button variant="ghost" size="icon-xs" onClick={saveEdit}>
+                              <Check className="w-3.5 h-3.5 text-success" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => setEditingItemId(null)}
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </Button>
                           </>
                         ) : (
                           <>
-                            <Button variant="ghost" size="icon-xs" onClick={() => startEdit(item)}><Pencil className="w-3 h-3" /></Button>
-                            <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => deleteItem(item.id)}><Trash2 className="w-3 h-3" /></Button>
+                            <Button variant="ghost" size="icon-xs" onClick={() => startEdit(item)}>
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="text-destructive"
+                              onClick={() => deleteItem(item.id)}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
                           </>
                         )}
                       </div>
@@ -299,10 +399,8 @@ function ItemSourceCell({
         >
           {part.partNumber}
         </button>
-        <span className="text-[10px] font-mono text-muted-foreground">Rev {part.revision}</span>
-        <Badge variant={categoryVariants[part.category] || "secondary"} className="text-[9px] px-1 py-0">
-          {part.category.replace("_", " ").toLowerCase()}
-        </Badge>
+        <span className="text-3xs font-mono text-muted-foreground">Rev {part.revision}</span>
+        <StatusBadge status={part.category} kind="bom" className="text-4xs px-1 py-0" />
       </div>
     );
   }
@@ -312,9 +410,7 @@ function ItemSourceCell({
       <div className="flex items-center gap-1.5">
         <Package className="w-3 h-3 text-muted-foreground shrink-0" />
         <span className="text-xs truncate max-w-28">{linked.name}</span>
-        <Badge variant={statusVariants[linked.status] || "secondary"} className="text-[9px] px-1 py-0">
-          {statusLabels[linked.status]}
-        </Badge>
+        <StatusBadge status={linked.status} kind="bom" className="text-4xs px-1 py-0" />
       </div>
     );
   }
@@ -330,9 +426,7 @@ function ItemSourceCell({
         >
           {file.name}
         </button>
-        <Badge variant={stateVariants[file.lifecycleState] || "secondary"} className="text-[9px] px-1 py-0">
-          {file.lifecycleState}
-        </Badge>
+        <StatusBadge status={file.lifecycleState} kind="lifecycle" className="text-4xs px-1 py-0" />
       </div>
     );
   }

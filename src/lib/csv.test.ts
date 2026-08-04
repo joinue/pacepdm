@@ -1,5 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { csvField, toCsv, parseCsv, parseCsvRecords } from "./csv";
+import { csvField, toCsv, parseCsv, parseCsvRecords, unescapeCsvFormula } from "./csv";
+
+describe("formula-injection round trip", () => {
+  it("restores the original value on re-import", () => {
+    const original = '=HYPERLINK("http://evil")';
+    const csv = toCsv(["name"], [[original]]);
+    const { rows } = parseCsvRecords(csv);
+    expect(rows[0].name).toBe(original);
+  });
+
+  it("leaves ordinary values untouched through a round trip", () => {
+    const csv = toCsv(["name", "cost"], [["Widget, large", -12.5]]);
+    const { rows } = parseCsvRecords(csv);
+    expect(rows[0].name).toBe("Widget, large");
+    expect(rows[0].cost).toBe("-12.5");
+  });
+
+  it("only strips an apostrophe that guards a formula", () => {
+    expect(unescapeCsvFormula("'=1+1")).toBe("=1+1");
+    expect(unescapeCsvFormula("'Twas the night")).toBe("'Twas the night");
+  });
+});
 
 describe("csvField", () => {
   it("leaves plain strings alone", () => {
@@ -27,6 +48,19 @@ describe("csvField", () => {
     expect(csvField(null)).toBe("");
     expect(csvField(undefined)).toBe("");
   });
+
+  it("neutralizes formula-like strings so spreadsheets treat them as text", () => {
+    expect(csvField("=cmd|'/c calc'!A1")).toBe(`"'=cmd|'/c calc'!A1"`);
+    expect(csvField("+1+1")).toBe(`"'+1+1"`);
+    expect(csvField("@SUM(A1)")).toBe(`"'@SUM(A1)"`);
+    expect(csvField("-1+1+cmd|'/c calc'!A1")).toBe(`"'-1+1+cmd|'/c calc'!A1"`);
+  });
+
+  it("leaves negative numbers alone so cost columns still parse", () => {
+    expect(csvField(-5)).toBe("-5");
+    expect(csvField("-5")).toBe("-5");
+    expect(csvField("-12.75")).toBe("-12.75");
+  });
 });
 
 describe("toCsv", () => {
@@ -49,9 +83,7 @@ describe("toCsv", () => {
         ["one", 'he said "hi"', "last\nline"],
       ]
     );
-    expect(csv).toBe(
-      'a,b,c\r\nx,"y,z",\r\none,"he said ""hi""","last\nline"'
-    );
+    expect(csv).toBe('a,b,c\r\nx,"y,z",\r\none,"he said ""hi""","last\nline"');
   });
 });
 
@@ -110,8 +142,8 @@ describe("parseCsvRecords", () => {
     const { headers, rows } = parseCsvRecords(input);
     expect(headers).toEqual(["part number", "name"]);
     expect(rows).toEqual([
-      { "part number": "P-001", "name": "Widget" },
-      { "part number": "P-002", "name": "Gadget" },
+      { "part number": "P-001", name: "Widget" },
+      { "part number": "P-002", name: "Gadget" },
     ]);
   });
 

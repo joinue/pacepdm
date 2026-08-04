@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import {
-  buildFilesZipStream,
-  safeZipFilename,
-  verifyDownloadToken,
-} from "@/lib/vault-zip";
+import { buildFilesZipStream, safeZipFilename, verifyDownloadToken } from "@/lib/vault-zip";
 
 /**
  * GET /api/files/bulk-download/zip/[token]

@@ -20,10 +20,50 @@ jobs:
       - run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
-        run: npx eslint src/
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
+
+      # The two gates ESLint cannot express. Both are ratchets: existing debt
+      # is frozen in scripts/*.baseline.json, and any new violation fails here.
+      # See docs/decisions/design-tokens.md and data-fetching.md.
+      - name: Design tokens
+        run: npm run lint:tokens
+
+      - name: Conventions
+        run: npm run lint:conventions
 
       - name: Tests
-        run: npx vitest run
+        run: npm test
+
+  # RLS posture is a property of the live database, not of the repo: migrations
+  # here are applied by hand, so a migration file proves nothing about what is
+  # deployed (docs/decisions/hand-applied-migrations.md). This job asks
+  # PostgREST directly, using the public anon key.
+  #
+  # Runs only on pushes to main, and is skipped when the secrets are absent so
+  # that forks and PRs from forks do not fail on a missing credential.
+  rls:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Probe RLS as anon
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ]; then
+            echo "Supabase secrets not configured for this repository — skipping."
+            exit 0
+          fi
+          node scripts/rls-probe.mjs

@@ -11,10 +11,7 @@ import { verifyDomainOwnership } from "@/lib/sso-admin";
  * IdP metadata via the /activate endpoint before `signInWithSSO`
  * requests for this domain succeed.
  */
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

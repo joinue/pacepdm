@@ -102,7 +102,9 @@ export interface VerifiedDownloadToken {
   zipName: string;
 }
 
-export function verifyDownloadToken(token: string):
+export function verifyDownloadToken(
+  token: string
+):
   | { ok: true; verified: VerifiedDownloadToken }
   | { ok: false; reason: "malformed" | "bad_signature" | "expired" } {
   const idx = token.lastIndexOf(".");
@@ -170,7 +172,8 @@ export async function resolveFilesToEntries(
     .from("files")
     .select("id, name, folderId, currentVersion")
     .in("id", fileIds)
-    .eq("tenantId", tenantId);
+    .eq("tenantId", tenantId)
+    .is("deletedAt", null);
 
   const files = filterViewable(scope, (rawFiles as FileRow[] | null) ?? [], (f) => f.folderId);
   if (files.length === 0) return { entries: [], totalBytes: 0, missing: fileIds.length };
@@ -277,7 +280,8 @@ export async function resolveFolderToEntries(
     .from("files")
     .select("id, name, folderId, currentVersion")
     .in("folderId", folderIds)
-    .eq("tenantId", tenantId);
+    .eq("tenantId", tenantId)
+    .is("deletedAt", null);
 
   const files = (rawFiles as FileRow[] | null) ?? [];
   if (files.length === 0) {

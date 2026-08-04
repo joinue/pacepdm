@@ -96,13 +96,14 @@ export const FILE_ROLE_LABELS: Record<string, string> = {
   OTHER: "Other",
 };
 
-export const categoryVariants: Record<string, "info" | "success" | "muted" | "warning" | "purple"> = {
-  MANUFACTURED: "info",
-  PURCHASED: "success",
-  STANDARD_HARDWARE: "muted",
-  RAW_MATERIAL: "warning",
-  SUB_ASSEMBLY: "purple",
-};
+export const categoryVariants: Record<string, "info" | "success" | "muted" | "warning" | "purple"> =
+  {
+    MANUFACTURED: "info",
+    PURCHASED: "success",
+    STANDARD_HARDWARE: "muted",
+    RAW_MATERIAL: "warning",
+    SUB_ASSEMBLY: "purple",
+  };
 
 export const stateVariants: Record<string, "warning" | "info" | "success" | "error"> = {
   WIP: "warning",

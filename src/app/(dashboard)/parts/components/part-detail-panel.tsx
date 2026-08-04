@@ -3,14 +3,13 @@
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { PartWhereUsed } from "@/lib/where-used";
-import {
-  Plus, X, FileText, Building2, ImageIcon, Upload, Loader2,
-} from "lucide-react";
+import { Plus, X, FileText, Building2, ImageIcon, Upload, Loader2 } from "lucide-react";
 import type { PartDetail, PartVendorLink } from "../parts-types";
-import { CATEGORIES, categoryVariants, stateVariants } from "../parts-types";
+import { CATEGORIES, categoryVariants } from "../parts-types";
 
 interface PartDetailPanelProps {
   detail: PartDetail | null;
@@ -74,12 +73,13 @@ export function PartDetailPanel({
             <p className="font-mono text-sm text-muted-foreground">{detail.partNumber}</p>
             <p className="font-semibold truncate">{detail.name}</p>
             <div className="flex items-center gap-1.5 mt-1">
-              <Badge variant={categoryVariants[detail.category] || "secondary"} className="text-[9px]">
+              <Badge
+                variant={categoryVariants[detail.category] || "secondary"}
+                className="text-4xs"
+              >
                 {CATEGORIES.find((c) => c.value === detail.category)?.label}
               </Badge>
-              <Badge variant={stateVariants[detail.lifecycleState] || "secondary"} className="text-[9px]">
-                {detail.lifecycleState}
-              </Badge>
+              <StatusBadge status={detail.lifecycleState} kind="lifecycle" className="text-4xs" />
             </div>
           </div>
           <Button variant="ghost" size="icon-xs" onClick={onClose}>
@@ -97,18 +97,26 @@ export function PartDetailPanel({
           <span className="font-mono">{detail.revision}</span>
           <span className="text-muted-foreground">Unit</span>
           <span>{detail.unit}</span>
-          {detail.material && <>
-            <span className="text-muted-foreground">Material</span>
-            <span>{detail.material}</span>
-          </>}
-          {detail.unitCost != null && <>
-            <span className="text-muted-foreground">Cost</span>
-            <span className="font-mono">${detail.unitCost.toFixed(2)}</span>
-          </>}
-          {detail.weight != null && <>
-            <span className="text-muted-foreground">Weight</span>
-            <span>{detail.weight} {detail.weightUnit}</span>
-          </>}
+          {detail.material && (
+            <>
+              <span className="text-muted-foreground">Material</span>
+              <span>{detail.material}</span>
+            </>
+          )}
+          {detail.unitCost != null && (
+            <>
+              <span className="text-muted-foreground">Cost</span>
+              <span className="font-mono">${detail.unitCost.toFixed(2)}</span>
+            </>
+          )}
+          {detail.weight != null && (
+            <>
+              <span className="text-muted-foreground">Weight</span>
+              <span>
+                {detail.weight} {detail.weightUnit}
+              </span>
+            </>
+          )}
         </div>
 
         <Separator />
@@ -134,9 +142,7 @@ export function PartDetailPanel({
 
         {/* Where Used */}
         {partWhereUsed &&
-        partWhereUsed.boms.length +
-          partWhereUsed.parentParts.length +
-          partWhereUsed.ecos.length >
+        partWhereUsed.boms.length + partWhereUsed.parentParts.length + partWhereUsed.ecos.length >
           0 ? (
           <WhereUsedSection
             boms={partWhereUsed.boms}
@@ -188,15 +194,27 @@ function LinkedFilesSection({
       ) : (
         <div className="space-y-1">
           {files.map((pf) => {
-            const f = pf.file as unknown as { id: string; name: string; revision: string; lifecycleState: string; fileType: string };
+            const f = pf.file as unknown as {
+              id: string;
+              name: string;
+              revision: string;
+              lifecycleState: string;
+              fileType: string;
+            };
             return (
               <div key={pf.id} className="flex items-center gap-2 text-sm group">
                 <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <button className="truncate hover:underline text-left flex-1" onClick={() => onPreviewFile({ id: f.id, name: f.name })}>
+                <button
+                  className="truncate hover:underline text-left flex-1"
+                  onClick={() => onPreviewFile({ id: f.id, name: f.name })}
+                >
                   {f.name}
                 </button>
-                <span className="text-[10px] text-muted-foreground">{pf.role}</span>
-                <button onClick={() => onUnlinkFile(f.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive">
+                <span className="text-3xs text-muted-foreground">{pf.role}</span>
+                <button
+                  onClick={() => onUnlinkFile(f.id)}
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                >
                   <X className="w-3 h-3" />
                 </button>
               </div>
@@ -234,9 +252,17 @@ function VendorsSection({
               <div className="flex items-center gap-1.5">
                 <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 <span className="font-medium">{v.vendor?.name ?? "(unknown vendor)"}</span>
-                {v.isPrimary && <Badge variant="info" className="text-[9px] px-1 py-0">Primary</Badge>}
+                {v.isPrimary && (
+                  <Badge variant="info" className="text-4xs px-1 py-0">
+                    Primary
+                  </Badge>
+                )}
               </div>
-              {v.vendorPartNumber && <p className="text-xs text-muted-foreground mt-0.5 ml-5">PN: {v.vendorPartNumber}</p>}
+              {v.vendorPartNumber && (
+                <p className="text-xs text-muted-foreground mt-0.5 ml-5">
+                  PN: {v.vendorPartNumber}
+                </p>
+              )}
               <div className="flex gap-3 ml-5 mt-0.5 text-xs text-muted-foreground">
                 {v.unitCost != null && <span>${v.unitCost.toFixed(2)}</span>}
                 {v.leadTimeDays != null && <span>{v.leadTimeDays}d lead</span>}

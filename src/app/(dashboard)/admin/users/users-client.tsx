@@ -5,21 +5,40 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { UserPlus, AlertTriangle, MoreHorizontal, UserMinus } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 interface User {
   id: string;
@@ -84,10 +103,13 @@ export function UsersClient({
           : `Invitation email sent to ${email}`
       );
 
-      setUsers((prev) => [...prev, {
-        ...data.user,
-        role: roles.find((r) => r.id === roleId) || null,
-      }]);
+      setUsers((prev) => [
+        ...prev,
+        {
+          ...data.user,
+          role: roles.find((r) => r.id === roleId) || null,
+        },
+      ]);
       resetAndClose();
     } catch {
       toast.error("Failed to invite user");
@@ -130,11 +152,11 @@ export function UsersClient({
         toast.error(data.error || "Failed to update user");
         return;
       }
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isActive } : u))
-      );
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isActive } : u)));
       if (!isActive && data.releasedCheckouts > 0) {
-        toast.success(`User deactivated. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`);
+        toast.success(
+          `User deactivated. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`
+        );
       } else {
         toast.success(`User ${isActive ? "activated" : "deactivated"}`);
       }
@@ -156,7 +178,9 @@ export function UsersClient({
       }
       setUsers((prev) => prev.filter((u) => u.id !== removeTarget.id));
       if (data.releasedCheckouts > 0) {
-        toast.success(`${removeTarget.fullName} removed. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`);
+        toast.success(
+          `${removeTarget.fullName} removed. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`
+        );
       } else {
         toast.success(`${removeTarget.fullName} removed from workspace`);
       }
@@ -176,7 +200,9 @@ export function UsersClient({
     // server truth (e.g., privilege ceiling rejected the change).
     const previousRole = user.role;
     setUsers((prev) =>
-      prev.map((u) => (u.id === user.id ? { ...u, role: { id: newRole.id, name: newRole.name } } : u))
+      prev.map((u) =>
+        u.id === user.id ? { ...u, role: { id: newRole.id, name: newRole.name } } : u
+      )
     );
 
     try {
@@ -188,29 +214,29 @@ export function UsersClient({
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "Failed to change role");
-        setUsers((prev) =>
-          prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u))
-        );
+        setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u)));
         return;
       }
       toast.success(`${user.fullName} is now ${newRole.name}`);
     } catch {
       toast.error("Failed to change role");
-      setUsers((prev) =>
-        prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u))
-      );
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u)));
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Users</h2>
-        <Button size="sm" onClick={() => setShowInvite(true)}>
-          <UserPlus className="w-4 h-4 mr-2" />
-          Invite User
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Users"
+        actions={
+          <>
+            <Button size="sm" onClick={() => setShowInvite(true)}>
+              <UserPlus className="w-4 h-4 mr-2" />
+              Invite User
+            </Button>
+          </>
+        }
+      />
 
       <div className="border rounded-lg bg-background">
         <Table>
@@ -304,7 +330,12 @@ export function UsersClient({
         </Table>
       </div>
 
-      <Dialog open={showInvite} onOpenChange={(open) => { if (!open) resetAndClose(); }}>
+      <Dialog
+        open={showInvite}
+        onOpenChange={(open) => {
+          if (!open) resetAndClose();
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Invite User</DialogTitle>
@@ -314,60 +345,65 @@ export function UsersClient({
           </DialogHeader>
 
           <form onSubmit={handleInvite}>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="invName">Full Name</Label>
-                  <Input
-                    id="invName"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Jane Smith"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="invEmail">Email</Label>
-                  <Input
-                    id="invEmail"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="jane@company.com"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Role</Label>
-                  <Select value={roleId} onValueChange={(v) => setRoleId(v ?? "")}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role...">
-                        {(value) => roles.find((r) => r.id === value)?.name ?? "Select role..."}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.map((role) => (
-                        <SelectItem key={role.id} value={role.id}>
-                          {role.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="invName">Full Name</Label>
+                <Input
+                  id="invName"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Jane Smith"
+                  required
+                />
               </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={resetAndClose}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={loading || !roleId}>
-                  {loading ? "Inviting..." : "Invite"}
-                </Button>
-              </DialogFooter>
+              <div className="space-y-2">
+                <Label htmlFor="invEmail">Email</Label>
+                <Input
+                  id="invEmail"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="jane@company.com"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select value={roleId} onValueChange={(v) => setRoleId(v ?? "")}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role...">
+                      {(value) => roles.find((r) => r.id === value)?.name ?? "Select role..."}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((role) => (
+                      <SelectItem key={role.id} value={role.id}>
+                        {role.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={resetAndClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={loading || !roleId}>
+                {loading ? "Inviting..." : "Invite"}
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
       {/* Deactivation confirmation */}
-      <Dialog open={!!deactivateTarget} onOpenChange={(open) => { if (!open) setDeactivateTarget(null); }}>
+      <Dialog
+        open={!!deactivateTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeactivateTarget(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Deactivate user</DialogTitle>
@@ -376,15 +412,19 @@ export function UsersClient({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 /30">
+              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
               <div className="text-sm space-y-1">
                 <p>This user will be immediately logged out and unable to sign back in.</p>
-                <p>Any files they have checked out will be automatically released so other team members can edit them.</p>
+                <p>
+                  Any files they have checked out will be automatically released so other team
+                  members can edit them.
+                </p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              Their data (files, parts, BOMs, ECOs) will be preserved. You can reactivate them at any time.
+              Their data (files, parts, BOMs, ECOs) will be preserved. You can reactivate them at
+              any time.
             </p>
           </div>
           <DialogFooter>
@@ -400,7 +440,12 @@ export function UsersClient({
 
       {/* Removal confirmation — irreversible. Distinct copy from
           deactivation so admins don't conflate the two. */}
-      <Dialog open={!!removeTarget} onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null); }}>
+      <Dialog
+        open={!!removeTarget}
+        onOpenChange={(open) => {
+          if (!open && !removing) setRemoveTarget(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remove user from workspace</DialogTitle>
@@ -413,15 +458,24 @@ export function UsersClient({
               <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
               <div className="text-sm space-y-1">
                 <p>This permanently removes their access to this workspace and cannot be undone.</p>
-                <p>Any files they have checked out will be released. To restore access, you&apos;ll need to invite them again.</p>
+                <p>
+                  Any files they have checked out will be released. To restore access, you&apos;ll
+                  need to invite them again.
+                </p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              Their authored data (files, parts, BOMs, ECOs, approval decisions) is preserved, but the author field will show as unknown.
+              Their authored data (files, parts, BOMs, ECOs, approval decisions) is preserved, but
+              the author field will show as unknown.
             </p>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={removing} onClick={() => setRemoveTarget(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={removing}
+              onClick={() => setRemoveTarget(null)}
+            >
               Cancel
             </Button>
             <Button type="button" variant="destructive" disabled={removing} onClick={confirmRemove}>
@@ -430,6 +484,6 @@ export function UsersClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

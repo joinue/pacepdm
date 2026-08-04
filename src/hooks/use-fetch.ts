@@ -84,14 +84,11 @@ export function useFetch<T>(url: string | null, options: UseFetchOptions = {}): 
     return () => abortRef.current?.abort();
   }, [enabled, url, performFetch]);
 
-  const setData = useCallback(
-    (updater: T | ((prev: T | null) => T | null)) => {
-      setDataState((prev) =>
-        typeof updater === "function" ? (updater as (prev: T | null) => T | null)(prev) : updater
-      );
-    },
-    []
-  );
+  const setData = useCallback((updater: T | ((prev: T | null) => T | null)) => {
+    setDataState((prev) =>
+      typeof updater === "function" ? (updater as (prev: T | null) => T | null)(prev) : updater
+    );
+  }, []);
 
   return { data, loading, error, refetch: performFetch, setData };
 }

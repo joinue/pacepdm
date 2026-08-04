@@ -84,49 +84,80 @@ export function VaultBrowser({
     }
   }, []);
 
-  const handleExternalDrop = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes("Files")) return;
-    e.preventDefault();
-    dragCounter.current = 0;
-    setShowDropOverlay(false);
-    const dropped = e.dataTransfer.files?.[0];
-    if (dropped) {
-      setExternalDropFile(dropped);
-      vault.setShowUpload(true);
-    }
-  }, [vault]);
+  const handleExternalDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      dragCounter.current = 0;
+      setShowDropOverlay(false);
+      const dropped = e.dataTransfer.files?.[0];
+      if (dropped) {
+        setExternalDropFile(dropped);
+        vault.setShowUpload(true);
+      }
+    },
+    [vault]
+  );
 
   // Clear the external drop file when the upload dialog closes
-  const handleUploadDialogChange = useCallback((open: boolean) => {
-    vault.setShowUpload(open);
-    if (!open) setExternalDropFile(null);
-  }, [vault]);
+  const handleUploadDialogChange = useCallback(
+    (open: boolean) => {
+      vault.setShowUpload(open);
+      if (!open) setExternalDropFile(null);
+    },
+    [vault]
+  );
 
   const selectedFileData = vault.files.find((f) => f.id === vault.selectedFile);
 
   // Pass undefined for actions the user can't perform — the detail panel
   // already hides menu items when their callbacks are missing. Server still
   // enforces permissions; this is purely UX.
-  const detailProps = vault.selectedFile ? {
-    fileId: vault.selectedFile,
-    metadataFields,
-    onClose: () => vault.selectFile(null),
-    onRefresh: () => vault.refresh(),
-    userId: user.id,
-    onCheckIn: can(PERMISSIONS.FILE_CHECKIN)
-      ? () => vault.setCheckInFileId(vault.selectedFile!)
-      : undefined,
-    onChangeState: can(PERMISSIONS.FILE_TRANSITION)
-      ? () => { if (selectedFileData) vault.openTransitionDialog(selectedFileData.id, selectedFileData.name, selectedFileData.lifecycleId ?? null); }
-      : undefined,
-    onRename: can(PERMISSIONS.FILE_EDIT)
-      ? () => { if (selectedFileData) { vault.setRenameTarget({ id: selectedFileData.id, name: selectedFileData.name, type: "file" }); vault.setNewName(selectedFileData.name); } }
-      : undefined,
-    onDelete: can(PERMISSIONS.FILE_DELETE)
-      ? () => { if (selectedFileData) vault.setDeleteTarget({ id: selectedFileData.id, name: selectedFileData.name, type: "file" }); }
-      : undefined,
-    isAdmin: can("admin.settings") || can("*"),
-  } : null;
+  const detailProps = vault.selectedFile
+    ? {
+        fileId: vault.selectedFile,
+        metadataFields,
+        onClose: () => vault.selectFile(null),
+        onRefresh: () => vault.refresh(),
+        userId: user.id,
+        onCheckIn: can(PERMISSIONS.FILE_CHECKIN)
+          ? () => vault.setCheckInFileId(vault.selectedFile!)
+          : undefined,
+        onChangeState: can(PERMISSIONS.FILE_TRANSITION)
+          ? () => {
+              if (selectedFileData)
+                vault.openTransitionDialog(
+                  selectedFileData.id,
+                  selectedFileData.name,
+                  selectedFileData.lifecycleId ?? null
+                );
+            }
+          : undefined,
+        onRename: can(PERMISSIONS.FILE_EDIT)
+          ? () => {
+              if (selectedFileData) {
+                vault.setRenameTarget({
+                  id: selectedFileData.id,
+                  name: selectedFileData.name,
+                  type: "file",
+                });
+                vault.setNewName(selectedFileData.name);
+              }
+            }
+          : undefined,
+        onDelete: can(PERMISSIONS.FILE_DELETE)
+          ? () => {
+              if (selectedFileData)
+                vault.setDeleteTarget({
+                  id: selectedFileData.id,
+                  name: selectedFileData.name,
+                  type: "file",
+                });
+            }
+          : undefined,
+        isAdmin: can("admin.settings") || can("*"),
+      }
+    : null;
 
   return (
     <div
@@ -148,23 +179,31 @@ export function VaultBrowser({
 
       {/* Detail view — replaces file list on desktop, sheet on mobile.
           Wrapped in ErrorBoundary so a panel render failure doesn't take down the vault. */}
-      {vault.selectedFile && detailProps && (
-        isDesktop ? (
-          <div className="border rounded-lg bg-background" style={{ height: "calc(100vh - 12rem)" }}>
+      {vault.selectedFile &&
+        detailProps &&
+        (isDesktop ? (
+          <div
+            className="border rounded-lg bg-background"
+            style={{ height: "calc(100vh - 12rem)" }}
+          >
             <ErrorBoundary>
               <FileDetailPanel {...detailProps} layout="full" />
             </ErrorBoundary>
           </div>
         ) : (
-          <Sheet open={!!vault.selectedFile} onOpenChange={(open) => { if (!open) vault.selectFile(null); }}>
+          <Sheet
+            open={!!vault.selectedFile}
+            onOpenChange={(open) => {
+              if (!open) vault.selectFile(null);
+            }}
+          >
             <SheetContent side="right" className="w-full max-w-none! p-0" showCloseButton={false}>
               <ErrorBoundary>
                 <FileDetailPanel {...detailProps} layout="compact" />
               </ErrorBoundary>
             </SheetContent>
           </Sheet>
-        )
-      )}
+        ))}
 
       {/* File list — hidden when detail view is open on desktop */}
       <div className={vault.selectedFile && isDesktop ? "hidden" : ""}>
@@ -172,9 +211,30 @@ export function VaultBrowser({
       </div>
 
       {/* Dialogs */}
-      <CreateFolderDialog open={vault.showCreateFolder} onOpenChange={vault.setShowCreateFolder} parentId={vault.currentFolderId} onCreated={() => vault.refresh()} />
-      <UploadFileDialog open={vault.showUpload} onOpenChange={handleUploadDialogChange} folderId={vault.currentFolderId} onUploaded={() => vault.refresh()} initialFile={externalDropFile} />
-      {vault.checkInFileId && <CheckInDialog open={!!vault.checkInFileId} onOpenChange={(open) => !open && vault.setCheckInFileId(null)} fileId={vault.checkInFileId} onCheckedIn={() => { vault.setCheckInFileId(null); vault.refresh(); }} />}
+      <CreateFolderDialog
+        open={vault.showCreateFolder}
+        onOpenChange={vault.setShowCreateFolder}
+        parentId={vault.currentFolderId}
+        onCreated={() => vault.refresh()}
+      />
+      <UploadFileDialog
+        open={vault.showUpload}
+        onOpenChange={handleUploadDialogChange}
+        folderId={vault.currentFolderId}
+        onUploaded={() => vault.refresh()}
+        initialFile={externalDropFile}
+      />
+      {vault.checkInFileId && (
+        <CheckInDialog
+          open={!!vault.checkInFileId}
+          onOpenChange={(open) => !open && vault.setCheckInFileId(null)}
+          fileId={vault.checkInFileId}
+          onCheckedIn={() => {
+            vault.setCheckInFileId(null);
+            vault.refresh();
+          }}
+        />
+      )}
 
       <VaultDialogs vault={vault} />
     </div>

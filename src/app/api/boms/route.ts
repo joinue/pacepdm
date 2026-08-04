@@ -1,49 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { v4 as uuid } from "uuid";
-import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { v4 as uuidv4 } from "uuid";
+import { z, nonEmptyString } from "@/lib/validation";
 
 const CreateBomSchema = z.object({
   name: nonEmptyString,
 });
 
-export async function GET() {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const db = getServiceClient();
+export const GET = withTenant({}, async ({ db }) => {
+  const { data } = await db
+    .from("boms")
+    .select("*")
+    .is("deletedAt", null)
+    .order("createdAt", { ascending: false })
+    .limit(500);
+  return data || [];
+});
 
-    const { data } = await db
-      .from("boms")
-      .select("*")
-      .eq("tenantId", tenantUser.tenantId)
-      .is("deletedAt", null)
-      .order("createdAt", { ascending: false })
-      .limit(500);
-    return NextResponse.json(data || []);
-  } catch (err) {
-    console.error("Failed to fetch BOMs:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch BOMs";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.FILE_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const parsed = await parseBody(request, CreateBomSchema);
-    if (!parsed.ok) return parsed.response;
-    const { name } = parsed.data;
-
-    const db = getServiceClient();
+export const POST = withTenant(
+  { permission: PERMISSIONS.FILE_EDIT, body: CreateBomSchema },
+  async ({ db, tenantUser, body, request }) => {
     const now = new Date().toISOString();
     const idempotencyKey = request.headers.get("idempotency-key") || null;
 
@@ -54,23 +31,25 @@ export async function POST(request: NextRequest) {
       const { data: existing } = await db
         .from("boms")
         .select("*")
-        .eq("tenantId", tenantUser.tenantId)
         .eq("clientRequestKey", idempotencyKey)
         .maybeSingle();
-      if (existing) return NextResponse.json(existing);
+      if (existing) return existing;
     }
 
-    const { data: bom, error } = await db.from("boms").insert({
-      id: uuid(),
-      tenantId: tenantUser.tenantId,
-      name,
-      revision: "A",
-      status: "DRAFT",
-      createdById: tenantUser.id,
-      clientRequestKey: idempotencyKey,
-      createdAt: now,
-      updatedAt: now,
-    }).select().single();
+    const { data: bom, error } = await db
+      .from("boms")
+      .insert({
+        id: uuidv4(),
+        name: body.name,
+        revision: "A",
+        status: "DRAFT",
+        createdById: tenantUser.id,
+        clientRequestKey: idempotencyKey,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single();
 
     if (error) {
       // Race: another request with the same key landed first
@@ -78,24 +57,22 @@ export async function POST(request: NextRequest) {
         const { data: existing } = await db
           .from("boms")
           .select("*")
-          .eq("tenantId", tenantUser.tenantId)
           .eq("clientRequestKey", idempotencyKey)
           .maybeSingle();
-        if (existing) return NextResponse.json(existing);
+        if (existing) return existing;
       }
-      throw error;
+      throw new Error(error.message);
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "bom.create", entityType: "bom", entityId: bom.id,
-      details: { name },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "bom.create",
+      entityType: "bom",
+      entityId: bom.id,
+      details: { name: body.name },
     });
 
-    return NextResponse.json(bom);
-  } catch (err) {
-    console.error("Failed to create BOM:", err);
-    const message = err instanceof Error ? err.message : "Failed to create BOM";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return bom;
   }
-}
+);

@@ -21,9 +21,7 @@ export function ReleasePageClient({ release }: { release: ReleaseRow }) {
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Release
-            </div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Release</div>
             <h1 className="text-2xl font-semibold truncate">{release.name}</h1>
             <div className="text-sm text-muted-foreground flex items-center gap-3 flex-wrap">
               <Link
@@ -203,9 +201,9 @@ export function ReleasePageClient({ release }: { release: ReleaseRow }) {
 
         <Separator />
         <div className="text-xs text-muted-foreground">
-          This release is an immutable snapshot. The files and BOMs below are
-          frozen at the moment {release.ecoNumber} was implemented — later
-          revisions won&apos;t change what this page shows.
+          This release is an immutable snapshot. The files and BOMs below are frozen at the moment{" "}
+          {release.ecoNumber} was implemented — later revisions won&apos;t change what this page
+          shows.
         </div>
       </div>
 

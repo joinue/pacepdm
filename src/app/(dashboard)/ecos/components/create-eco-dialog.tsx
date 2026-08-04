@@ -7,10 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { reasonLabels, changeTypeLabelsEco } from "../constants";
@@ -69,7 +78,9 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>New Engineering Change Order</DialogTitle>
-          <DialogDescription>Create an ECO to propose and track an engineering change.</DialogDescription>
+          <DialogDescription>
+            Create an ECO to propose and track an engineering change.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
@@ -101,7 +112,9 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(reasonLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -109,24 +122,46 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Change Type</Label>
-                <Select value={form.changeType} onValueChange={(v) => setField("changeType", v ?? "")}>
+                <Select
+                  value={form.changeType}
+                  onValueChange={(v) => setField("changeType", v ?? "")}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select type...">
-                      {(v) => changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ?? "Select type..."}
+                      {(v) =>
+                        changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ??
+                        "Select type..."
+                      }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(changeTypeLabelsEco).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                      <SelectItem key={k} value={k}>
+                        {v}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Priority</Label>
-                <Select value={form.priority} onValueChange={(v) => setField("priority", v ?? "MEDIUM")}>
+                <Select
+                  value={form.priority}
+                  onValueChange={(v) => setField("priority", v ?? "MEDIUM")}
+                >
                   <SelectTrigger>
-                    <SelectValue>{(v) => ({ LOW: "Low", MEDIUM: "Medium", HIGH: "High", CRITICAL: "Critical" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                    <SelectValue>
+                      {(v) =>
+                        (
+                          ({
+                            LOW: "Low",
+                            MEDIUM: "Medium",
+                            HIGH: "High",
+                            CRITICAL: "Critical",
+                          }) as Record<string, string>
+                        )[v as string] ?? ""
+                      }
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="LOW">Low</SelectItem>
@@ -139,7 +174,9 @@ export function CreateEcoDialog({ open, onOpenChange, onCreated }: CreateEcoDial
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={close}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={creating || !form.title.trim()}>
               {creating ? "Creating..." : "Create ECO"}
             </Button>

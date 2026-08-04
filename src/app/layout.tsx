@@ -47,9 +47,7 @@ export default function RootLayout({
           enableSystem={false}
           storageKey="pace-pdm-theme"
         >
-          <TooltipProvider>
-            {children}
-          </TooltipProvider>
+          <TooltipProvider>{children}</TooltipProvider>
           <Toaster />
         </ThemeProvider>
       </body>

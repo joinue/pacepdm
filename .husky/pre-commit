@@ -1,0 +1,10 @@
+# Format and lint the staged files, then hold the two gates that guard the
+# conventions ESLint cannot express, then typecheck the project.
+#
+# The token and convention gates run against the whole tree rather than the
+# staged subset: both are ratchets (scripts/*.baseline.json), and a partial
+# view would let a violation move between files unnoticed.
+npx lint-staged
+npm run lint:tokens
+npm run lint:conventions
+npm run typecheck

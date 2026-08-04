@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 
@@ -44,7 +49,10 @@ export function CreateBomDialog({ open, onOpenChange, onCreated }: CreateBomDial
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const created = await fetchJson<CreatedBom>("/api/boms", { method: "POST", body: { name: name.trim() } });
+      const created = await fetchJson<CreatedBom>("/api/boms", {
+        method: "POST",
+        body: { name: name.trim() },
+      });
       toast.success("BOM created");
       close();
       onCreated(created);
@@ -61,8 +69,8 @@ export function CreateBomDialog({ open, onOpenChange, onCreated }: CreateBomDial
         <DialogHeader>
           <DialogTitle>New Bill of Materials</DialogTitle>
           <DialogDescription>
-            Create a BOM to list the parts and materials needed to build something.
-            You&apos;ll add items and link them to vault files after creating it.
+            Create a BOM to list the parts and materials needed to build something. You&apos;ll add
+            items and link them to vault files after creating it.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>

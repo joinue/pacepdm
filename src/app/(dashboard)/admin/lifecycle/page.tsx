@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus, Trash2, ArrowRight, Tag } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 interface LifecycleState {
   id: string;
@@ -114,7 +116,9 @@ export default function LifecyclePage() {
   }, []);
 
   useEffect(() => {
-    void (async () => { await loadData(); })();
+    void (async () => {
+      await loadData();
+    })();
   }, [loadData]);
 
   // --- Lifecycle CRUD ---
@@ -188,14 +192,11 @@ export default function LifecyclePage() {
 
   async function handleDeleteState() {
     if (!deleteStateInfo) return;
-    const res = await fetch(
-      `/api/lifecycle/${deleteStateInfo.lifecycleId}/states`,
-      {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stateId: deleteStateInfo.stateId }),
-      }
-    );
+    const res = await fetch(`/api/lifecycle/${deleteStateInfo.lifecycleId}/states`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stateId: deleteStateInfo.stateId }),
+    });
     if (!res.ok) {
       const d = await res.json();
       toast.error(d.error);
@@ -238,16 +239,13 @@ export default function LifecyclePage() {
 
   async function handleDeleteTransition() {
     if (!deleteTransitionInfo) return;
-    const res = await fetch(
-      `/api/lifecycle/${deleteTransitionInfo.lifecycleId}/transitions`,
-      {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transitionId: deleteTransitionInfo.transitionId,
-        }),
-      }
-    );
+    const res = await fetch(`/api/lifecycle/${deleteTransitionInfo.lifecycleId}/transitions`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transitionId: deleteTransitionInfo.transitionId,
+      }),
+    });
     if (!res.ok) {
       const d = await res.json();
       toast.error(d.error);
@@ -275,27 +273,26 @@ export default function LifecyclePage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Lifecycle Management</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Define lifecycle states and transitions for files
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreateLifecycle(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Lifecycle
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Lifecycle Management"
+        description="Define lifecycle states and transitions for files"
+        actions={
+          <>
+            <Button size="sm" onClick={() => setShowCreateLifecycle(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Lifecycle
+            </Button>
+          </>
+        }
+      />
 
       {lifecycles.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             <Tag className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">
-              No lifecycles yet. Create one to define states and transitions for
-              your files.
+              No lifecycles yet. Create one to define states and transitions for your files.
             </p>
           </CardContent>
         </Card>
@@ -350,10 +347,7 @@ export default function LifecyclePage() {
                 ) : (
                   <div className="flex gap-2 flex-wrap">
                     {lc.states.map((state) => (
-                      <div
-                        key={state.id}
-                        className="flex items-center gap-1 group"
-                      >
+                      <div key={state.id} className="flex items-center gap-1 group">
                         <Badge
                           style={{
                             backgroundColor: state.color + "20",
@@ -422,13 +416,11 @@ export default function LifecyclePage() {
                     {lc.transitions.map((t) => {
                       const fromName =
                         (Array.isArray(t.fromState)
-                          ? (t.fromState as unknown as { name: string }[])[0]
-                              ?.name
+                          ? (t.fromState as unknown as { name: string }[])[0]?.name
                           : t.fromState?.name) || "?";
                       const toName =
                         (Array.isArray(t.toState)
-                          ? (t.toState as unknown as { name: string }[])[0]
-                              ?.name
+                          ? (t.toState as unknown as { name: string }[])[0]?.name
                           : t.toState?.name) || "?";
                       return (
                         <div
@@ -439,18 +431,11 @@ export default function LifecyclePage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 text-sm">
                               <span className="font-medium">{fromName}</span>
-                              <span className="text-muted-foreground">
-                                &rarr;
-                              </span>
+                              <span className="text-muted-foreground">&rarr;</span>
                               <span className="font-medium">{toName}</span>
-                              <span className="text-muted-foreground">
-                                ({t.name})
-                              </span>
+                              <span className="text-muted-foreground">({t.name})</span>
                               {t.requiresApproval && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px]"
-                                >
+                                <Badge variant="outline" className="text-3xs">
                                   Requires Approval
                                 </Badge>
                               )}
@@ -504,25 +489,16 @@ export default function LifecyclePage() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
                   checked={lcIsDefault}
-                  onCheckedChange={(checked) =>
-                    setLcIsDefault(checked === true)
-                  }
+                  onCheckedChange={(checked) => setLcIsDefault(checked === true)}
                 />
                 <span className="text-sm">Set as default lifecycle</span>
               </label>
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowCreateLifecycle(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setShowCreateLifecycle(false)}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={creatingLc || !lcName.trim()}
-              >
+              <Button type="submit" disabled={creatingLc || !lcName.trim()}>
                 {creatingLc ? "Creating..." : "Create"}
               </Button>
             </DialogFooter>
@@ -547,8 +523,7 @@ export default function LifecyclePage() {
           <DialogHeader>
             <DialogTitle>Add State</DialogTitle>
             <DialogDescription>
-              Add a new state to this lifecycle. States represent stages a file
-              can be in.
+              Add a new state to this lifecycle. States represent stages a file can be in.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddState}>
@@ -593,9 +568,7 @@ export default function LifecyclePage() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <Checkbox
                     checked={stateIsInitial}
-                    onCheckedChange={(checked) =>
-                      setStateIsInitial(checked === true)
-                    }
+                    onCheckedChange={(checked) => setStateIsInitial(checked === true)}
                   />
                   <div>
                     <span className="text-sm">Initial state</span>
@@ -607,9 +580,7 @@ export default function LifecyclePage() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <Checkbox
                     checked={stateIsFinal}
-                    onCheckedChange={(checked) =>
-                      setStateIsFinal(checked === true)
-                    }
+                    onCheckedChange={(checked) => setStateIsFinal(checked === true)}
                   />
                   <div>
                     <span className="text-sm">Final state</span>
@@ -621,11 +592,7 @@ export default function LifecyclePage() {
               </div>
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAddStateTo(null)}
-              >
+              <Button type="button" variant="outline" onClick={() => setAddStateTo(null)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!stateName.trim()}>
@@ -653,8 +620,8 @@ export default function LifecyclePage() {
           <DialogHeader>
             <DialogTitle>Add Transition</DialogTitle>
             <DialogDescription>
-              Define a transition between two states. Transitions control how
-              files move between lifecycle states.
+              Define a transition between two states. Transitions control how files move between
+              lifecycle states.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddTransition}>
@@ -667,7 +634,11 @@ export default function LifecyclePage() {
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select source state...">
-                      {(v) => (addTransitionTo && getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ?? "Select source state..."}
+                      {(v) =>
+                        (addTransitionTo &&
+                          getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ??
+                        "Select source state..."
+                      }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -682,13 +653,14 @@ export default function LifecyclePage() {
               </div>
               <div className="space-y-2">
                 <Label>To State</Label>
-                <Select
-                  value={transToStateId}
-                  onValueChange={(v) => setTransToStateId(v ?? "")}
-                >
+                <Select value={transToStateId} onValueChange={(v) => setTransToStateId(v ?? "")}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select target state...">
-                      {(v) => (addTransitionTo && getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ?? "Select target state..."}
+                      {(v) =>
+                        (addTransitionTo &&
+                          getStatesForLifecycle(addTransitionTo).find((s) => s.id === v)?.name) ??
+                        "Select target state..."
+                      }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -713,9 +685,7 @@ export default function LifecyclePage() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
                   checked={transRequiresApproval}
-                  onCheckedChange={(checked) =>
-                    setTransRequiresApproval(checked === true)
-                  }
+                  onCheckedChange={(checked) => setTransRequiresApproval(checked === true)}
                 />
                 <div>
                   <span className="text-sm">Requires approval</span>
@@ -726,18 +696,12 @@ export default function LifecyclePage() {
               </label>
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAddTransitionTo(null)}
-              >
+              <Button type="button" variant="outline" onClick={() => setAddTransitionTo(null)}>
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={
-                  !transFromStateId || !transToStateId || !transName.trim()
-                }
+                disabled={!transFromStateId || !transToStateId || !transName.trim()}
               >
                 Add Transition
               </Button>
@@ -755,8 +719,8 @@ export default function LifecyclePage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete lifecycle?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the lifecycle and all its states and
-              transitions. This cannot be undone.
+              This will permanently delete the lifecycle and all its states and transitions. This
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -782,8 +746,8 @@ export default function LifecyclePage() {
               Delete state &ldquo;{deleteStateInfo?.stateName}&rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove this state. It cannot be deleted if
-              transitions reference it or files are in this state.
+              This will permanently remove this state. It cannot be deleted if transitions reference
+              it or files are in this state.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -810,8 +774,8 @@ export default function LifecyclePage() {
               &rdquo;?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove this transition. Files will no longer
-              be able to use this path between states.
+              This will permanently remove this transition. Files will no longer be able to use this
+              path between states.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -825,6 +789,6 @@ export default function LifecyclePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

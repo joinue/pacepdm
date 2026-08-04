@@ -4,11 +4,7 @@ import { getApiTenantUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { getFolderAccessScope } from "@/lib/folder-access";
-import {
-  resolveFilesToEntries,
-  signDownloadToken,
-  MAX_DOWNLOAD_BYTES,
-} from "@/lib/vault-zip";
+import { resolveFilesToEntries, signDownloadToken, MAX_DOWNLOAD_BYTES } from "@/lib/vault-zip";
 
 const PrepareSchema = z.object({
   // No upper bound on count — the server-side stream is memory-bounded.

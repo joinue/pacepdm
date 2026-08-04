@@ -25,7 +25,9 @@ function slugify(text: string): string {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user || !user.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -58,11 +60,7 @@ export async function POST(request: NextRequest) {
 
     // Generate unique slug
     let slug = slugify(companyName);
-    const { data: existing } = await db
-      .from("tenants")
-      .select("id")
-      .eq("slug", slug)
-      .single();
+    const { data: existing } = await db.from("tenants").select("id").eq("slug", slug).single();
     if (existing) {
       slug = `${slug}-${Date.now().toString(36)}`;
     }
@@ -136,19 +134,87 @@ export async function POST(request: NextRequest) {
     const obsoleteId = uuid();
 
     await db.from("lifecycle_states").insert([
-      { id: wipId, lifecycleId, name: "WIP", color: "#F59E0B", isInitial: true, isFinal: false, sortOrder: 0 },
-      { id: inReviewId, lifecycleId, name: "In Review", color: "#3B82F6", isInitial: false, isFinal: false, sortOrder: 1 },
-      { id: releasedId, lifecycleId, name: "Released", color: "#10B981", isInitial: false, isFinal: false, sortOrder: 2 },
-      { id: obsoleteId, lifecycleId, name: "Obsolete", color: "#EF4444", isInitial: false, isFinal: true, sortOrder: 3 },
+      {
+        id: wipId,
+        lifecycleId,
+        name: "WIP",
+        color: "#F59E0B",
+        isInitial: true,
+        isFinal: false,
+        sortOrder: 0,
+      },
+      {
+        id: inReviewId,
+        lifecycleId,
+        name: "In Review",
+        color: "#3B82F6",
+        isInitial: false,
+        isFinal: false,
+        sortOrder: 1,
+      },
+      {
+        id: releasedId,
+        lifecycleId,
+        name: "Released",
+        color: "#10B981",
+        isInitial: false,
+        isFinal: false,
+        sortOrder: 2,
+      },
+      {
+        id: obsoleteId,
+        lifecycleId,
+        name: "Obsolete",
+        color: "#EF4444",
+        isInitial: false,
+        isFinal: true,
+        sortOrder: 3,
+      },
     ]);
 
     const approveReleaseId = uuid();
     await db.from("lifecycle_transitions").insert([
-      { id: uuid(), lifecycleId, fromStateId: wipId, toStateId: inReviewId, name: "Submit for Review", requiresApproval: false },
-      { id: uuid(), lifecycleId, fromStateId: inReviewId, toStateId: wipId, name: "Return to WIP", requiresApproval: false },
-      { id: approveReleaseId, lifecycleId, fromStateId: inReviewId, toStateId: releasedId, name: "Approve & Release", requiresApproval: true, approvalRoles: ["Admin", "Engineer"] },
-      { id: uuid(), lifecycleId, fromStateId: releasedId, toStateId: wipId, name: "Revise", requiresApproval: false },
-      { id: uuid(), lifecycleId, fromStateId: releasedId, toStateId: obsoleteId, name: "Mark Obsolete", requiresApproval: false },
+      {
+        id: uuid(),
+        lifecycleId,
+        fromStateId: wipId,
+        toStateId: inReviewId,
+        name: "Submit for Review",
+        requiresApproval: false,
+      },
+      {
+        id: uuid(),
+        lifecycleId,
+        fromStateId: inReviewId,
+        toStateId: wipId,
+        name: "Return to WIP",
+        requiresApproval: false,
+      },
+      {
+        id: approveReleaseId,
+        lifecycleId,
+        fromStateId: inReviewId,
+        toStateId: releasedId,
+        name: "Approve & Release",
+        requiresApproval: true,
+        approvalRoles: ["Admin", "Engineer"],
+      },
+      {
+        id: uuid(),
+        lifecycleId,
+        fromStateId: releasedId,
+        toStateId: wipId,
+        name: "Revise",
+        requiresApproval: false,
+      },
+      {
+        id: uuid(),
+        lifecycleId,
+        fromStateId: releasedId,
+        toStateId: obsoleteId,
+        name: "Mark Obsolete",
+        requiresApproval: false,
+      },
     ]);
 
     // Default approval group, workflow, and assignment so a fresh tenant

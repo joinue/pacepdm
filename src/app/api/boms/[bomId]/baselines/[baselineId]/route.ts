@@ -37,10 +37,7 @@ export async function GET(
 
     if (error) {
       console.error(`[boms/${bomId}/baselines/${baselineId}] GET failed:`, error);
-      return NextResponse.json(
-        { error: `Query failed: ${error.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Query failed: ${error.message}` }, { status: 500 });
     }
     if (!snapshot) {
       return NextResponse.json({ error: "Baseline not found" }, { status: 404 });

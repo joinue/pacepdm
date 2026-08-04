@@ -6,10 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
@@ -64,7 +73,9 @@ export function CompareBomDialog({ open, onOpenChange, boms }: CompareBomDialogP
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Compare BOMs</DialogTitle>
-          <DialogDescription>Select two BOMs to compare their items side by side.</DialogDescription>
+          <DialogDescription>
+            Select two BOMs to compare their items side by side.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="grid grid-cols-2 gap-3">
@@ -75,7 +86,11 @@ export function CompareBomDialog({ open, onOpenChange, boms }: CompareBomDialogP
                 value={compareA}
                 onChange={(e) => setCompareA(e.target.value)}
               >
-                {boms.map((b) => <option key={b.id} value={b.id}>{b.name} (Rev {b.revision})</option>)}
+                {boms.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} (Rev {b.revision})
+                  </option>
+                ))}
               </select>
             </div>
             <div className="space-y-1">
@@ -85,7 +100,11 @@ export function CompareBomDialog({ open, onOpenChange, boms }: CompareBomDialogP
                 value={compareB}
                 onChange={(e) => setCompareB(e.target.value)}
               >
-                {boms.map((b) => <option key={b.id} value={b.id}>{b.name} (Rev {b.revision})</option>)}
+                {boms.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} (Rev {b.revision})
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -94,7 +113,14 @@ export function CompareBomDialog({ open, onOpenChange, boms }: CompareBomDialogP
             disabled={comparing || !compareA || !compareB || compareA === compareB}
             size="sm"
           >
-            {comparing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Comparing...</> : "Compare"}
+            {comparing ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Comparing...
+              </>
+            ) : (
+              "Compare"
+            )}
           </Button>
 
           {result && <CompareResultView result={result} />}
@@ -118,18 +144,23 @@ function CompareResultView({ result }: { result: CompareResult }) {
     <div className="space-y-3 mt-2">
       {/* Summary chips */}
       <div className="flex gap-3 text-sm">
-        <SummaryChip color="bg-green-500" count={result.summary.added} label="added" />
-        <SummaryChip color="bg-red-500" count={result.summary.removed} label="removed" />
-        <SummaryChip color="bg-yellow-500" count={result.summary.changed} label="changed" />
-        <SummaryChip color="bg-gray-300" count={result.summary.unchanged} label="unchanged" />
+        <SummaryChip color="bg-success" count={result.summary.added} label="added" />
+        <SummaryChip color="bg-destructive" count={result.summary.removed} label="removed" />
+        <SummaryChip color="bg-warning" count={result.summary.changed} label="changed" />
+        <SummaryChip
+          color="bg-muted-foreground"
+          count={result.summary.unchanged}
+          label="unchanged"
+        />
       </div>
 
       {/* Cost delta */}
       <div className="text-sm text-muted-foreground">
         Cost: ${result.bomA.totalCost.toFixed(2)} → ${result.bomB.totalCost.toFixed(2)}
         {costDelta !== 0 && (
-          <span className={costDelta > 0 ? "text-red-500 ml-1" : "text-green-500 ml-1"}>
-            ({costDeltaSign}{costDelta.toFixed(2)})
+          <span className={costDelta > 0 ? "text-destructive ml-1" : "text-success ml-1"}>
+            ({costDeltaSign}
+            {costDelta.toFixed(2)})
           </span>
         )}
       </div>
@@ -157,15 +188,23 @@ function CompareResultView({ result }: { result: CompareResult }) {
                 <TableRow
                   key={i}
                   className={
-                    change.type === "added" ? "bg-green-500/5"
-                      : change.type === "removed" ? "bg-red-500/5"
-                        : "bg-yellow-500/5"
+                    change.type === "added"
+                      ? "bg-success/5"
+                      : change.type === "removed"
+                        ? "bg-destructive/5"
+                        : "bg-warning/5"
                   }
                 >
                   <TableCell>
                     <Badge
-                      variant={change.type === "added" ? "success" : change.type === "removed" ? "error" : "warning"}
-                      className="text-[9px]"
+                      variant={
+                        change.type === "added"
+                          ? "success"
+                          : change.type === "removed"
+                            ? "error"
+                            : "warning"
+                      }
+                      className="text-4xs"
                     >
                       {change.type}
                     </Badge>
@@ -189,7 +228,9 @@ function SummaryChip({ color, count, label }: { color: string; count: number; la
   return (
     <div className="flex items-center gap-1.5">
       <span className={`w-2 h-2 rounded-full ${color}`} />
-      <span>{count} {label}</span>
+      <span>
+        {count} {label}
+      </span>
     </div>
   );
 }

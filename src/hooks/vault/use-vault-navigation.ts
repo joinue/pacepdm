@@ -38,8 +38,7 @@ export function useVaultNavigation(rootFolderId: string) {
   const searchParams = useSearchParams();
 
   const initialViewParam = searchParams.get("view");
-  const initialViewMode: VaultViewMode =
-    initialViewParam === "checkouts" ? "checkouts" : "folder";
+  const initialViewMode: VaultViewMode = initialViewParam === "checkouts" ? "checkouts" : "folder";
 
   const [viewMode, setViewMode] = useState<VaultViewMode>(initialViewMode);
   const [currentFolderId, setCurrentFolderId] = useState(
@@ -79,9 +78,7 @@ export function useVaultNavigation(rootFolderId: string) {
         // If we were in a flat view, the crumb trail is meaningless — reset
         // it to just the root and the newly-entered folder. Otherwise append
         // as usual so descendants accumulate correctly.
-        const base = prev[0]?.id === rootFolderId
-          ? prev
-          : [{ id: rootFolderId, name: "Vault" }];
+        const base = prev[0]?.id === rootFolderId ? prev : [{ id: rootFolderId, name: "Vault" }];
         return [...base, { id: folder.id, name: folder.name }];
       });
       setSelectedFile(null);

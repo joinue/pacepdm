@@ -6,29 +6,53 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  FolderOpen, MoreHorizontal, Download, LogIn, LogOut, Eye,
-  File as FileIcon, FileText, Pencil, Trash2, FolderInput,
-  ArrowRightLeft, Lock, Clock, XCircle, Shield, ImagePlus, Loader2, ArrowUp,
+  FolderOpen,
+  MoreHorizontal,
+  Download,
+  LogIn,
+  LogOut,
+  Eye,
+  File as FileIcon,
+  FileText,
+  Pencil,
+  Trash2,
+  FolderInput,
+  ArrowRightLeft,
+  Lock,
+  Clock,
+  XCircle,
+  Shield,
+  ImagePlus,
+  Loader2,
+  ArrowUp,
 } from "lucide-react";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
 import type { FileItem } from "./vault-types";
-import { lifecycleColors, formatFileSize } from "./vault-types";
+import { formatFileSize } from "./vault-types";
 import { FolderAccessDialog } from "./folder-access-dialog";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 // Supabase's joined `folder:folders(...)` embed is typed loosely and may
 // arrive as either a single object or a single-element array depending on
 // the FK cardinality inference. Normalize at read-time so the rendering
 // code can treat it as a plain optional record.
-function getFolderRef(
-  file: FileItem
-): { id: string; name: string; path: string } | null {
+function getFolderRef(file: FileItem): { id: string; name: string; path: string } | null {
   const f = file.folder as
     | { id: string; name: string; path: string }
     | Array<{ id: string; name: string; path: string }>
@@ -47,6 +71,11 @@ interface VaultFileListProps {
 function FileThumb({ file, onRefresh }: { file: FileItem; onRefresh: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // Set true when the <img> for an existing thumbnailUrl fails to load.
+  // Falls back to the category-icon branch — which has the upload
+  // affordance — so a stuck/corrupt thumbnailKey isn't a dead end from
+  // the list view either.
+  const [imageBroken, setImageBroken] = useState(false);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const img = e.target.files?.[0];
@@ -55,7 +84,10 @@ function FileThumb({ file, onRefresh }: { file: FileItem; onRefresh: () => void 
     try {
       const formData = new FormData();
       formData.append("image", img);
-      const res = await fetch(`/api/files/${file.id}/thumbnail/set`, { method: "POST", body: formData });
+      const res = await fetch(`/api/files/${file.id}/thumbnail/set`, {
+        method: "POST",
+        body: formData,
+      });
       const data = await res.json();
       if (!res.ok) {
         toast.error(data.error || "Failed to upload thumbnail");
@@ -71,12 +103,19 @@ function FileThumb({ file, onRefresh }: { file: FileItem; onRefresh: () => void 
     }
   }
 
-  if (file.thumbnailUrl) {
+  if (file.thumbnailUrl && !imageBroken) {
     return (
       <div className="relative w-12 h-12 rounded overflow-hidden bg-muted/30 shrink-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={file.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-        {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500 absolute -top-0.5 -right-0.5" />}
+        <img
+          src={file.thumbnailUrl}
+          alt=""
+          className="w-full h-full object-cover"
+          onError={() => setImageBroken(true)}
+        />
+        {file.isCheckedOut && (
+          <Lock className="w-3 h-3 text-destructive absolute -top-0.5 -right-0.5" />
+        )}
       </div>
     );
   }
@@ -87,19 +126,32 @@ function FileThumb({ file, onRefresh }: { file: FileItem; onRefresh: () => void 
   const canUpload = !file.isFrozen;
   return (
     <div className="group relative shrink-0 w-12 h-12 flex items-center justify-center">
-      {file.category === "PART" || file.category === "ASSEMBLY" || file.category === "MODEL_3D" ? <FileIcon className="w-7 h-7 text-orange-500" /> : file.category === "DRAWING" || file.category === "DRAWING_2D" ? <FileText className="w-7 h-7 text-green-600" /> : <FileText className="w-7 h-7 text-muted-foreground" />}
-      {file.isCheckedOut && <Lock className="w-3 h-3 text-red-500 absolute top-0 right-0" />}
+      {file.category === "PART" || file.category === "ASSEMBLY" || file.category === "MODEL_3D" ? (
+        <FileIcon className="w-7 h-7 text-warning" />
+      ) : file.category === "DRAWING" || file.category === "DRAWING_2D" ? (
+        <FileText className="w-7 h-7 text-success" />
+      ) : (
+        <FileText className="w-7 h-7 text-muted-foreground" />
+      )}
+      {file.isCheckedOut && <Lock className="w-3 h-3 text-destructive absolute top-0 right-0" />}
       {canUpload && (
         <>
           <button
             type="button"
             title="Set thumbnail"
             aria-label="Set thumbnail"
-            onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
             disabled={uploading}
             className="absolute inset-0 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center"
           >
-            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
+            {uploading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <ImagePlus className="w-4 h-4" />
+            )}
           </button>
           <input
             ref={inputRef}
@@ -119,38 +171,128 @@ function ApprovalBadges({ file }: { file: FileItem }) {
   return (
     <>
       {file.approvalStatus === "PENDING" && (
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-600 dark:text-orange-400">
-          <Clock className="w-2.5 h-2.5 mr-0.5" />Pending
+        <Badge variant="secondary" className="text-3xs px-1.5 py-0 bg-warning/10 text-warning">
+          <Clock className="w-2.5 h-2.5 mr-0.5" />
+          Pending
         </Badge>
       )}
       {file.approvalStatus === "REJECTED" && (
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-red-500/10 text-red-600 dark:text-red-400">
-          <XCircle className="w-2.5 h-2.5 mr-0.5" />Rejected
+        <Badge
+          variant="secondary"
+          className="text-3xs px-1.5 py-0 bg-destructive/10 text-destructive"
+        >
+          <XCircle className="w-2.5 h-2.5 mr-0.5" />
+          Rejected
         </Badge>
       )}
     </>
   );
 }
 
-function FileContextMenu({ file, vault, userId }: { file: FileItem; vault: VaultBrowserState; userId: string }) {
+function FileContextMenu({
+  file,
+  vault,
+  userId,
+}: {
+  file: FileItem;
+  vault: VaultBrowserState;
+  userId: string;
+}) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => e.stopPropagation()}>
-          <MoreHorizontal className="w-4 h-4" />
-        </Button>
-      } />
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.selectFile(file.id); }}><Eye className="w-4 h-4 mr-2" />Details</DropdownMenuItem>
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.handleDownload(file.id); }}><Download className="w-4 h-4 mr-2" />Download</DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.selectFile(file.id);
+          }}
+        >
+          <Eye className="w-4 h-4 mr-2" />
+          Details
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.handleDownload(file.id);
+          }}
+        >
+          <Download className="w-4 h-4 mr-2" />
+          Download
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {!file.isCheckedOut && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.handleCheckout(file.id); }}><LogOut className="w-4 h-4 mr-2" />Check Out</DropdownMenuItem>}
-        {file.isCheckedOut && file.checkedOutById === userId && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.setCheckInFileId(file.id); }}><LogIn className="w-4 h-4 mr-2" />Check In</DropdownMenuItem>}
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.openTransitionDialog(file.id, file.name, file.lifecycleId ?? null); }}><ArrowRightLeft className="w-4 h-4 mr-2" />Change State</DropdownMenuItem>
+        {!file.isCheckedOut && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              vault.handleCheckout(file.id);
+            }}
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Check Out
+          </DropdownMenuItem>
+        )}
+        {file.isCheckedOut && file.checkedOutById === userId && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              vault.setCheckInFileId(file.id);
+            }}
+          >
+            <LogIn className="w-4 h-4 mr-2" />
+            Check In
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.openTransitionDialog(file.id, file.name, file.lifecycleId ?? null);
+          }}
+        >
+          <ArrowRightLeft className="w-4 h-4 mr-2" />
+          Change State
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.setRenameTarget({ id: file.id, name: file.name, type: "file" }); vault.setNewName(file.name); }}><Pencil className="w-4 h-4 mr-2" />Rename</DropdownMenuItem>
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.openMoveDialog(file.id, file.name); }}><FolderInput className="w-4 h-4 mr-2" />Move</DropdownMenuItem>
-        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); vault.setDeleteTarget({ id: file.id, name: file.name, type: "file" }); }}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.setRenameTarget({ id: file.id, name: file.name, type: "file" });
+            vault.setNewName(file.name);
+          }}
+        >
+          <Pencil className="w-4 h-4 mr-2" />
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.openMoveDialog(file.id, file.name);
+          }}
+        >
+          <FolderInput className="w-4 h-4 mr-2" />
+          Move
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="text-destructive"
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.setDeleteTarget({ id: file.id, name: file.name, type: "file" });
+          }}
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Delete
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -167,21 +309,48 @@ function FolderContextMenu({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <MoreHorizontal className="w-4 h-4" />
-        </Button>
-      } />
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); vault.setRenameTarget({ id: folder.id, name: folder.name, type: "folder" }); vault.setNewName(folder.name); }}>
-          <Pencil className="w-4 h-4 mr-2" />Rename
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.setRenameTarget({ id: folder.id, name: folder.name, type: "folder" });
+            vault.setNewName(folder.name);
+          }}
+        >
+          <Pencil className="w-4 h-4 mr-2" />
+          Rename
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onManageAccess(folder); }}>
-          <Shield className="w-4 h-4 mr-2" />Manage access
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onManageAccess(folder);
+          }}
+        >
+          <Shield className="w-4 h-4 mr-2" />
+          Manage access
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); vault.setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" }); }}>
-          <Trash2 className="w-4 h-4 mr-2" />Delete
+        <DropdownMenuItem
+          className="text-destructive"
+          onClick={(e) => {
+            e.stopPropagation();
+            vault.setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" });
+          }}
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Delete
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -189,7 +358,8 @@ function FolderContextMenu({
 }
 
 export function VaultFileList({ vault, userId }: VaultFileListProps) {
-  const { folders, filteredFiles, loading, selectedFile, selectedFiles, dragFileId, dropTargetId } = vault;
+  const { folders, filteredFiles, loading, selectedFile, selectedFiles, dragFileId, dropTargetId } =
+    vault;
   const [accessFolder, setAccessFolder] = useState<{ id: string; name: string } | null>(null);
 
   const isFlat = vault.viewMode !== "folder";
@@ -225,7 +395,9 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
 
   return (
     <div className="flex gap-4">
-      <div className={`flex-1 min-w-0 transition-opacity duration-150 ${loading && !isInitialLoad ? "opacity-60" : "opacity-100"}`}>
+      <div
+        className={`flex-1 min-w-0 transition-opacity duration-150 ${loading && !isInitialLoad ? "opacity-60" : "opacity-100"}`}
+      >
         {/* Mobile card view */}
         <div className="md:hidden space-y-1">
           {isInitialLoad ? (
@@ -236,14 +408,16 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
             <>
               {parentFolder && (
                 <div
-                  className={`flex items-center p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-blue-50 dark:hover:bg-blue-950/20 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
+                  className={`flex items-center p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-info/10 dark:hover:bg-info/20 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
                   onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
                   onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
                   onDragLeave={vault.handleDragLeave}
                   onDrop={(e) => vault.handleDrop(e, parentFolder.id)}
                 >
                   <div className="relative shrink-0 w-12 h-12 flex items-center justify-center">
-                    <FolderOpen className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-blue-500"}`} />
+                    <FolderOpen
+                      className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-info"}`}
+                    />
                     <ArrowUp className="w-3 h-3 absolute bottom-1 right-1 text-muted-foreground" />
                   </div>
                   <div className="ml-3 min-w-0">
@@ -258,7 +432,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
               {folders.map((folder) => (
                 <div
                   key={folder.id}
-                  className={`flex items-center justify-between p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-blue-50 dark:hover:bg-blue-950/20 ${dropTargetId === folder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
+                  className={`flex items-center justify-between p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-info/10 dark:hover:bg-info/20 ${dropTargetId === folder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
                   onClick={() => vault.navigateToFolder(folder)}
                   onDragOver={(e) => vault.handleDragOver(e, folder.id)}
                   onDragLeave={vault.handleDragLeave}
@@ -266,17 +440,26 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="relative shrink-0 w-12 h-12 flex items-center justify-center">
-                      <FolderOpen className={`w-8 h-8 ${dropTargetId === folder.id ? "text-primary" : "text-blue-500"}`} />
+                      <FolderOpen
+                        className={`w-8 h-8 ${dropTargetId === folder.id ? "text-primary" : "text-info"}`}
+                      />
                       {folder.isRestricted && (
-                        <Lock className="w-3 h-3 text-amber-600 absolute bottom-1 right-1" />
+                        <Lock className="w-3 h-3 text-warning absolute bottom-1 right-1" />
                       )}
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{folder.name}</p>
-                      <p className="text-xs text-muted-foreground">{folder._count.files} files{folder._count.children > 0 ? `, ${folder._count.children} folders` : ""}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {folder._count.files} files
+                        {folder._count.children > 0 ? `, ${folder._count.children} folders` : ""}
+                      </p>
                     </div>
                   </div>
-                  <FolderContextMenu folder={folder} vault={vault} onManageAccess={setAccessFolder} />
+                  <FolderContextMenu
+                    folder={folder}
+                    vault={vault}
+                    onManageAccess={setAccessFolder}
+                  />
                 </div>
               ))}
               {filteredFiles.map((file) => {
@@ -301,19 +484,27 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                               e.stopPropagation();
                               vault.navigateToFolder({ id: folderRef.id, name: folderRef.name });
                             }}
-                            className="text-[11px] text-muted-foreground hover:text-foreground hover:underline truncate block max-w-full text-left"
+                            className="text-2xs text-muted-foreground hover:text-foreground hover:underline truncate block max-w-full text-left"
                             title={folderRef.path}
                           >
                             in {folderRef.path || folderRef.name}
                           </button>
                         )}
                         <div className="flex items-center gap-2 mt-0.5">
-                          <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${lifecycleColors[file.lifecycleState] || ""}`}>
-                            {file.lifecycleState}
-                          </Badge>
+                          <StatusBadge
+                            status={file.lifecycleState}
+                            kind="lifecycle"
+                            className="text-3xs px-1.5 py-0"
+                          />
                           <ApprovalBadges file={file} />
-                          <span className="text-[11px] text-muted-foreground font-mono">Rev {file.revision}.{file.currentVersion}</span>
-                          {file.partNumber && <span className="text-[11px] text-muted-foreground">{file.partNumber}</span>}
+                          <span className="text-2xs text-muted-foreground font-mono">
+                            Rev {file.revision}.{file.currentVersion}
+                          </span>
+                          {file.partNumber && (
+                            <span className="text-2xs text-muted-foreground">
+                              {file.partNumber}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -333,7 +524,9 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 <TableHead className="w-8">
                   {filteredFiles.length > 0 && (
                     <Checkbox
-                      checked={selectedFiles.size === filteredFiles.length && filteredFiles.length > 0}
+                      checked={
+                        selectedFiles.size === filteredFiles.length && filteredFiles.length > 0
+                      }
                       onCheckedChange={vault.toggleSelectAll}
                     />
                   )}
@@ -351,7 +544,9 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
             <TableBody>
               {isInitialLoad ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading...</TableCell>
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    Loading...
+                  </TableCell>
                 </TableRow>
               ) : folders.length === 0 && filteredFiles.length === 0 && !parentFolder ? (
                 <TableRow>
@@ -363,7 +558,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 <>
                   {parentFolder && (
                     <TableRow
-                      className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/20 bg-muted/30 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
+                      className={`cursor-pointer hover:bg-info/10 dark:hover:bg-info/20 bg-muted/30 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
                       onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
                       onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
                       onDragLeave={vault.handleDragLeave}
@@ -372,7 +567,9 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                       <TableCell />
                       <TableCell>
                         <div className="relative w-12 h-12 flex items-center justify-center">
-                          <FolderOpen className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-blue-500"}`} />
+                          <FolderOpen
+                            className={`w-8 h-8 ${dropTargetId === parentFolder.id ? "text-primary" : "text-info"}`}
+                          />
                           <ArrowUp className="w-3 h-3 absolute bottom-1 right-1 text-muted-foreground" />
                         </div>
                       </TableCell>
@@ -395,7 +592,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                   {folders.map((folder) => (
                     <TableRow
                       key={folder.id}
-                      className={`cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950/20 bg-muted/30 ${dropTargetId === folder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
+                      className={`cursor-pointer hover:bg-info/10 dark:hover:bg-info/20 bg-muted/30 ${dropTargetId === folder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
                       onClick={() => vault.navigateToFolder(folder)}
                       onDragOver={(e) => vault.handleDragOver(e, folder.id)}
                       onDragLeave={vault.handleDragLeave}
@@ -404,21 +601,32 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                       <TableCell />
                       <TableCell>
                         <div className="relative w-12 h-12 flex items-center justify-center">
-                          <FolderOpen className={`w-8 h-8 ${dropTargetId === folder.id ? "text-primary" : "text-blue-500"}`} />
+                          <FolderOpen
+                            className={`w-8 h-8 ${dropTargetId === folder.id ? "text-primary" : "text-info"}`}
+                          />
                           {folder.isRestricted && (
-                            <Lock className="w-3 h-3 text-amber-600 absolute bottom-1 right-1" />
+                            <Lock className="w-3 h-3 text-warning absolute bottom-1 right-1" />
                           )}
                         </div>
                       </TableCell>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {folder.name}
-                          <span className="text-xs text-muted-foreground font-normal">{folder._count.files} files{folder._count.children > 0 ? `, ${folder._count.children} folders` : ""}</span>
+                          <span className="text-xs text-muted-foreground font-normal">
+                            {folder._count.files} files
+                            {folder._count.children > 0
+                              ? `, ${folder._count.children} folders`
+                              : ""}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell colSpan={5} />
                       <TableCell>
-                        <FolderContextMenu folder={folder} vault={vault} onManageAccess={setAccessFolder} />
+                        <FolderContextMenu
+                          folder={folder}
+                          vault={vault}
+                          onManageAccess={setAccessFolder}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -435,14 +643,22 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                         onDragEnd={vault.handleDragEnd}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={selectedFiles.has(file.id)} onCheckedChange={() => vault.toggleFileSelect(file.id)} />
+                          <Checkbox
+                            checked={selectedFiles.has(file.id)}
+                            onCheckedChange={() => vault.toggleFileSelect(file.id)}
+                          />
                         </TableCell>
                         <TableCell>
                           <FileThumb file={file} onRefresh={vault.refresh} />
                         </TableCell>
                         <TableCell className="font-medium">
-                          <div>{file.name}
-                            {file.isCheckedOut && <span className="text-[11px] text-red-500 ml-1.5">({file.checkedOutBy?.fullName})</span>}
+                          <div>
+                            {file.name}
+                            {file.isCheckedOut && (
+                              <span className="text-2xs text-destructive ml-1.5">
+                                ({file.checkedOutBy?.fullName})
+                              </span>
+                            )}
                           </div>
                           {folderRef && (
                             <button
@@ -451,7 +667,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                                 e.stopPropagation();
                                 vault.navigateToFolder({ id: folderRef.id, name: folderRef.name });
                               }}
-                              className="text-[11px] text-muted-foreground hover:text-foreground hover:underline font-normal truncate block max-w-full text-left mt-0.5"
+                              className="text-2xs text-muted-foreground hover:text-foreground hover:underline font-normal truncate block max-w-full text-left mt-0.5"
                               title={folderRef.path}
                             >
                               in {folderRef.path || folderRef.name}
@@ -459,15 +675,21 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                           )}
                         </TableCell>
                         <TableCell className="text-sm">{file.partNumber || "—"}</TableCell>
-                        <TableCell className="font-mono text-xs">{file.revision}.{file.currentVersion}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {file.revision}.{file.currentVersion}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            <Badge variant="secondary" className={lifecycleColors[file.lifecycleState] || ""}>{file.lifecycleState}</Badge>
+                            <StatusBadge status={file.lifecycleState} kind="lifecycle" />
                             <ApprovalBadges file={file} />
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm">{latestVersion ? formatFileSize(latestVersion.fileSize) : "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground"><FormattedDate date={file.updatedAt} variant="date" /></TableCell>
+                        <TableCell className="text-sm">
+                          {latestVersion ? formatFileSize(latestVersion.fileSize) : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          <FormattedDate date={file.updatedAt} variant="date" />
+                        </TableCell>
                         <TableCell>
                           <FileContextMenu file={file} vault={vault} userId={userId} />
                         </TableCell>
@@ -483,7 +705,9 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
 
       <FolderAccessDialog
         open={!!accessFolder}
-        onOpenChange={(open) => { if (!open) setAccessFolder(null); }}
+        onOpenChange={(open) => {
+          if (!open) setAccessFolder(null);
+        }}
         folderId={accessFolder?.id ?? null}
         folderName={accessFolder?.name ?? ""}
         onChanged={() => vault.refresh()}

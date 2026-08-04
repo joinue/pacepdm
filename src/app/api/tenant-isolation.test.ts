@@ -111,18 +111,19 @@ vi.mock("@/lib/db", () => ({
     // folder-access resolver. Returning an "open" scope (no restrictions)
     // keeps this mock transparent for tenant-isolation tests, which are
     // concerned with cross-tenant leaks, not ACL rows.
-    rpc: () => Promise.resolve({
-      data: {
-        bypass: false,
-        restrictedAny: false,
-        allowed: [],
-        editable: [],
-        admin: [],
-        denied: [],
-        restricted: [],
-      },
-      error: null,
-    }),
+    rpc: () =>
+      Promise.resolve({
+        data: {
+          bypass: false,
+          restrictedAny: false,
+          allowed: [],
+          editable: [],
+          admin: [],
+          denied: [],
+          restricted: [],
+        },
+        error: null,
+      }),
   }),
 }));
 
@@ -164,6 +165,14 @@ import { GET as getEco, PUT as putEco, DELETE as deleteEco } from "@/app/api/eco
 const TENANT_A = "tenant-a";
 const TENANT_B = "tenant-b";
 
+// Route params are validated as UUIDs by the wrapper, so ids that reach a
+// handler have to look like real ones. A readable placeholder ("eco-1") now
+// correctly returns 400 before the handler runs, which is the point of
+// declaring a `params` schema — a malformed id is rejected at the boundary
+// instead of reaching Postgres as a cast error.
+const ECO_ID = "11111111-1111-4111-8111-111111111111";
+const FILE_ID = "22222222-2222-4222-8222-222222222222";
+
 const userInTenantA = {
   id: "user-a",
   tenantId: TENANT_A,
@@ -186,98 +195,129 @@ beforeEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Multi-tenant isolation (API routes)", () => {
-  describe("GET /api/files/[fileId] — application-level tenant guard", () => {
+  describe("GET /api/files/[fileId] — SQL-level tenant guard", () => {
     it("returns 404 when the requested file belongs to a different tenant", async () => {
-      // Simulate Supabase returning the row even though it's another tenant's
-      // (the query is by id only — no SQL tenant filter on this route).
-      supabaseResponses.set("files", {
-        data: { id: "file-1", tenantId: TENANT_B, name: "secret.sldprt", currentVersion: 1 },
-        error: null,
-      });
+      // The route loads the file through `loadFile`, which queries the scoped
+      // client — so the tenant filter is in the SQL and the row never comes
+      // back at all. Previously this route fetched by id and compared
+      // tenantId in JavaScript, meaning another tenant's row reached process
+      // memory before being rejected.
+      supabaseResponses.set("files", (filters) =>
+        filters.tenantId === TENANT_B
+          ? {
+              data: { id: FILE_ID, tenantId: TENANT_B, name: "secret.sldprt", folderId: "f-b" },
+              error: null,
+            }
+          : { data: null, error: null }
+      );
 
       const res = await getFileDetail(makeRequest() as never, {
-        params: Promise.resolve({ fileId: "file-1" }),
+        params: Promise.resolve({ fileId: FILE_ID }),
       });
 
       expect(res.status).toBe(404);
-      const body = await res.json();
-      expect(body).toEqual({ error: "File not found" });
+      expect(await res.json()).toEqual({ error: "File not found" });
     });
 
     it("returns the file when it belongs to the caller's tenant", async () => {
-      supabaseResponses.set("files", {
-        data: { id: "file-1", tenantId: TENANT_A, name: "ours.sldprt", currentVersion: 1 },
-        error: null,
-      });
+      supabaseResponses.set("files", (filters) =>
+        filters.tenantId === TENANT_A
+          ? {
+              data: { id: FILE_ID, tenantId: TENANT_A, name: "ours.sldprt", folderId: "f-a" },
+              error: null,
+            }
+          : { data: null, error: null }
+      );
 
       const res = await getFileDetail(makeRequest() as never, {
-        params: Promise.resolve({ fileId: "file-1" }),
+        params: Promise.resolve({ fileId: FILE_ID }),
       });
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.id).toBe("file-1");
+      expect(body.id).toBe(FILE_ID);
       expect(body.tenantId).toBe(TENANT_A);
     });
 
     it("returns 401 when no tenant user is authenticated", async () => {
       mockTenantUser.current = null;
       const res = await getFileDetail(makeRequest() as never, {
-        params: Promise.resolve({ fileId: "file-1" }),
+        params: Promise.resolve({ fileId: FILE_ID }),
       });
       expect(res.status).toBe(401);
     });
   });
 
+  // Every ECO verb is now SQL-level: the route runs on withTenant, whose
+  // scoped client applies .eq("tenantId", caller) to every read, update and
+  // delete. The mock honours that filter, so a cross-tenant row is simply
+  // never returned. Previously PUT and DELETE fetched by id and compared
+  // tenantId in JavaScript — the row crossed into process memory before being
+  // rejected. These tests fail if a refactor reintroduces that.
   describe("GET /api/ecos/[ecoId] — SQL-level tenant guard", () => {
     it("returns 404 when an ECO ID exists but belongs to another tenant", async () => {
-      // The SQL query includes .eq("tenantId", caller). Honor that — return
-      // the row only when the asked tenant matches TENANT_B (where it lives).
+      // Return the row only when the asked tenant matches TENANT_B, where it
+      // actually lives. A caller in tenant A must therefore see nothing.
       supabaseResponses.set("ecos", (filters) =>
         filters.tenantId === TENANT_B
-          ? { data: { id: "eco-1", tenantId: TENANT_B }, error: null }
-          : { data: null, error: null },
+          ? { data: { id: ECO_ID, tenantId: TENANT_B }, error: null }
+          : { data: null, error: null }
       );
 
       const res = await getEco(makeRequest() as never, {
-        params: Promise.resolve({ ecoId: "eco-1" }),
+        params: Promise.resolve({ ecoId: ECO_ID }),
       });
 
-      // Caller is in tenant A → SQL filter excludes the tenant-B row → 404
       expect(res.status).toBe(404);
     });
 
     it("returns the ECO when it belongs to the caller's tenant", async () => {
       supabaseResponses.set("ecos", (filters) =>
         filters.tenantId === TENANT_A
-          ? { data: { id: "eco-1", tenantId: TENANT_A, ecoNumber: "ECO-1" }, error: null }
-          : { data: null, error: null },
+          ? { data: { id: ECO_ID, tenantId: TENANT_A, ecoNumber: "ECO-1" }, error: null }
+          : { data: null, error: null }
       );
 
       const res = await getEco(makeRequest() as never, {
-        params: Promise.resolve({ ecoId: "eco-1" }),
+        params: Promise.resolve({ ecoId: ECO_ID }),
       });
 
       expect(res.status).toBe(200);
     });
+
+    it("rejects a malformed ECO id before touching the database", async () => {
+      const res = await getEco(makeRequest() as never, {
+        params: Promise.resolve({ ecoId: "eco-1" }),
+      });
+      expect(res.status).toBe(400);
+    });
   });
 
-  describe("PUT /api/ecos/[ecoId] — application-level tenant guard", () => {
+  describe("PUT /api/ecos/[ecoId] — SQL-level tenant guard", () => {
     it("returns 404 when updating an ECO from another tenant", async () => {
-      // PUT fetches by id only (no tenant filter), then guards in JS.
-      supabaseResponses.set("ecos", {
-        data: { id: "eco-1", tenantId: TENANT_B, status: "DRAFT", ecoNumber: "ECO-001", createdById: "user-b" },
-        error: null,
-      });
+      supabaseResponses.set("ecos", (filters) =>
+        filters.tenantId === TENANT_B
+          ? {
+              data: {
+                id: ECO_ID,
+                tenantId: TENANT_B,
+                status: "DRAFT",
+                ecoNumber: "ECO-001",
+                createdById: "user-b",
+              },
+              error: null,
+            }
+          : { data: null, error: null }
+      );
 
-      const req = new Request("http://test.local/api/ecos/eco-1", {
+      const req = new Request(`http://test.local/api/ecos/${ECO_ID}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "Hijacked title" }),
       });
 
       const res = await putEco(req as never, {
-        params: Promise.resolve({ ecoId: "eco-1" }),
+        params: Promise.resolve({ ecoId: ECO_ID }),
       });
 
       expect(res.status).toBe(404);
@@ -285,27 +325,31 @@ describe("Multi-tenant isolation (API routes)", () => {
 
     it("returns 401 when no tenant user is authenticated", async () => {
       mockTenantUser.current = null;
-      const req = new Request("http://test.local/api/ecos/eco-1", {
+      const req = new Request(`http://test.local/api/ecos/${ECO_ID}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "x" }),
       });
       const res = await putEco(req as never, {
-        params: Promise.resolve({ ecoId: "eco-1" }),
+        params: Promise.resolve({ ecoId: ECO_ID }),
       });
       expect(res.status).toBe(401);
     });
   });
 
-  describe("DELETE /api/ecos/[ecoId] — application-level tenant guard", () => {
+  describe("DELETE /api/ecos/[ecoId] — SQL-level tenant guard", () => {
     it("returns 404 when deleting an ECO from another tenant", async () => {
-      supabaseResponses.set("ecos", {
-        data: { id: "eco-1", tenantId: TENANT_B, status: "DRAFT", ecoNumber: "ECO-001" },
-        error: null,
-      });
+      supabaseResponses.set("ecos", (filters) =>
+        filters.tenantId === TENANT_B
+          ? {
+              data: { id: ECO_ID, tenantId: TENANT_B, status: "DRAFT", ecoNumber: "ECO-001" },
+              error: null,
+            }
+          : { data: null, error: null }
+      );
 
       const res = await deleteEco(makeRequest() as never, {
-        params: Promise.resolve({ ecoId: "eco-1" }),
+        params: Promise.resolve({ ecoId: ECO_ID }),
       });
 
       expect(res.status).toBe(404);

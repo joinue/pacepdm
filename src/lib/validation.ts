@@ -47,10 +47,7 @@ export type ParseResult<T> = ParseSuccess<T> | ParseFailure;
  *   - Body is missing or not valid JSON → 400 with "Invalid JSON body"
  *   - Body fails schema validation     → 400 with field-level error map
  */
-export async function parseBody<T>(
-  request: Request,
-  schema: ZodType<T>
-): Promise<ParseResult<T>> {
+export async function parseBody<T>(request: Request, schema: ZodType<T>): Promise<ParseResult<T>> {
   let body: unknown;
   try {
     body = await request.json();
@@ -130,10 +127,7 @@ export function formatZodError(error: ZodError): Record<string, string> {
 // "non-empty trimmed string" or "uuid" inline. Compose them in route schemas.
 
 /** A non-empty trimmed string. Trims first, then enforces min length 1. */
-export const nonEmptyString = z
-  .string()
-  .trim()
-  .min(1, "Must not be empty");
+export const nonEmptyString = z.string().trim().min(1, "Must not be empty");
 
 /** Optional non-empty trimmed string — empty strings are coerced to null. */
 export const optionalString = z

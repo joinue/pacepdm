@@ -55,7 +55,8 @@ export function EcoItemsTab({
               {items.length} item{items.length !== 1 ? "s" : ""} affected by this change
             </p>
             <Button size="sm" variant="outline" onClick={onAddClick}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" />Add Item
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              Add Item
             </Button>
           </div>
         )}
@@ -77,10 +78,16 @@ export function EcoItemsTab({
         ) : (
           <div className="space-y-2">
             {items.map((item) => {
-              const ct = changeTypeLabels[item.changeType] || { label: item.changeType, variant: "info" as const };
+              const ct = changeTypeLabels[item.changeType] || {
+                label: item.changeType,
+                variant: "info" as const,
+              };
               const isPart = !!item.part;
               return (
-                <div key={item.id} className="flex items-start gap-3 p-3 rounded-lg border bg-background group">
+                <div
+                  key={item.id}
+                  className="flex items-start gap-3 p-3 rounded-lg border bg-background group"
+                >
                   {isPart ? (
                     <Package className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
                   ) : (
@@ -93,7 +100,9 @@ export function EcoItemsTab({
                           ? `${item.part.partNumber} — ${item.part.name}`
                           : item.file?.name}
                       </span>
-                      <Badge variant={ct.variant} className="text-[10px] shrink-0">{ct.label}</Badge>
+                      <Badge variant={ct.variant} className="text-3xs shrink-0">
+                        {ct.label}
+                      </Badge>
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground flex-wrap">
                       {item.part ? (
@@ -107,7 +116,9 @@ export function EcoItemsTab({
                             {item.toRevision && (
                               <>
                                 <ArrowRight className="w-3 h-3" />
-                                <span className="font-semibold text-foreground">{item.toRevision}</span>
+                                <span className="font-semibold text-foreground">
+                                  {item.toRevision}
+                                </span>
                               </>
                             )}
                             {!item.toRevision && (

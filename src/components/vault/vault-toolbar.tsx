@@ -4,13 +4,28 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbSeparator,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  FolderPlus, Upload, Download, FolderDown, Trash2, Search, LogOut, ArrowLeft,
+  FolderPlus,
+  Upload,
+  Download,
+  FolderDown,
+  Trash2,
+  Search,
+  LogOut,
+  ArrowLeft,
 } from "lucide-react";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -30,8 +45,7 @@ const FLAT_VIEW_META: Record<
 > = {
   checkouts: {
     title: "My checked-out files",
-    description:
-      "Files you've checked out across every folder, oldest first.",
+    description: "Files you've checked out across every folder, oldest first.",
   },
 };
 
@@ -40,8 +54,7 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
   const canUpload = can(PERMISSIONS.FILE_UPLOAD);
   const canCreateFolder = can(PERMISSIONS.FOLDER_CREATE);
   const canDelete = can(PERMISSIONS.FILE_DELETE);
-  const flatMeta =
-    vault.viewMode !== "folder" ? FLAT_VIEW_META[vault.viewMode] : null;
+  const flatMeta = vault.viewMode !== "folder" ? FLAT_VIEW_META[vault.viewMode] : null;
   const isFlat = flatMeta !== null;
 
   return (
@@ -62,9 +75,7 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
                   Back to vault
                 </Button>
               </div>
-              <h2 className="text-xl sm:text-2xl font-bold mt-1">
-                {flatMeta.title}
-              </h2>
+              <h2 className="text-xl sm:text-2xl font-bold mt-1">{flatMeta.title}</h2>
               <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                 {flatMeta.description}
               </p>
@@ -79,14 +90,23 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
         <div className="flex gap-2 flex-wrap">
           {vault.selectedFiles.size > 0 && (
             <>
-              <Button variant="outline" size="sm" onClick={vault.handleBulkDownload} disabled={vault.bulkDownloading}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={vault.handleBulkDownload}
+                disabled={vault.bulkDownloading}
+              >
                 <Download className="w-4 h-4 sm:mr-1" />
                 <span className="hidden sm:inline">
                   {vault.bulkDownloading ? "Zipping..." : `Download (${vault.selectedFiles.size})`}
                 </span>
               </Button>
               {canDelete && (
-                <Button variant="destructive" size="sm" onClick={() => vault.setShowBulkDeleteConfirm(true)}>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => vault.setShowBulkDeleteConfirm(true)}
+                >
                   <Trash2 className="w-4 h-4 sm:mr-1" />
                   <span className="hidden sm:inline">Delete ({vault.selectedFiles.size})</span>
                 </Button>
@@ -146,16 +166,21 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
             />
           </div>
           {vault.lifecycleStates.length > 1 && (
-            <Select value={vault.filterState} onValueChange={(v) => vault.setFilterState(v ?? "all")}>
+            <Select
+              value={vault.filterState}
+              onValueChange={(v) => vault.setFilterState(v ?? "all")}
+            >
               <SelectTrigger className="w-full sm:w-40 h-9">
                 <SelectValue placeholder="All states">
-                  {(v) => v === "all" ? "All states" : (v as string)}
+                  {(v) => (v === "all" ? "All states" : (v as string))}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All states</SelectItem>
                 {vault.lifecycleStates.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -189,9 +214,15 @@ function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
             <React.Fragment key={`${entry.id}-${i}`}>
               {i > 0 && <BreadcrumbSeparator className="shrink-0" />}
               <BreadcrumbItem
-                onDragOver={(e) => { if (!isEllipsis && entry.id !== vault.currentFolderId) vault.handleDragOver(e, entry.id); }}
+                onDragOver={(e) => {
+                  if (!isEllipsis && entry.id !== vault.currentFolderId)
+                    vault.handleDragOver(e, entry.id);
+                }}
                 onDragLeave={vault.handleDragLeave}
-                onDrop={(e) => { if (!isEllipsis && entry.id !== vault.currentFolderId) vault.handleDrop(e, entry.id); }}
+                onDrop={(e) => {
+                  if (!isEllipsis && entry.id !== vault.currentFolderId)
+                    vault.handleDrop(e, entry.id);
+                }}
                 className={`${vault.dropTargetId === entry.id ? "ring-2 ring-primary rounded px-1" : ""} min-w-0`}
               >
                 {isEllipsis ? (

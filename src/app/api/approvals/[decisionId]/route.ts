@@ -32,7 +32,10 @@ export async function PUT(
     if (rework) {
       // Reject-and-rework flow requires a non-empty comment
       if (!comment?.trim()) {
-        return NextResponse.json({ error: "Comment is required for rework requests" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Comment is required for rework requests" },
+          { status: 400 }
+        );
       }
 
       const result = await rejectForRework({

@@ -47,9 +47,7 @@ export function EcoBomImpact({ ecoId }: { ecoId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await fetchJson<BomImpactData>(
-        `/api/ecos/${ecoId}/bom-impact`
-      );
+      const result = await fetchJson<BomImpactData>(`/api/ecos/${ecoId}/bom-impact`);
       setData(result);
       // Auto-expand if only 1-2 BOMs affected (common case).
       if (result.affectedBoms.length <= 2) {
@@ -92,11 +90,12 @@ export function EcoBomImpact({ ecoId }: { ecoId: string }) {
       <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/30">
         <Layers className="w-3.5 h-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">BOM Impact</span>
-        <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+        <Badge variant="secondary" className="text-4xs px-1.5 py-0">
           {data.summary.totalBoms} BOM{data.summary.totalBoms !== 1 ? "s" : ""}
         </Badge>
-        <span className="text-[11px] text-muted-foreground">
-          {data.summary.totalItemsAffected} item{data.summary.totalItemsAffected !== 1 ? "s" : ""} affected
+        <span className="text-2xs text-muted-foreground">
+          {data.summary.totalItemsAffected} item{data.summary.totalItemsAffected !== 1 ? "s" : ""}{" "}
+          affected
         </span>
       </div>
 
@@ -109,10 +108,11 @@ export function EcoBomImpact({ ecoId }: { ecoId: string }) {
               onClick={() => toggleBom(bom.bomId)}
               className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/20 transition-colors"
             >
-              {isExpanded
-                ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
-                : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
-              }
+              {isExpanded ? (
+                <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
+              )}
               <Link
                 href={`/boms/${bom.bomId}`}
                 onClick={(e) => e.stopPropagation()}
@@ -121,11 +121,11 @@ export function EcoBomImpact({ ecoId }: { ecoId: string }) {
                 {bom.bomName}
               </Link>
               {bom.bomRevision && (
-                <span className="text-[10px] font-mono text-muted-foreground">
+                <span className="text-3xs font-mono text-muted-foreground">
                   Rev {bom.bomRevision}
                 </span>
               )}
-              <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+              <span className="text-3xs text-muted-foreground ml-auto shrink-0">
                 {bom.affectedItems.length} of {bom.totalItems} items
               </span>
             </button>
@@ -134,7 +134,7 @@ export function EcoBomImpact({ ecoId }: { ecoId: string }) {
               <div className="px-3 pb-2.5">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <tr className="text-3xs uppercase tracking-wider text-muted-foreground">
                       <th className="text-left py-1 pr-2 font-medium">Item</th>
                       <th className="text-left py-1 pr-2 font-medium">Part #</th>
                       <th className="text-left py-1 pr-2 font-medium">Name</th>

@@ -32,6 +32,7 @@ export async function POST(
       .select("id, tenantId")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!part) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
@@ -54,27 +55,38 @@ export async function POST(
       await db.from("part_vendors").update({ isPrimary: false }).eq("partId", partId);
     }
 
-    const { data: link, error } = await db.from("part_vendors").insert({
-      id: uuid(),
-      partId,
-      vendorId: body.vendorId,
-      // vendorName is the legacy text column, kept in sync until migration 010
-      // drops it. Populating it from the canonical vendor record keeps old
-      // code paths and any external SQL queries working during the transition.
-      vendorName: vendorRecord.name,
-      vendorPartNumber: body.vendorPartNumber?.trim() || null,
-      unitCost: body.unitCost || null,
-      currency: body.currency || "USD",
-      leadTimeDays: body.leadTimeDays || null,
-      isPrimary: body.isPrimary || false,
-      notes: body.notes?.trim() || null,
-      createdAt: now,
-      updatedAt: now,
-    }).select().single();
+    const { data: link, error } = await db
+      .from("part_vendors")
+      .insert({
+        id: uuid(),
+        partId,
+        vendorId: body.vendorId,
+        // vendorName is the legacy text column, kept in sync until migration 010
+        // drops it. Populating it from the canonical vendor record keeps old
+        // code paths and any external SQL queries working during the transition.
+        vendorName: vendorRecord.name,
+        vendorPartNumber: body.vendorPartNumber?.trim() || null,
+        unitCost: body.unitCost || null,
+        currency: body.currency || "USD",
+        leadTimeDays: body.leadTimeDays || null,
+        isPrimary: body.isPrimary || false,
+        notes: body.notes?.trim() || null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single();
 
     if (error) throw error;
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "part.vendor_add", entityType: "part", entityId: partId, details: { vendorId: body.vendorId, vendorName: vendorRecord.name, linkId: link.id } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.vendor_add",
+      entityType: "part",
+      entityId: partId,
+      details: { vendorId: body.vendorId, vendorName: vendorRecord.name, linkId: link.id },
+    });
 
     return NextResponse.json(link);
   } catch (err) {

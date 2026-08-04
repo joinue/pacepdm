@@ -1,0 +1,325 @@
+{
+  "src/app/(auth)/forgot-password/page.tsx": {
+    "raw-fetch": 1
+  },
+  "src/app/(auth)/login/page.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/(dashboard)/admin/approval-groups/approval-groups-client.tsx": {
+    "raw-fetch": 6
+  },
+  "src/app/(dashboard)/admin/lifecycle/page.tsx": {
+    "generic-error-toast": 1,
+    "raw-fetch": 7
+  },
+  "src/app/(dashboard)/admin/metadata/metadata-client.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/(dashboard)/admin/roles/page.tsx": {
+    "raw-fetch": 4
+  },
+  "src/app/(dashboard)/admin/settings/settings-client.tsx": {
+    "raw-fetch": 1
+  },
+  "src/app/(dashboard)/admin/users/users-client.tsx": {
+    "generic-error-toast": 4,
+    "raw-fetch": 4
+  },
+  "src/app/(dashboard)/admin/workflows/page.tsx": {
+    "raw-fetch": 10
+  },
+  "src/app/(dashboard)/approvals/page.tsx": {
+    "raw-fetch": 1
+  },
+  "src/app/(dashboard)/boms/boms-view.tsx": {
+    "raw-fetch": 1
+  },
+  "src/app/(dashboard)/parts/components/add-vendor-dialog.tsx": {
+    "raw-fetch": 3
+  },
+  "src/app/(dashboard)/parts/components/file-preview-dialog.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/(dashboard)/parts/components/link-file-dialog.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/(dashboard)/parts/components/part-form-dialog.tsx": {
+    "generic-error-toast": 1,
+    "raw-fetch": 8,
+    "swallowed-error": 1
+  },
+  "src/app/(dashboard)/parts/page.tsx": {
+    "raw-fetch": 9,
+    "swallowed-error": 1
+  },
+  "src/app/(dashboard)/profile/page.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/(dashboard)/search/page.tsx": {
+    "raw-fetch": 5,
+    "swallowed-error": 3
+  },
+  "src/app/(dashboard)/vendors/page.tsx": {
+    "raw-fetch": 4
+  },
+  "src/app/api/admin/sso/[id]/activate/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/admin/sso/[id]/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/admin/sso/[id]/verify/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/admin/sso/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/approval-groups/[groupId]/members/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/approval-groups/[groupId]/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/approval-groups/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/approvals/[decisionId]/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/approvals/requests/route.ts": {
+    "unwrapped-route": 5
+  },
+  "src/app/api/auth/sso/resolve/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/boms/[bomId]/baselines/[baselineId]/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/boms/[bomId]/baselines/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/boms/[bomId]/export/route.ts": {
+    "unwrapped-route": 5
+  },
+  "src/app/api/boms/[bomId]/items/route.ts": {
+    "unwrapped-route": 13
+  },
+  "src/app/api/boms/[bomId]/rollup/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/boms/compare/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/cron/approval-reminders/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/ecos/[ecoId]/bom-impact/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/ecos/[ecoId]/implement/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/ecos/[ecoId]/items/route.ts": {
+    "unwrapped-route": 9
+  },
+  "src/app/api/ecos/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/files/[fileId]/checkin/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/download/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/metadata/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/move/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/parts/route.ts": {
+    "unwrapped-route": 8
+  },
+  "src/app/api/files/[fileId]/preview/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/rename/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/restore/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/thumbnail/regenerate/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/thumbnail/set/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/transition/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/[fileId]/upload-version/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/bulk-download/prepare/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/bulk-download/zip/[token]/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/files/bulk-transition/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/files/route.ts": {
+    "unwrapped-route": 7
+  },
+  "src/app/api/folders/[folderId]/access/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/folders/[folderId]/download/prepare/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/folders/[folderId]/route.ts": {
+    "unwrapped-route": 8
+  },
+  "src/app/api/folders/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/lifecycle/[lifecycleId]/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/lifecycle/[lifecycleId]/states/route.ts": {
+    "unwrapped-route": 8
+  },
+  "src/app/api/lifecycle/[lifecycleId]/transitions/route.ts": {
+    "unwrapped-route": 8
+  },
+  "src/app/api/lifecycle/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/lifecycle/transitions/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/parts/[partId]/files/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/parts/[partId]/route.ts": {
+    "unwrapped-route": 8
+  },
+  "src/app/api/parts/[partId]/thumbnail/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/parts/[partId]/vendors/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/parts/export/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/parts/import/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/parts/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/public/share/[token]/content/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/public/share/[token]/route.ts": {
+    "unwrapped-route": 3
+  },
+  "src/app/api/public/share/[token]/zip/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/releases/[releaseId]/zip/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/search/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/share-tokens/[id]/activity/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/share-tokens/route.ts": {
+    "unwrapped-route": 5
+  },
+  "src/app/api/tenants/route.ts": {
+    "unwrapped-route": 2
+  },
+  "src/app/api/users/[userId]/route.ts": {
+    "unwrapped-route": 7
+  },
+  "src/app/api/users/invite/route.ts": {
+    "unwrapped-route": 4
+  },
+  "src/app/api/workflows/[workflowId]/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/workflows/[workflowId]/steps/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/workflows/assignments/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/api/workflows/route.ts": {
+    "unwrapped-route": 6
+  },
+  "src/app/auth/confirm/page.tsx": {
+    "raw-fetch": 1
+  },
+  "src/app/onboarding/page.tsx": {
+    "raw-fetch": 2
+  },
+  "src/app/share/[token]/share-viewer-client.tsx": {
+    "raw-fetch": 1
+  },
+  "src/components/layout/app-shell.tsx": {
+    "swallowed-error": 1
+  },
+  "src/components/layout/global-search.tsx": {
+    "raw-fetch": 1
+  },
+  "src/components/layout/header.tsx": {
+    "generic-error-toast": 2,
+    "raw-fetch": 1,
+    "swallowed-error": 1
+  },
+  "src/components/providers/notification-provider.tsx": {
+    "raw-fetch": 6
+  },
+  "src/components/share/share-dialog.tsx": {
+    "generic-error-toast": 1
+  },
+  "src/components/ui/mention-input.tsx": {
+    "raw-fetch": 1
+  },
+  "src/components/vault/cad-viewer.tsx": {
+    "raw-fetch": 2,
+    "swallowed-error": 1
+  },
+  "src/components/vault/checkin-dialog.tsx": {
+    "generic-error-toast": 1,
+    "raw-fetch": 1
+  },
+  "src/components/vault/create-folder-dialog.tsx": {
+    "generic-error-toast": 1,
+    "raw-fetch": 1
+  },
+  "src/components/vault/file-detail-panel.tsx": {
+    "generic-error-toast": 1,
+    "raw-fetch": 13
+  },
+  "src/components/vault/folder-access-dialog.tsx": {
+    "swallowed-error": 1
+  },
+  "src/components/vault/upload-file-dialog.tsx": {
+    "generic-error-toast": 2,
+    "raw-fetch": 7,
+    "swallowed-error": 1
+  },
+  "src/components/vault/vault-file-list.tsx": {
+    "raw-fetch": 1
+  },
+  "src/lib/supabase/server.ts": {
+    "swallowed-error": 1
+  }
+}

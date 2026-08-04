@@ -18,12 +18,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Package, FileText, GitBranch, ClipboardList, ArrowUpRight, Star } from "lucide-react";
-import type {
-  WhereUsedBom,
-  WhereUsedPart,
-  WhereUsedFile,
-  WhereUsedEco,
-} from "@/lib/where-used";
+import type { WhereUsedBom, WhereUsedPart, WhereUsedFile, WhereUsedEco } from "@/lib/where-used";
 
 type EcoStatusVariant = "muted" | "info" | "warning" | "success" | "error" | "purple";
 
@@ -91,11 +86,17 @@ export function WhereUsedSection({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-muted-foreground uppercase">{title}</p>
-        <span className="text-[10px] text-muted-foreground">{total} reference{total === 1 ? "" : "s"}</span>
+        <span className="text-3xs text-muted-foreground">
+          {total} reference{total === 1 ? "" : "s"}
+        </span>
       </div>
 
       {parentParts.length > 0 && (
-        <SubSection label="Parent assemblies" count={parentParts.length} icon={<GitBranch className="w-3 h-3" />}>
+        <SubSection
+          label="Parent assemblies"
+          count={parentParts.length}
+          icon={<GitBranch className="w-3 h-3" />}
+        >
           {parentParts.map((p) => (
             <PartRow key={p.partId} part={p} onClick={onNavigatePart} showDepth />
           ))}
@@ -103,7 +104,11 @@ export function WhereUsedSection({
       )}
 
       {representsBoms.length > 0 && (
-        <SubSection label="Represents BOM" count={representsBoms.length} icon={<ClipboardList className="w-3 h-3" />}>
+        <SubSection
+          label="Represents BOM"
+          count={representsBoms.length}
+          icon={<ClipboardList className="w-3 h-3" />}
+        >
           {representsBoms.map((b) => (
             <BomRow key={b.bomId} bom={b} showQuantity={false} onClick={onNavigateBom} />
           ))}
@@ -111,7 +116,11 @@ export function WhereUsedSection({
       )}
 
       {boms.length > 0 && (
-        <SubSection label="Used in BOMs" count={boms.length} icon={<ClipboardList className="w-3 h-3" />}>
+        <SubSection
+          label="Used in BOMs"
+          count={boms.length}
+          icon={<ClipboardList className="w-3 h-3" />}
+        >
           {boms.map((b) => (
             <BomRow key={`${b.bomId}-${b.quantity}`} bom={b} onClick={onNavigateBom} />
           ))}
@@ -119,7 +128,11 @@ export function WhereUsedSection({
       )}
 
       {linkedParts.length > 0 && (
-        <SubSection label="Linked parts" count={linkedParts.length} icon={<Package className="w-3 h-3" />}>
+        <SubSection
+          label="Linked parts"
+          count={linkedParts.length}
+          icon={<Package className="w-3 h-3" />}
+        >
           {linkedParts.map((p) => (
             <PartRow key={p.partId} part={p} onClick={onNavigatePart} />
           ))}
@@ -127,7 +140,11 @@ export function WhereUsedSection({
       )}
 
       {linkedFiles.length > 0 && (
-        <SubSection label="Linked files" count={linkedFiles.length} icon={<FileText className="w-3 h-3" />}>
+        <SubSection
+          label="Linked files"
+          count={linkedFiles.length}
+          icon={<FileText className="w-3 h-3" />}
+        >
           {linkedFiles.map((f) => (
             <FileRow key={f.fileId} file={f} onClick={onNavigateFile} />
           ))}
@@ -135,7 +152,11 @@ export function WhereUsedSection({
       )}
 
       {ecos.length > 0 && (
-        <SubSection label="Related ECOs" count={ecos.length} icon={<ArrowUpRight className="w-3 h-3" />}>
+        <SubSection
+          label="Related ECOs"
+          count={ecos.length}
+          icon={<ArrowUpRight className="w-3 h-3" />}
+        >
           {ecos.map((e) => (
             <EcoRow key={e.ecoId} eco={e} onClick={onNavigateEco} />
           ))}
@@ -158,7 +179,7 @@ function SubSection({
 }) {
   return (
     <div className="space-y-1">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground">
         {icon}
         <span>{label}</span>
         <span className="text-muted-foreground/60">({count})</span>
@@ -168,13 +189,7 @@ function SubSection({
   );
 }
 
-function RowShell({
-  onClick,
-  children,
-}: {
-  onClick?: () => void;
-  children: React.ReactNode;
-}) {
+function RowShell({ onClick, children }: { onClick?: () => void; children: React.ReactNode }) {
   const className =
     "w-full text-left flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-colors";
   if (onClick) {
@@ -200,12 +215,17 @@ function BomRow({
     <RowShell onClick={onClick ? () => onClick(bom.bomId) : undefined}>
       <span className="font-medium truncate flex-1">{bom.bomName}</span>
       {showQuantity && bom.quantity > 0 && (
-        <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
+        <span className="text-3xs text-muted-foreground shrink-0 font-mono">
           ×{bom.quantity} {bom.unit}
         </span>
       )}
-      <span className="text-[10px] text-muted-foreground shrink-0 font-mono">Rev {bom.bomRevision}</span>
-      <Badge variant={BOM_STATUS_VARIANTS[bom.bomStatus] || "muted"} className="text-[9px] px-1 py-0 shrink-0">
+      <span className="text-3xs text-muted-foreground shrink-0 font-mono">
+        Rev {bom.bomRevision}
+      </span>
+      <Badge
+        variant={BOM_STATUS_VARIANTS[bom.bomStatus] || "muted"}
+        className="text-4xs px-1 py-0 shrink-0"
+      >
         {bom.bomStatus}
       </Badge>
     </RowShell>
@@ -226,54 +246,45 @@ function PartRow({
       <Package className="w-3 h-3 text-muted-foreground shrink-0" />
       <span className="font-mono shrink-0">{part.partNumber}</span>
       <span className="truncate text-muted-foreground flex-1">{part.name}</span>
-      {part.isPrimary && <Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
-      {part.role && <span className="text-[10px] text-muted-foreground shrink-0">{part.role}</span>}
+      {part.isPrimary && <Star className="w-2.5 h-2.5 text-warning shrink-0" />}
+      {part.role && <span className="text-3xs text-muted-foreground shrink-0">{part.role}</span>}
       {showDepth && typeof part.depth === "number" && part.depth > 0 && (
-        <span className="text-[10px] text-muted-foreground/70 shrink-0">L{part.depth}</span>
+        <span className="text-3xs text-muted-foreground/70 shrink-0">L{part.depth}</span>
       )}
-      <span className="text-[10px] text-muted-foreground shrink-0 font-mono">Rev {part.revision}</span>
+      <span className="text-3xs text-muted-foreground shrink-0 font-mono">Rev {part.revision}</span>
     </RowShell>
   );
 }
 
-function FileRow({
-  file,
-  onClick,
-}: {
-  file: WhereUsedFile;
-  onClick?: (fileId: string) => void;
-}) {
+function FileRow({ file, onClick }: { file: WhereUsedFile; onClick?: (fileId: string) => void }) {
   return (
     <RowShell onClick={onClick ? () => onClick(file.fileId) : undefined}>
       <FileText className="w-3 h-3 text-muted-foreground shrink-0" />
       <span className="truncate flex-1">{file.name}</span>
-      {file.isPrimary && <Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
-      {file.role && <span className="text-[10px] text-muted-foreground shrink-0">{file.role}</span>}
-      <span className="text-[10px] text-muted-foreground shrink-0 font-mono">Rev {file.revision}</span>
+      {file.isPrimary && <Star className="w-2.5 h-2.5 text-warning shrink-0" />}
+      {file.role && <span className="text-3xs text-muted-foreground shrink-0">{file.role}</span>}
+      <span className="text-3xs text-muted-foreground shrink-0 font-mono">Rev {file.revision}</span>
     </RowShell>
   );
 }
 
-function EcoRow({
-  eco,
-  onClick,
-}: {
-  eco: WhereUsedEco;
-  onClick?: (ecoId: string) => void;
-}) {
+function EcoRow({ eco, onClick }: { eco: WhereUsedEco; onClick?: (ecoId: string) => void }) {
   return (
     <RowShell onClick={onClick ? () => onClick(eco.ecoId) : undefined}>
       <span className="font-mono shrink-0">{eco.ecoNumber}</span>
       <span className="truncate text-muted-foreground flex-1">{eco.title}</span>
       {eco.changeType && (
-        <span className="text-[10px] text-muted-foreground shrink-0">{eco.changeType}</span>
+        <span className="text-3xs text-muted-foreground shrink-0">{eco.changeType}</span>
       )}
       {eco.fromRevision && eco.toRevision && (
-        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+        <span className="text-3xs font-mono text-muted-foreground shrink-0">
           {eco.fromRevision} → {eco.toRevision}
         </span>
       )}
-      <Badge variant={ECO_STATUS_VARIANTS[eco.status] || "muted"} className="text-[9px] px-1 py-0 shrink-0">
+      <Badge
+        variant={ECO_STATUS_VARIANTS[eco.status] || "muted"}
+        className="text-4xs px-1 py-0 shrink-0"
+      >
         {eco.status}
       </Badge>
     </RowShell>

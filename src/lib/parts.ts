@@ -17,7 +17,10 @@ export const DEFAULT_PART_NUMBER_SETTINGS: PartNumberSettings = {
 export function readPartNumberSettings(raw: unknown): PartNumberSettings {
   const s = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const mode = s.partNumberMode === "MANUAL" ? "MANUAL" : "AUTO";
-  const prefix = typeof s.partNumberPrefix === "string" ? s.partNumberPrefix : DEFAULT_PART_NUMBER_SETTINGS.prefix;
+  const prefix =
+    typeof s.partNumberPrefix === "string"
+      ? s.partNumberPrefix
+      : DEFAULT_PART_NUMBER_SETTINGS.prefix;
   const padding =
     typeof s.partNumberPadding === "number" && s.partNumberPadding > 0 && s.partNumberPadding <= 12
       ? Math.floor(s.partNumberPadding)
@@ -35,7 +38,7 @@ export function formatPartNumber(seq: number, settings: PartNumberSettings): str
 // value. The loser sees zero rows returned and retries with the fresh seq.
 export async function nextPartNumberSequence(
   db: SupabaseClient,
-  tenantId: string,
+  tenantId: string
 ): Promise<number> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const { data: current, error: readError } = await db

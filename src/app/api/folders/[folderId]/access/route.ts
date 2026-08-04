@@ -22,14 +22,17 @@ const CreateRowSchema = z.object({
   note: z.string().max(500).nullable().optional(),
 });
 
-async function authorize(
-  folderId: string
-): Promise<
-  | { ok: true; tenantUser: Awaited<ReturnType<typeof getApiTenantUser>>; db: ReturnType<typeof getServiceClient> }
+async function authorize(folderId: string): Promise<
+  | {
+      ok: true;
+      tenantUser: Awaited<ReturnType<typeof getApiTenantUser>>;
+      db: ReturnType<typeof getServiceClient>;
+    }
   | { ok: false; response: NextResponse }
 > {
   const tenantUser = await getApiTenantUser();
-  if (!tenantUser) return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  if (!tenantUser)
+    return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
   const db = getServiceClient();
   const { data: folder } = await db
@@ -38,15 +41,23 @@ async function authorize(
     .eq("id", folderId)
     .single();
   if (!folder || folder.tenantId !== tenantUser.tenantId) {
-    return { ok: false, response: NextResponse.json({ error: "Folder not found" }, { status: 404 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Folder not found" }, { status: 404 }),
+    };
   }
 
   const scope = await getFolderAccessScope(tenantUser);
   if (!canViewFolder(scope, folderId)) {
-    return { ok: false, response: NextResponse.json({ error: "Folder not found" }, { status: 404 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Folder not found" }, { status: 404 }),
+    };
   }
 
-  const perms = Array.isArray(tenantUser.role.permissions) ? (tenantUser.role.permissions as string[]) : [];
+  const perms = Array.isArray(tenantUser.role.permissions)
+    ? (tenantUser.role.permissions as string[])
+    : [];
   const isTenantManager = hasPermission(perms, PERMISSIONS.FOLDER_MANAGE_ACCESS);
   const isFolderAdmin = canAdminFolder(scope, folderId);
   if (!isTenantManager && !isFolderAdmin) {
@@ -70,10 +81,12 @@ export async function GET(
     // which the client computes by walking up the tree.
     const { data } = await auth.db
       .from("folder_access")
-      .select(`
+      .select(
+        `
         *,
         grantedBy:tenant_users!folder_access_grantedById_fkey(id, fullName, email)
-      `)
+      `
+      )
       .eq("folderId", folderId)
       .eq("tenantId", auth.tenantUser!.tenantId)
       .order("grantedAt", { ascending: false });
@@ -181,7 +194,11 @@ export async function DELETE(
       .select("id, tenantId, folderId, principalType, principalId, level")
       .eq("id", rowId)
       .single();
-    if (!existing || existing.tenantId !== auth.tenantUser!.tenantId || existing.folderId !== folderId) {
+    if (
+      !existing ||
+      existing.tenantId !== auth.tenantUser!.tenantId ||
+      existing.folderId !== folderId
+    ) {
       return NextResponse.json({ error: "Access row not found" }, { status: 404 });
     }
 

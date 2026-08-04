@@ -43,11 +43,7 @@ export function renderNotificationEmail(p: RenderParams): Rendered {
   const subject = `[${p.tenantName}] ${SUBJECT_PREFIX[p.type]}: ${p.title}`;
 
   const escape = (s: string) =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const ctaHtml = p.link
     ? `<p style="margin:24px 0"><a href="${escape(p.link)}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:500">${CTA_LABEL[p.type]}</a></p>`

@@ -4,7 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { FileText, Download, ExternalLink } from "lucide-react";
 
@@ -17,7 +22,12 @@ export function FilePreviewDialog({ file, onClose }: FilePreviewDialogProps) {
   const router = useRouter();
 
   return (
-    <Dialog open={!!file} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open={!!file}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -28,11 +38,26 @@ export function FilePreviewDialog({ file, onClose }: FilePreviewDialogProps) {
         </DialogHeader>
         {file && <FilePreviewInline fileId={file.id} />}
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => { window.open(`/api/files/${file?.id}/download`, "_blank"); }}>
-            <Download className="w-3.5 h-3.5 mr-1.5" />Download
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              window.open(`/api/files/${file?.id}/download`, "_blank");
+            }}
+          >
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            Download
           </Button>
-          <Button variant="outline" size="sm" onClick={() => { router.push(`/vault?fileId=${file?.id}`); onClose(); }}>
-            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />Open in Vault
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              router.push(`/vault?fileId=${file?.id}`);
+              onClose();
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+            Open in Vault
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -73,12 +98,15 @@ function FilePreviewInline({ fileId }: { fileId: string }) {
     };
   }, [fileId]);
 
-  if (loading) return <p className="text-sm text-muted-foreground text-center py-8">Loading preview...</p>;
+  if (loading)
+    return <p className="text-sm text-muted-foreground text-center py-8">Loading preview...</p>;
   if (!preview || !preview.canPreview) {
     return (
       <div className="text-center py-8">
         <FileText className="w-10 h-10 mx-auto mb-2 text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground">Preview not available for .{preview?.fileType || "unknown"} files</p>
+        <p className="text-sm text-muted-foreground">
+          Preview not available for .{preview?.fileType || "unknown"} files
+        </p>
       </div>
     );
   }
@@ -87,19 +115,31 @@ function FilePreviewInline({ fileId }: { fileId: string }) {
     return (
       <div className="flex items-center justify-center bg-muted/30 rounded-lg p-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={preview.url} alt="File preview" className="max-w-full max-h-80 object-contain rounded" />
+        <img
+          src={preview.url}
+          alt="File preview"
+          className="max-w-full max-h-80 object-contain rounded"
+        />
       </div>
     );
   }
 
   if (preview.previewType === "pdf") {
     return (
-      <div className="w-full rounded-lg border overflow-hidden" style={{ height: "60vh", minHeight: "350px" }}>
+      <div
+        className="w-full rounded-lg border overflow-hidden"
+        style={{ height: "60vh", minHeight: "350px" }}
+      >
         <object data={preview.url} type="application/pdf" className="w-full h-full">
           <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
             <FileText className="w-10 h-10 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">PDF preview unavailable in this browser</p>
-            <a href={preview.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">
+            <a
+              href={preview.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary underline"
+            >
               Open PDF directly
             </a>
           </div>

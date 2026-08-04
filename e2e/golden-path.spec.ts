@@ -88,7 +88,9 @@ test.describe("Golden path", () => {
 
     for (const { path, heading } of sections) {
       await page.goto(path);
-      await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible({
+        timeout: 10000,
+      });
       // No uncaught errors — if a page crashes, Playwright will fail
     }
   });

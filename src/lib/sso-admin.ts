@@ -133,9 +133,7 @@ export async function createSupabaseSamlProvider(params: {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(
-      `Supabase SSO provider create failed (${res.status}): ${text.slice(0, 500)}`
-    );
+    throw new Error(`Supabase SSO provider create failed (${res.status}): ${text.slice(0, 500)}`);
   }
   return (await res.json()) as SupabaseSsoProvider;
 }
@@ -149,7 +147,5 @@ export async function deleteSupabaseSamlProvider(providerId: string): Promise<vo
   // don't block a row delete over a reconciliation hiccup.
   if (res.ok || res.status === 404) return;
   const text = await res.text().catch(() => "");
-  throw new Error(
-    `Supabase SSO provider delete failed (${res.status}): ${text.slice(0, 500)}`
-  );
+  throw new Error(`Supabase SSO provider delete failed (${res.status}): ${text.slice(0, 500)}`);
 }

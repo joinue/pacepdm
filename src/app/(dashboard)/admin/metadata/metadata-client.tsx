@@ -5,21 +5,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 interface Field {
   id: string;
@@ -47,7 +69,10 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
 
     const body: Record<string, unknown> = { name, fieldType, isRequired };
     if (fieldType === "SELECT" && options.trim()) {
-      body.options = options.split(",").map((o) => o.trim()).filter(Boolean);
+      body.options = options
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean);
     }
 
     const res = await fetch("/api/metadata-fields", {
@@ -94,14 +119,18 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Metadata Fields</h2>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Field
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Metadata Fields"
+        actions={
+          <>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Field
+            </Button>
+          </>
+        }
+      />
 
       <div className="border rounded-lg bg-background">
         <Table>
@@ -119,16 +148,27 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
               <TableRow key={field.id}>
                 <TableCell className="font-medium">
                   {field.name}
-                  {field.isSystem && <Badge variant="secondary" className="ml-2 text-xs">System</Badge>}
+                  {field.isSystem && (
+                    <Badge variant="secondary" className="ml-2 text-xs">
+                      System
+                    </Badge>
+                  )}
                 </TableCell>
-                <TableCell><Badge variant="outline">{field.fieldType}</Badge></TableCell>
+                <TableCell>
+                  <Badge variant="outline">{field.fieldType}</Badge>
+                </TableCell>
                 <TableCell>{field.isRequired ? "Yes" : "No"}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {field.options ? (field.options as string[]).join(", ") : "—"}
                 </TableCell>
                 <TableCell>
                   {!field.isSystem && (
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteId(field.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-destructive"
+                      onClick={() => setDeleteId(field.id)}
+                    >
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   )}
@@ -149,12 +189,19 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Field Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Heat Treatment" required />
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., Heat Treatment"
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label>Type</Label>
                 <Select value={fieldType} onValueChange={(v) => setFieldType(v ?? "TEXT")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="TEXT">Text</SelectItem>
                     <SelectItem value="NUMBER">Number</SelectItem>
@@ -168,12 +215,18 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
               {fieldType === "SELECT" && (
                 <div className="space-y-2">
                   <Label>Options (comma-separated)</Label>
-                  <Input value={options} onChange={(e) => setOptions(e.target.value)} placeholder="Option 1, Option 2, Option 3" />
+                  <Input
+                    value={options}
+                    onChange={(e) => setOptions(e.target.value)}
+                    placeholder="Option 1, Option 2, Option 3"
+                  />
                 </div>
               )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
+                Cancel
+              </Button>
               <Button type="submit" disabled={loading || !name.trim()}>
                 {loading ? "Creating..." : "Create"}
               </Button>
@@ -186,14 +239,21 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete field?</AlertDialogTitle>
-            <AlertDialogDescription>This will remove the field and all its values from every file. This cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription>
+              This will remove the field and all its values from every file. This cannot be undone.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

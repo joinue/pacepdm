@@ -5,15 +5,20 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Plus, Loader2, X, ArrowRight, Trash2, Package,
-} from "lucide-react";
+import { Plus, Loader2, X, ArrowRight, Trash2, Package } from "lucide-react";
 import Link from "next/link";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -23,10 +28,7 @@ import { useNotifications } from "@/components/providers/notification-provider";
 import { PERMISSIONS } from "@/lib/permissions";
 
 import type { ECO, ECOItem, ApprovalData } from "./types";
-import {
-  statusVariants, priorityVariants, VALID_TRANSITIONS, DELETABLE_STATUSES,
-  approvalStatusConfig,
-} from "./constants";
+import { VALID_TRANSITIONS, DELETABLE_STATUSES, approvalStatusConfig } from "./constants";
 import { CreateEcoDialog } from "./components/create-eco-dialog";
 import { AddEcoItemDialog } from "./components/add-eco-item-dialog";
 import { EcoList } from "./components/eco-list";
@@ -34,6 +36,7 @@ import { EcoDetailsTab } from "./components/eco-details-tab";
 import { EcoItemsTab } from "./components/eco-items-tab";
 import { EcoApprovalTab } from "./components/eco-approval-tab";
 import { EcoBomImpact } from "./components/eco-bom-impact";
+import { PageHeader } from "@/components/ui/page-header";
 
 /**
  * ECOs view — list + optional detail. Selection lives in the URL path
@@ -142,7 +145,9 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
 
   // ─── Effects ─────────────────────────────────────────────────────────
   useEffect(() => {
-    void (async () => { await loadEcos(); })();
+    void (async () => {
+      await loadEcos();
+    })();
   }, [loadEcos]);
 
   // Whenever the URL-selected ECO changes, reload its items + approval.
@@ -212,9 +217,12 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // ─── Navigation ──────────────────────────────────────────────────────
   // Accepts the whole ECO because that's what EcoList passes to onSelect;
   // we only need the id, but keeping the signature matches the component.
-  const selectEco = useCallback((eco: ECO) => {
-    router.push(`/ecos/${eco.id}`);
-  }, [router]);
+  const selectEco = useCallback(
+    (eco: ECO) => {
+      router.push(`/ecos/${eco.id}`);
+    },
+    [router]
+  );
 
   const clearSelection = useCallback(() => {
     router.push("/ecos");
@@ -223,7 +231,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // ─── Derived state ───────────────────────────────────────────────────
   const selectedEco = ecos.find((e) => e.id === selectedEcoId) || null;
   const selectionMissing = !loading && selectedEcoId !== null && !selectedEco;
-  const transitions = selectedEco ? (VALID_TRANSITIONS[selectedEco.status] || []) : [];
+  const transitions = selectedEco ? VALID_TRANSITIONS[selectedEco.status] || [] : [];
   const canDelete = selectedEco && DELETABLE_STATUSES.includes(selectedEco.status);
 
   // ─── ECO-level mutations ─────────────────────────────────────────────
@@ -275,11 +283,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         const bits: string[] = [];
         if (parts > 0) bits.push(`${parts} part${parts !== 1 ? "s" : ""} released`);
         if (files > 0) bits.push(`${files} file${files !== 1 ? "s" : ""} released`);
-        toast.success(
-          bits.length > 0
-            ? `ECO implemented — ${bits.join(", ")}`
-            : "ECO implemented"
-        );
+        toast.success(bits.length > 0 ? `ECO implemented — ${bits.join(", ")}` : "ECO implemented");
         // Capture the release id so the detail header can show the
         // "View release" link immediately, without waiting for a refetch.
         if (result.releaseId) setReleaseIdForSelected(result.releaseId);
@@ -288,10 +292,13 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         return;
       }
 
-      const updated = await fetchJson<ECO & { pendingApproval?: boolean }>(`/api/ecos/${selectedEco.id}`, {
-        method: "PUT",
-        body: { status: newStatus },
-      });
+      const updated = await fetchJson<ECO & { pendingApproval?: boolean }>(
+        `/api/ecos/${selectedEco.id}`,
+        {
+          method: "PUT",
+          body: { status: newStatus },
+        }
+      );
       if (updated.pendingApproval) {
         toast.success("Submitted for approval — workflow started");
         setDetailTab("approval");
@@ -335,25 +342,25 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   return (
     <div className="flex h-full gap-0">
       {/* Left: ECO List */}
-      <div className={`flex-1 min-w-0 space-y-4 ${selectedEco ? "hidden lg:block lg:max-w-md xl:max-w-lg" : ""}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">Engineering Change Orders</h2>
-            <p className="text-sm text-muted-foreground mt-1">Track and manage engineering changes</p>
-          </div>
-          {canCreate && (
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              <Plus className="w-4 h-4 mr-2" />New ECO
-            </Button>
-          )}
-        </div>
-
-        <EcoList
-          ecos={ecos}
-          loading={loading}
-          selectedEcoId={selectedEcoId}
-          onSelect={selectEco}
+      <div
+        className={`flex-1 min-w-0 space-y-4 ${selectedEco ? "hidden lg:block lg:max-w-md xl:max-w-lg" : ""}`}
+      >
+        <PageHeader
+          title="Engineering Change Orders"
+          description="Track and manage engineering changes"
+          actions={
+            <>
+              {canCreate && (
+                <Button size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  New ECO
+                </Button>
+              )}
+            </>
+          }
         />
+
+        <EcoList ecos={ecos} loading={loading} selectedEcoId={selectedEcoId} onSelect={selectEco} />
       </div>
 
       {/* Right: Missing-selection empty state */}
@@ -375,13 +382,11 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
           <div className="flex items-start justify-between gap-3 mb-5">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                <span className="text-xs font-mono text-muted-foreground font-medium">{selectedEco.ecoNumber}</span>
-                <Badge variant={statusVariants[selectedEco.status] || "muted"}>
-                  {selectedEco.status.replace("_", " ")}
-                </Badge>
-                <Badge variant={priorityVariants[selectedEco.priority] || "muted"}>
-                  {selectedEco.priority}
-                </Badge>
+                <span className="text-xs font-mono text-muted-foreground font-medium">
+                  {selectedEco.ecoNumber}
+                </span>
+                <StatusBadge status={selectedEco.status} kind="eco" />
+                <StatusBadge status={selectedEco.priority} kind="priority" />
               </div>
               <h3 className="text-lg font-semibold leading-snug">{selectedEco.title}</h3>
               {selectedEco.createdBy && (
@@ -404,7 +409,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
                   onClick={() => setDeleteTarget(selectedEco)}
                 >
                   <Trash2 className="w-4 h-4" />
@@ -427,10 +432,11 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                   disabled={transitioning}
                   onClick={() => handleTransition(t.status)}
                 >
-                  {transitioning
-                    ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    : <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
-                  }
+                  {transitioning ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   {t.label}
                 </Button>
               ))}
@@ -451,7 +457,9 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
               <TabsTrigger value="items">
                 Affected Items
                 {items.length > 0 && (
-                  <Badge variant="secondary" className="text-[9px] ml-1.5 px-1.5 py-0">{items.length}</Badge>
+                  <Badge variant="secondary" className="text-4xs ml-1.5 px-1.5 py-0">
+                    {items.length}
+                  </Badge>
                 )}
               </TabsTrigger>
               <TabsTrigger value="approval">
@@ -459,7 +467,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                 {approval && (
                   <Badge
                     variant={approvalStatusConfig[approval.status]?.variant || "muted"}
-                    className="text-[9px] ml-1.5 px-1.5 py-0"
+                    className="text-4xs ml-1.5 px-1.5 py-0"
                   >
                     {approvalStatusConfig[approval.status]?.label}
                   </Badge>
@@ -511,7 +519,9 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingEmptyTransition === "IMPLEMENTED" ? "Implement empty ECO?" : "Submit empty ECO?"}
+              {pendingEmptyTransition === "IMPLEMENTED"
+                ? "Implement empty ECO?"
+                : "Submit empty ECO?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               This ECO has no affected parts or files.{" "}
@@ -540,12 +550,16 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleteTarget?.ecoNumber}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete &ldquo;{deleteTarget?.title}&rdquo; and all its affected items. This action cannot be undone.
+              This will permanently delete &ldquo;{deleteTarget?.title}&rdquo; and all its affected
+              items. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Delete ECO
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -7,11 +7,23 @@ import { MentionInput } from "@/components/ui/mention-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  CheckCircle, XCircle, Clock, Shield, Loader2, RotateCcw,
-  ChevronRight, MessageSquare, Undo2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Shield,
+  Loader2,
+  RotateCcw,
+  ChevronRight,
+  MessageSquare,
+  Undo2,
 } from "lucide-react";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -19,6 +31,8 @@ import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ApprovalTimeline } from "@/components/approvals/approval-timeline";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 // --- Types ---
 
@@ -86,12 +100,21 @@ interface RequestDetail {
     decider: { fullName: string } | null;
     step: { stepOrder: number; signatureLabel: string } | null;
   }[];
-  timeline: { id: string; event: string; details: string | null; createdAt: string; user: { fullName: string } | null }[];
+  timeline: {
+    id: string;
+    event: string;
+    details: string | null;
+    createdAt: string;
+    user: { fullName: string } | null;
+  }[];
 }
 
 // --- Status helpers ---
 
-const statusConfig: Record<string, { label: string; variant: "muted" | "warning" | "success" | "error" | "info" | "purple" }> = {
+const statusConfig: Record<
+  string,
+  { label: string; variant: "muted" | "warning" | "success" | "error" | "info" | "purple" }
+> = {
   PENDING: { label: "Pending", variant: "warning" },
   APPROVED: { label: "Approved", variant: "success" },
   REJECTED: { label: "Rejected", variant: "error" },
@@ -115,7 +138,10 @@ export default function ApprovalsPage() {
   const [loading, setLoading] = useState(true);
 
   // Decision action
-  const [actionTarget, setActionTarget] = useState<{ decision: PendingDecision; action: "APPROVED" | "REJECTED" | "REWORK" } | null>(null);
+  const [actionTarget, setActionTarget] = useState<{
+    decision: PendingDecision;
+    action: "APPROVED" | "REJECTED" | "REWORK";
+  } | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -146,12 +172,11 @@ export default function ApprovalsPage() {
   // Initial load — abort on unmount to avoid setting state on a dead component
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([
-      fetchPending(controller.signal),
-      fetchMyRequests(controller.signal),
-    ]).finally(() => {
-      if (!controller.signal.aborted) setLoading(false);
-    });
+    Promise.all([fetchPending(controller.signal), fetchMyRequests(controller.signal)]).finally(
+      () => {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    );
     return () => controller.abort();
   }, [fetchPending, fetchMyRequests]);
 
@@ -207,14 +232,22 @@ export default function ApprovalsPage() {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); setSubmitting(false); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      setSubmitting(false);
+      return;
+    }
 
     const result = await res.json();
     toast.success(
-      isRework ? "Rework requested — requester notified"
-      : actionTarget.action === "APPROVED"
-        ? result.requestComplete ? "Approved — all steps complete" : "Approved — next step activated"
-        : "Rejected"
+      isRework
+        ? "Rework requested — requester notified"
+        : actionTarget.action === "APPROVED"
+          ? result.requestComplete
+            ? "Approved — all steps complete"
+            : "Approved — next step activated"
+          : "Rejected"
     );
 
     setActionTarget(null);
@@ -253,11 +286,11 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">Approvals</h2>
-        <p className="text-sm text-muted-foreground mt-1">Review pending approvals and track your requests</p>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Approvals"
+        description="Review pending approvals and track your requests"
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-muted/50 rounded-lg w-fit">
@@ -266,7 +299,11 @@ export default function ApprovalsPage() {
           onClick={() => setTab("pending")}
         >
           Needs My Review
-          {pending.length > 0 && <Badge variant="error" className="text-[9px] ml-1.5 px-1.5 py-0">{pending.length}</Badge>}
+          {pending.length > 0 && (
+            <Badge variant="error" className="text-4xs ml-1.5 px-1.5 py-0">
+              {pending.length}
+            </Badge>
+          )}
         </button>
         <button
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === "my-requests" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground"}`}
@@ -310,20 +347,34 @@ export default function ApprovalsPage() {
                           </Badge>
                         )}
                         {decision.approvalMode && decision.approvalMode !== "ANY" && (
-                          <Badge variant="muted" className="text-[10px] shrink-0">
+                          <Badge variant="muted" className="text-3xs shrink-0">
                             {modeLabels[decision.approvalMode] || decision.approvalMode}
                           </Badge>
                         )}
                         {decision.deadlineAt && (
-                          <Badge variant={new Date(decision.deadlineAt) < new Date() ? "error" : "warning"} className="text-[10px] shrink-0">
+                          <Badge
+                            variant={
+                              new Date(decision.deadlineAt) < new Date() ? "error" : "warning"
+                            }
+                            className="text-3xs shrink-0"
+                          >
                             <Clock className="w-3 h-3 mr-0.5" />
-                            {new Date(decision.deadlineAt) < new Date() ? "Overdue" : <><span>Due </span><FormattedDate date={decision.deadlineAt} variant="date" /></>}
+                            {new Date(decision.deadlineAt) < new Date() ? (
+                              "Overdue"
+                            ) : (
+                              <>
+                                <span>Due </span>
+                                <FormattedDate date={decision.deadlineAt} variant="date" />
+                              </>
+                            )}
                           </Badge>
                         )}
                       </div>
                       <h3 className="font-medium">{decision.request.title}</h3>
                       {decision.request.description && (
-                        <p className="text-sm text-muted-foreground mt-0.5">{decision.request.description}</p>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {decision.request.description}
+                        </p>
                       )}
                       <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                         <span>Requested by {decision.request.requestedBy.fullName}</span>
@@ -344,7 +395,7 @@ export default function ApprovalsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="text-purple-600 border-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+                        className="text-chart-4 border-chart-4/30 hover:bg-chart-4/10 dark:hover:bg-chart-4/30"
                         onClick={() => setActionTarget({ decision, action: "REWORK" })}
                       >
                         <RotateCcw className="w-4 h-4 mr-1" />
@@ -374,103 +425,149 @@ export default function ApprovalsPage() {
             ))}
           </div>
         )
+      ) : /* ---- MY REQUESTS ---- */
+      myRequests.length === 0 ? (
+        <Card>
+          <CardContent className="py-0">
+            <EmptyState
+              icon={Clock}
+              title="No requests yet"
+              description="You haven't submitted any approval requests."
+            />
+          </CardContent>
+        </Card>
       ) : (
-        /* ---- MY REQUESTS ---- */
-        myRequests.length === 0 ? (
-          <Card>
-            <CardContent className="py-0">
-              <EmptyState
-                icon={Clock}
-                title="No requests yet"
-                description="You haven't submitted any approval requests."
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {myRequests.map((req) => {
-              const config = statusConfig[req.status] || statusConfig.PENDING;
-              const totalSteps = req.decisions.filter((d) => d.signatureLabel).length || req.decisions.length;
-              const completedSteps = req.decisions.filter((d) => d.status === "APPROVED").length;
+        <div className="space-y-3">
+          {myRequests.map((req) => {
+            const config = statusConfig[req.status] || statusConfig.PENDING;
+            const totalSteps =
+              req.decisions.filter((d) => d.signatureLabel).length || req.decisions.length;
+            const completedSteps = req.decisions.filter((d) => d.status === "APPROVED").length;
 
-              return (
-                <Card key={req.id} className="cursor-pointer hover:border-foreground/20 transition-colors" onClick={() => loadRequestDetail(req.id)}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant={config.variant} className="text-xs">{config.label}</Badge>
-                          {req.workflow && <span className="text-[10px] text-muted-foreground">{req.workflow.name}</span>}
-                        </div>
-                        <h3 className="font-medium">{req.title}</h3>
-                        <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                          <FormattedDate date={req.createdAt} variant="date" />
-                          {totalSteps > 0 && (
-                            <>
-                              <span>&middot;</span>
-                              <span>{completedSteps}/{totalSteps} steps</span>
-                            </>
-                          )}
-                          {req.completedAt && (
-                            <>
-                              <span>&middot;</span>
-                              <span>Completed <FormattedDate date={req.completedAt} variant="date" /></span>
-                            </>
-                          )}
-                        </div>
-                        {/* Step progress bar */}
-                        {totalSteps > 1 && (
-                          <div className="flex gap-1 mt-2">
-                            {req.decisions.map((d, i) => (
-                              <div key={i} className={`h-1.5 flex-1 rounded-full ${
-                                d.status === "APPROVED" ? "bg-green-500" :
-                                d.status === "REJECTED" ? "bg-red-500" :
-                                d.status === "PENDING" ? "bg-yellow-500" :
-                                d.status === "REWORK" ? "bg-purple-500" :
-                                "bg-muted"
-                              }`} />
-                            ))}
-                          </div>
+            return (
+              <Card
+                key={req.id}
+                className="cursor-pointer hover:border-foreground/20 transition-colors"
+                onClick={() => loadRequestDetail(req.id)}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant={config.variant} className="text-xs">
+                          {config.label}
+                        </Badge>
+                        {req.workflow && (
+                          <span className="text-3xs text-muted-foreground">
+                            {req.workflow.name}
+                          </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {req.status === "PENDING" && (
-                          <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleRecall(req.id); }}>
-                            <Undo2 className="w-3.5 h-3.5 mr-1" />
-                            Recall
-                          </Button>
+                      <h3 className="font-medium">{req.title}</h3>
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                        <FormattedDate date={req.createdAt} variant="date" />
+                        {totalSteps > 0 && (
+                          <>
+                            <span>&middot;</span>
+                            <span>
+                              {completedSteps}/{totalSteps} steps
+                            </span>
+                          </>
                         )}
-                        {req.status === "REWORK" && (
-                          <Button variant="default" size="sm" onClick={(e) => { e.stopPropagation(); handleResubmit(req.id); }}>
-                            <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                            Resubmit
-                          </Button>
+                        {req.completedAt && (
+                          <>
+                            <span>&middot;</span>
+                            <span>
+                              Completed <FormattedDate date={req.completedAt} variant="date" />
+                            </span>
+                          </>
                         )}
-                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
                       </div>
+                      {/* Step progress bar */}
+                      {totalSteps > 1 && (
+                        <div className="flex gap-1 mt-2">
+                          {req.decisions.map((d, i) => (
+                            <div
+                              key={i}
+                              className={`h-1.5 flex-1 rounded-full ${
+                                d.status === "APPROVED"
+                                  ? "bg-success"
+                                  : d.status === "REJECTED"
+                                    ? "bg-destructive"
+                                    : d.status === "PENDING"
+                                      ? "bg-warning"
+                                      : d.status === "REWORK"
+                                        ? "bg-chart-4"
+                                        : "bg-muted"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )
+                    <div className="flex items-center gap-2 shrink-0">
+                      {req.status === "PENDING" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRecall(req.id);
+                          }}
+                        >
+                          <Undo2 className="w-3.5 h-3.5 mr-1" />
+                          Recall
+                        </Button>
+                      )}
+                      {req.status === "REWORK" && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleResubmit(req.id);
+                          }}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                          Resubmit
+                        </Button>
+                      )}
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       )}
 
       {/* Decision dialog */}
-      <Dialog open={!!actionTarget} onOpenChange={(open) => { if (!open) { setActionTarget(null); setComment(""); } }}>
+      <Dialog
+        open={!!actionTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActionTarget(null);
+            setComment("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {actionTarget?.action === "APPROVED" ? "Approve" : actionTarget?.action === "REWORK" ? "Request Rework" : "Reject"}
+              {actionTarget?.action === "APPROVED"
+                ? "Approve"
+                : actionTarget?.action === "REWORK"
+                  ? "Request Rework"
+                  : "Reject"}
               : {actionTarget?.decision.request.title}
             </DialogTitle>
             <DialogDescription>
               {actionTarget?.action === "APPROVED"
                 ? `Sign off as "${actionTarget?.decision.signatureLabel || "Approved"}". Add an optional comment.`
                 : actionTarget?.action === "REWORK"
-                ? "Send this back to the requester for changes. A comment explaining what needs to change is required."
-                : "Provide a reason for rejection."}
+                  ? "Send this back to the requester for changes. A comment explaining what needs to change is required."
+                  : "Provide a reason for rejection."}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -478,120 +575,169 @@ export default function ApprovalsPage() {
               value={comment}
               onChange={setComment}
               placeholder={
-                actionTarget?.action === "APPROVED" ? "Optional comment... (use @ to mention someone)" :
-                actionTarget?.action === "REWORK" ? "What needs to change?" :
-                "Reason for rejection..."
+                actionTarget?.action === "APPROVED"
+                  ? "Optional comment... (use @ to mention someone)"
+                  : actionTarget?.action === "REWORK"
+                    ? "What needs to change?"
+                    : "Reason for rejection..."
               }
               rows={3}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setActionTarget(null); setComment(""); }}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setActionTarget(null);
+                setComment("");
+              }}
+            >
+              Cancel
+            </Button>
             <Button
               onClick={handleDecision}
-              disabled={submitting || ((actionTarget?.action === "REJECTED" || actionTarget?.action === "REWORK") && !comment.trim())}
-              variant={actionTarget?.action === "APPROVED" ? "success" : actionTarget?.action === "REWORK" ? "default" : "destructive"}
+              disabled={
+                submitting ||
+                ((actionTarget?.action === "REJECTED" || actionTarget?.action === "REWORK") &&
+                  !comment.trim())
+              }
+              variant={
+                actionTarget?.action === "APPROVED"
+                  ? "success"
+                  : actionTarget?.action === "REWORK"
+                    ? "default"
+                    : "destructive"
+              }
             >
-              {submitting ? "Submitting..." : actionTarget?.action === "APPROVED" ? "Approve" : actionTarget?.action === "REWORK" ? "Request Rework" : "Reject"}
+              {submitting
+                ? "Submitting..."
+                : actionTarget?.action === "APPROVED"
+                  ? "Approve"
+                  : actionTarget?.action === "REWORK"
+                    ? "Request Rework"
+                    : "Reject"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Request detail dialog with timeline */}
-      <Dialog open={!!viewRequest} onOpenChange={(open) => { if (!open) setViewRequest(null); }}>
+      <Dialog
+        open={!!viewRequest}
+        onOpenChange={(open) => {
+          if (!open) setViewRequest(null);
+        }}
+      >
         <DialogContent className="max-w-lg">
           {loadingDetail ? (
-            <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-          ) : viewRequest && (
-            <>
-              <DialogHeader>
-                <DialogTitle>{viewRequest.title}</DialogTitle>
-                <DialogDescription>
-                  {viewRequest.workflow ? `Workflow: ${viewRequest.workflow.name}` : viewRequest.type}
-                  {viewRequest.description && ` — ${viewRequest.description}`}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4 max-h-96 overflow-y-auto">
-                {/* Status + actions */}
-                <div className="flex items-center gap-2">
-                  <Badge variant={statusConfig[viewRequest.status]?.variant || "muted"}>
-                    {statusConfig[viewRequest.status]?.label || viewRequest.status}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    Requested by {viewRequest.requestedBy.fullName} on <FormattedDate date={viewRequest.createdAt} />
-                  </span>
-                </div>
+            <div className="flex justify-center py-8">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            viewRequest && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{viewRequest.title}</DialogTitle>
+                  <DialogDescription>
+                    {viewRequest.workflow
+                      ? `Workflow: ${viewRequest.workflow.name}`
+                      : viewRequest.type}
+                    {viewRequest.description && ` — ${viewRequest.description}`}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4 max-h-96 overflow-y-auto">
+                  {/* Status + actions */}
+                  <div className="flex items-center gap-2">
+                    <Badge variant={statusConfig[viewRequest.status]?.variant || "muted"}>
+                      {statusConfig[viewRequest.status]?.label || viewRequest.status}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Requested by {viewRequest.requestedBy.fullName} on{" "}
+                      <FormattedDate date={viewRequest.createdAt} />
+                    </span>
+                  </div>
 
-                {/* Steps / Decisions */}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Approval Steps</p>
-                  <div className="space-y-2">
-                    {viewRequest.decisions
-                      .sort((a, b) => (a.step?.stepOrder || 0) - (b.step?.stepOrder || 0))
-                      .map((d) => {
-                        const stepNum = d.step?.stepOrder;
-                        const dConfig = statusConfig[d.status] || statusConfig.PENDING;
-                        return (
-                          <div key={d.id} className="flex items-start gap-3 p-2 rounded-md border">
-                            {stepNum && (
-                              <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-mono font-bold shrink-0">
-                                {stepNum}
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium">{d.group.name}</span>
-                                <Badge variant={dConfig.variant} className="text-[9px]">{dConfig.label}</Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {d.signatureLabel || "Approval"}
-                                {d.approvalMode && d.approvalMode !== "ANY" && ` · ${modeLabels[d.approvalMode]}`}
-                              </p>
-                              {d.decider && (
-                                <p className="text-xs mt-0.5">
-                                  {d.decider.fullName} — <FormattedDate date={d.decidedAt!} />
-                                </p>
-                              )}
-                              {d.comment && (
-                                <div className="flex items-start gap-1 mt-1 text-xs text-muted-foreground">
-                                  <MessageSquare className="w-3 h-3 mt-0.5 shrink-0" />
-                                  <span>{d.comment}</span>
+                  {/* Steps / Decisions */}
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+                      Approval Steps
+                    </p>
+                    <div className="space-y-2">
+                      {viewRequest.decisions
+                        .sort((a, b) => (a.step?.stepOrder || 0) - (b.step?.stepOrder || 0))
+                        .map((d) => {
+                          const stepNum = d.step?.stepOrder;
+                          const dConfig = statusConfig[d.status] || statusConfig.PENDING;
+                          return (
+                            <div
+                              key={d.id}
+                              className="flex items-start gap-3 p-2 rounded-md border"
+                            >
+                              {stepNum && (
+                                <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-mono font-bold shrink-0">
+                                  {stepNum}
                                 </div>
                               )}
-                              {d.deadlineAt && d.status === "PENDING" && (
-                                <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  Deadline: <FormattedDate date={d.deadlineAt} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium">{d.group.name}</span>
+                                  <Badge variant={dConfig.variant} className="text-4xs">
+                                    {dConfig.label}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {d.signatureLabel || "Approval"}
+                                  {d.approvalMode &&
+                                    d.approvalMode !== "ANY" &&
+                                    ` · ${modeLabels[d.approvalMode]}`}
                                 </p>
-                              )}
+                                {d.decider && (
+                                  <p className="text-xs mt-0.5">
+                                    {d.decider.fullName} — <FormattedDate date={d.decidedAt!} />
+                                  </p>
+                                )}
+                                {d.comment && (
+                                  <div className="flex items-start gap-1 mt-1 text-xs text-muted-foreground">
+                                    <MessageSquare className="w-3 h-3 mt-0.5 shrink-0" />
+                                    <span>{d.comment}</span>
+                                  </div>
+                                )}
+                                {d.deadlineAt && d.status === "PENDING" && (
+                                  <p className="text-3xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    Deadline: <FormattedDate date={d.deadlineAt} />
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                    </div>
                   </div>
-                </div>
 
-                <Separator />
+                  <Separator />
 
-                {/* Timeline — rendered via the shared component so the
+                  {/* Timeline — rendered via the shared component so the
                     ECO approval tab and this dialog stay in visual sync.
                     Requests created via the legacy approval path prior
                     to the engine fix won't have any history rows; the
                     shared component surfaces a clear message in that
                     case instead of rendering an empty section. */}
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Timeline</p>
-                  <ApprovalTimeline
-                    events={viewRequest.timeline}
-                    emptyMessage="No timeline events were recorded. This request was created before timeline tracking was added to the legacy approval path — new requests will populate a full timeline."
-                  />
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+                      Timeline
+                    </p>
+                    <ApprovalTimeline
+                      events={viewRequest.timeline}
+                      emptyMessage="No timeline events were recorded. This request was created before timeline tracking was added to the legacy approval path — new requests will populate a full timeline."
+                    />
+                  </div>
                 </div>
-              </div>
-            </>
+              </>
+            )
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

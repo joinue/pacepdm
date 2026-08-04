@@ -7,10 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Search, Loader2, X, FileText, Package } from "lucide-react";
@@ -80,9 +89,7 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
     }
     setSearchingParts(true);
     try {
-      const data = await fetchJson<SearchPart[]>(
-        `/api/parts?q=${encodeURIComponent(q)}`
-      );
+      const data = await fetchJson<SearchPart[]>(`/api/parts?q=${encodeURIComponent(q)}`);
       setPartResults((data || []).slice(0, 10));
     } catch {
       setPartResults([]);
@@ -141,20 +148,29 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
         <DialogHeader>
           <DialogTitle>Add Affected Item</DialogTitle>
           <DialogDescription>
-            Link a part (recommended) or a loose file to this ECO. Parts cascade their linked drawings, models, and specs on implement.
+            Link a part (recommended) or a loose file to this ECO. Parts cascade their linked
+            drawings, models, and specs on implement.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             <Tabs value={target} onValueChange={(v) => setTarget(v as "part" | "file")}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="part"><Package className="w-3.5 h-3.5 mr-1.5" />Part</TabsTrigger>
-                <TabsTrigger value="file"><FileText className="w-3.5 h-3.5 mr-1.5" />File</TabsTrigger>
+                <TabsTrigger value="part">
+                  <Package className="w-3.5 h-3.5 mr-1.5" />
+                  Part
+                </TabsTrigger>
+                <TabsTrigger value="file">
+                  <FileText className="w-3.5 h-3.5 mr-1.5" />
+                  File
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="part" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label>Part <span className="text-destructive">*</span></Label>
+                  <Label>
+                    Part <span className="text-destructive">*</span>
+                  </Label>
                   {selectedPart ? (
                     <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
                       <Package className="w-5 h-5 text-primary shrink-0" />
@@ -163,7 +179,8 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                           {selectedPart.partNumber} — {selectedPart.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Rev {selectedPart.revision} &middot; {selectedPart.lifecycleState} &middot; {selectedPart.category}
+                          Rev {selectedPart.revision} &middot; {selectedPart.lifecycleState}{" "}
+                          &middot; {selectedPart.category}
                         </p>
                       </div>
                       <Button
@@ -171,7 +188,10 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0 shrink-0"
-                        onClick={() => { setSelectedPart(null); setPartSearch(""); }}
+                        onClick={() => {
+                          setSelectedPart(null);
+                          setPartSearch("");
+                        }}
                       >
                         <X className="w-3.5 h-3.5" />
                       </Button>
@@ -201,11 +221,16 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                               key={p.id}
                               type="button"
                               className="w-full text-left px-3 py-2.5 text-sm hover:bg-muted/50 border-b last:border-0 flex items-center gap-3 transition-colors"
-                              onClick={() => { setSelectedPart(p); setPartResults([]); }}
+                              onClick={() => {
+                                setSelectedPart(p);
+                                setPartResults([]);
+                              }}
                             >
                               <Package className="w-4 h-4 text-muted-foreground shrink-0" />
                               <div className="min-w-0 flex-1">
-                                <span className="font-medium">{p.partNumber} — {p.name}</span>
+                                <span className="font-medium">
+                                  {p.partNumber} — {p.name}
+                                </span>
                                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                   <span>Rev {p.revision}</span>
                                   <span>&middot;</span>
@@ -230,10 +255,14 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                   <Input
                     value={toRevision}
                     onChange={(e) => setToRevision(e.target.value)}
-                    placeholder={selectedPart ? `Leave blank to auto-bump from ${selectedPart.revision}` : "Leave blank to auto-bump"}
+                    placeholder={
+                      selectedPart
+                        ? `Leave blank to auto-bump from ${selectedPart.revision}`
+                        : "Leave blank to auto-bump"
+                    }
                     maxLength={8}
                   />
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     If blank, the server bumps a single-letter revision on implement (e.g. A → B).
                   </p>
                 </div>
@@ -241,14 +270,17 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
 
               <TabsContent value="file" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label>File <span className="text-destructive">*</span></Label>
+                  <Label>
+                    File <span className="text-destructive">*</span>
+                  </Label>
                   {selectedFile ? (
                     <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
                       <FileText className="w-5 h-5 text-primary shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{selectedFile.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {selectedFile.partNumber || "No part number"} &middot; {selectedFile.lifecycleState}
+                          {selectedFile.partNumber || "No part number"} &middot;{" "}
+                          {selectedFile.lifecycleState}
                         </p>
                       </div>
                       <Button
@@ -256,7 +288,10 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0 shrink-0"
-                        onClick={() => { setSelectedFile(null); setFileSearch(""); }}
+                        onClick={() => {
+                          setSelectedFile(null);
+                          setFileSearch("");
+                        }}
                       >
                         <X className="w-3.5 h-3.5" />
                       </Button>
@@ -285,7 +320,10 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                               key={f.id}
                               type="button"
                               className="w-full text-left px-3 py-2.5 text-sm hover:bg-muted/50 border-b last:border-0 flex items-center gap-3 transition-colors"
-                              onClick={() => { setSelectedFile(f); setFileResults([]); }}
+                              onClick={() => {
+                                setSelectedFile(f);
+                                setFileResults([]);
+                              }}
                             >
                               <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
                               <div className="min-w-0 flex-1">
@@ -312,9 +350,13 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
             </Tabs>
 
             <div className="space-y-2">
-              <Label>Change Type <span className="text-destructive">*</span></Label>
+              <Label>
+                Change Type <span className="text-destructive">*</span>
+              </Label>
               <Select value={changeType} onValueChange={(v) => setChangeType(v ?? "MODIFY")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ADD">Add — Newly introduced</SelectItem>
                   <SelectItem value="MODIFY">Modify — Existing item being changed</SelectItem>
@@ -334,7 +376,9 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={close}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={!canSubmit || submitting}>
               {submitting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
               Add to ECO

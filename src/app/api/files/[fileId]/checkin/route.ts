@@ -25,7 +25,7 @@ export async function POST(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -47,7 +47,13 @@ export async function POST(
     // path or direct DB write could still land us here. The released
     // artifact stays immutable.
     if (file.isFrozen) {
-      return NextResponse.json({ error: "Cannot check in a frozen/released file. The release happened during your checkout — undo your checkout instead." }, { status: 409 });
+      return NextResponse.json(
+        {
+          error:
+            "Cannot check in a frozen/released file. The release happened during your checkout — undo your checkout instead.",
+        },
+        { status: 409 }
+      );
     }
 
     const formData = await request.formData();
@@ -83,20 +89,24 @@ export async function POST(
         const thumb = await extractThumbnail(thumbBuffer, newFile.name);
         if (thumb) {
           const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
-          const { error: thumbUploadError } = await db.storage.from("vault").upload(key, thumb.data, {
-            contentType: thumb.mimeType,
-            upsert: false,
-          });
+          const { error: thumbUploadError } = await db.storage
+            .from("vault")
+            .upload(key, thumb.data, {
+              contentType: thumb.mimeType,
+              upsert: false,
+            });
           if (thumbUploadError) {
             console.error("Thumbnail storage upload failed:", thumbUploadError);
-            thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+            thumbnailWarning =
+              "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
           } else {
             thumbnailKey = key;
           }
         }
       } catch (e) {
         console.error("Thumbnail generation failed:", e);
-        thumbnailWarning = "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
+        thumbnailWarning =
+          "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
       }
 
       await db.from("file_versions").insert({
@@ -111,21 +121,27 @@ export async function POST(
         createdAt: now,
       });
 
-      await db.from("files").update({
-        currentVersion: newVersion,
-        isCheckedOut: false,
-        checkedOutById: null,
-        checkedOutAt: null,
-        updatedAt: now,
-        thumbnailKey,
-      }).eq("id", fileId);
+      await db
+        .from("files")
+        .update({
+          currentVersion: newVersion,
+          isCheckedOut: false,
+          checkedOutById: null,
+          checkedOutAt: null,
+          updatedAt: now,
+          thumbnailKey,
+        })
+        .eq("id", fileId);
     } else {
-      await db.from("files").update({
-        isCheckedOut: false,
-        checkedOutById: null,
-        checkedOutAt: null,
-        updatedAt: now,
-      }).eq("id", fileId);
+      await db
+        .from("files")
+        .update({
+          isCheckedOut: false,
+          checkedOutById: null,
+          checkedOutAt: null,
+          updatedAt: now,
+        })
+        .eq("id", fileId);
     }
 
     await logAudit({
@@ -174,8 +190,12 @@ export async function POST(
       );
     }
 
-    const warnings = (newFile && thumbnailWarning) ? [thumbnailWarning] : undefined;
-    return NextResponse.json({ success: true, version: newFile ? newVersion : file.currentVersion, warnings });
+    const warnings = newFile && thumbnailWarning ? [thumbnailWarning] : undefined;
+    return NextResponse.json({
+      success: true,
+      version: newFile ? newVersion : file.currentVersion,
+      warnings,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to check in file";
     return NextResponse.json({ error: message }, { status: 500 });

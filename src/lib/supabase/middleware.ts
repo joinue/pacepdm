@@ -15,9 +15,7 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({
             request,
           });
@@ -45,9 +43,7 @@ export async function updateSession(request: NextRequest) {
 
   const host = request.headers.get("host") || "";
   const isAppHost =
-    host.startsWith("app.") ||
-    host.includes("localhost") ||
-    host.includes("127.0.0.1");
+    host.startsWith("app.") || host.includes("localhost") || host.includes("127.0.0.1");
 
   const pathname = request.nextUrl.pathname;
 
@@ -72,9 +68,7 @@ export async function updateSession(request: NextRequest) {
   // ── Apex domain (pacepdm.com) ───────────────────────────────────────
 
   if (!isAppHost) {
-    const appOrigin =
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-      `https://app.${host}`;
+    const appOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || `https://app.${host}`;
 
     // Public pages: serve to everyone, logged-in or not.
     if (isPublicPath) {
@@ -87,26 +81,20 @@ export async function updateSession(request: NextRequest) {
     }
 
     // Auth pages and app routes: redirect to app subdomain.
-    return NextResponse.redirect(
-      new URL(pathname + request.nextUrl.search, appOrigin)
-    );
+    return NextResponse.redirect(new URL(pathname + request.nextUrl.search, appOrigin));
   }
 
   // ── App subdomain (app.pacepdm.com) / localhost ─────────────────────
 
   // Marketing / legal pages on the app subdomain → redirect to apex.
   const isMarketingPath =
-    pathname.startsWith("/marketing") ||
-    pathname === "/privacy" ||
-    pathname === "/terms";
+    pathname.startsWith("/marketing") || pathname === "/privacy" || pathname === "/terms";
 
   if (isMarketingPath) {
     const apexOrigin =
       process.env.NEXT_PUBLIC_MARKETING_URL?.replace(/\/$/, "") ||
       `https://${host.replace(/^app\./, "")}`;
-    return NextResponse.redirect(
-      new URL(pathname + request.nextUrl.search, apexOrigin)
-    );
+    return NextResponse.redirect(new URL(pathname + request.nextUrl.search, apexOrigin));
   }
 
   // Unauthenticated users → login (except auth pages, API, shared links).

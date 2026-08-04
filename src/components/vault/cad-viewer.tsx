@@ -27,7 +27,6 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Loader2, AlertTriangle } from "lucide-react";
 
-
 // Loose typing for occt-import-js's dynamic module — the package
 // ships no .d.ts, so we keep the surface we use to a minimum and
 // describe it inline.
@@ -188,27 +187,27 @@ export function CadViewer({
         // folder. Rendered at the live canvas size — the server's
         // sharp pipeline caps it at 400px anyway.
         if (autoCaptureThumbnail && fileId) {
-          renderer.domElement.toBlob(
-            (blob) => {
-              if (!blob || cancelled) return;
-              const form = new FormData();
-              form.append("image", new File([blob], `${fileId}-thumbnail.png`, { type: "image/png" }));
-              fetch(`/api/files/${fileId}/thumbnail/set`, {
-                method: "POST",
-                body: form,
+          renderer.domElement.toBlob((blob) => {
+            if (!blob || cancelled) return;
+            const form = new FormData();
+            form.append(
+              "image",
+              new File([blob], `${fileId}-thumbnail.png`, { type: "image/png" })
+            );
+            fetch(`/api/files/${fileId}/thumbnail/set`, {
+              method: "POST",
+              body: form,
+            })
+              .then((res) => {
+                if (!cancelled && res.ok) onThumbnailCaptured?.();
               })
-                .then((res) => {
-                  if (!cancelled && res.ok) onThumbnailCaptured?.();
-                })
-                .catch((err) => {
-                  // Non-fatal: the user can still see the model in
-                  // the viewer, they just won't get a list thumbnail
-                  // this round.
-                  console.warn("[CadViewer] thumbnail auto-capture failed:", err);
-                });
-            },
-            "image/png"
-          );
+              .catch((err) => {
+                // Non-fatal: the user can still see the model in
+                // the viewer, they just won't get a list thumbnail
+                // this round.
+                console.warn("[CadViewer] thumbnail auto-capture failed:", err);
+              });
+          }, "image/png");
         }
 
         onRendered?.();
@@ -296,14 +295,15 @@ export function CadViewer({
           <AlertTriangle className="w-5 h-5 text-destructive" />
           <p className="text-sm font-medium">Couldn&apos;t render this model</p>
           <p className="text-xs text-muted-foreground max-w-sm">
-            {errorMessage || "The file could be empty, corrupted, or a format variant the viewer doesn't recognize."}
+            {errorMessage ||
+              "The file could be empty, corrupted, or a format variant the viewer doesn't recognize."}
           </p>
         </div>
       )}
       {status === "ready" && (
         // Tiny help hint in the corner so users know the mouse
         // controls before they start flailing.
-        <div className="absolute bottom-2 right-2 text-[10px] text-muted-foreground/70 bg-background/80 rounded px-2 py-0.5 pointer-events-none">
+        <div className="absolute bottom-2 right-2 text-3xs text-muted-foreground/70 bg-background/80 rounded px-2 py-0.5 pointer-events-none">
           drag: rotate &middot; scroll: zoom &middot; right-drag: pan
         </div>
       )}
@@ -362,9 +362,7 @@ async function parseOcct(buffer: ArrayBuffer, ext: string): Promise<THREE.Object
 
   const input = new Uint8Array(buffer);
   const isStep = ext === "step" || ext === "stp";
-  const result = isStep
-    ? occt.ReadStepFile?.(input, null)
-    : occt.ReadIgesFile?.(input, null);
+  const result = isStep ? occt.ReadStepFile?.(input, null) : occt.ReadIgesFile?.(input, null);
 
   if (!result || !result.success) {
     throw new Error(
@@ -400,9 +398,7 @@ async function parseOcct(buffer: ArrayBuffer, ext: string): Promise<THREE.Object
     } else {
       geometry.computeVertexNormals();
     }
-    geometry.setIndex(
-      new THREE.BufferAttribute(new Uint32Array(mesh.index.array), 1)
-    );
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.index.array), 1));
     group.add(new THREE.Mesh(geometry, material));
   }
   return group;

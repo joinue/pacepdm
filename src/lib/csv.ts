@@ -12,17 +12,51 @@
 // migration is local.
 
 /**
+ * True when a string would be interpreted as a formula by Excel / Sheets /
+ * LibreOffice rather than as text. Our exports carry user-supplied content
+ * (part names, descriptions, vendor names), so a value like
+ * `=cmd|'/c calc'!A1` in a part name executes on the machine of whoever
+ * opens the export. See CWE-1236.
+ *
+ * `-` is in the dangerous set (`-1+1+cmd|...` is a valid formula) but is
+ * also how every negative number starts, so we only treat a leading `-` as
+ * dangerous when the value isn't just a number. Numeric values are never
+ * escaped, which keeps `unitCost` and `weight` columns parsing as numbers.
+ */
+function isFormulaLike(s: string): boolean {
+  if (/^[=+@\t\r]/.test(s)) return true;
+  if (s.startsWith("-")) return !Number.isFinite(Number(s));
+  return false;
+}
+
+/**
  * Serialize a single CSV field: quote it if it contains any of comma,
  * newline, or double-quote; double up embedded quotes. Numbers, nulls,
  * and `undefined` are coerced to their string representation (empty
  * string for null/undefined). Booleans become `"true"`/`"false"`.
+ *
+ * Formula-like strings are prefixed with a single quote and force-quoted,
+ * which spreadsheets render as literal text. `parseCsvRecords` strips that
+ * prefix back off, so an export → edit → re-import round trip is lossless.
  */
 export function csvField(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "string" ? value : String(value);
-  if (/[",\r\n]/.test(s)) {
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  const raw = String(value);
+  const s = isFormulaLike(raw) ? `'${raw}` : raw;
+  if (/[",\r\n]/.test(s) || s !== raw) {
     return `"${s.replace(/"/g, '""')}"`;
   }
+  return s;
+}
+
+/**
+ * Undo the formula-injection guard applied by `csvField`. Strips exactly
+ * one leading apostrophe when what follows would have been escaped on the
+ * way out, so re-importing our own export yields the original value.
+ */
+export function unescapeCsvFormula(s: string): string {
+  if (s.startsWith("'") && isFormulaLike(s.slice(1))) return s.slice(1);
   return s;
 }
 
@@ -139,7 +173,7 @@ export function parseCsvRecords(input: string): {
     if (row.length === 1 && row[0] === "") continue; // skip blank lines
     const rec: Record<string, string> = {};
     for (let c = 0; c < headers.length; c++) {
-      rec[headers[c]] = (row[c] ?? "").trim();
+      rec[headers[c]] = unescapeCsvFormula((row[c] ?? "").trim());
     }
     rows.push(rec);
   }

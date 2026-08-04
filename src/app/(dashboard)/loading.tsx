@@ -35,7 +35,10 @@ export default function DashboardLoading() {
         <CardContent>
           <div className="space-y-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0">
+              <div
+                key={i}
+                className="flex items-center justify-between border-b pb-2 last:border-0"
+              >
                 <Skeleton className="h-4 w-64" />
                 <Skeleton className="h-3 w-20" />
               </div>

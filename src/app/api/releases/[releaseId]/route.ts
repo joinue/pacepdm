@@ -1,27 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant, notFound } from "@/lib/api-route";
 import { getReleaseById } from "@/lib/releases";
+import { z, uuid } from "@/lib/validation";
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ releaseId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { releaseId } = await params;
-    const db = getServiceClient();
-    const release = await getReleaseById(db, tenantUser.tenantId, releaseId);
-    if (!release) {
-      return NextResponse.json({ error: "Release not found" }, { status: 404 });
-    }
-    return NextResponse.json(release);
-  } catch (err) {
-    console.error("Failed to fetch release:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch release";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+const ParamsSchema = z.object({ releaseId: uuid });
+
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
+  // getReleaseById takes a raw client and scopes by the tenantId it is given,
+  // which is the caller's own.
+  const release = await getReleaseById(
+    db.unscoped("releases helper takes a raw client and scopes by the tenantId passed in"),
+    tenantUser.tenantId,
+    params.releaseId
+  );
+  if (!release) throw notFound("Release not found");
+  return release;
+});

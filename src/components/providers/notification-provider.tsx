@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  ReactNode,
+} from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useTenantUser } from "./tenant-provider";
 
@@ -164,11 +172,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             degradedRef.current = false;
             setDegraded(false);
           }
-        } else if (
-          status === "CHANNEL_ERROR" ||
-          status === "TIMED_OUT" ||
-          status === "CLOSED"
-        ) {
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           if (!degradedRef.current) {
             degradedRef.current = true;
             setDegraded(true);
@@ -213,62 +217,73 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     };
   }, [fetchCounts, fetchApprovalCount]);
 
-  const markRead = useCallback(async (notificationId: string) => {
-    try {
-      const r = await fetch("/api/notifications", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notificationId }),
-      });
-      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-      // Optimistically decrement the matching category/type bucket so
-      // the sidebar badge updates without waiting for a refetch.
-      setCounts((prev) => {
-        const notif = notifications.find((n) => n.id === notificationId);
-        if (!notif || notif.isRead) return prev;
-        const nextByType = { ...prev.byType };
-        if (notif.type in nextByType) {
-          nextByType[notif.type] = Math.max(0, nextByType[notif.type] - 1);
-        }
-        const nextByCategory = { ...prev.byCategory };
-        const link = notif.link || "";
-        if (link.startsWith("/vault")) nextByCategory.vault = Math.max(0, nextByCategory.vault - 1);
-        else if (link.startsWith("/boms")) nextByCategory.boms = Math.max(0, nextByCategory.boms - 1);
-        else if (link.startsWith("/ecos")) nextByCategory.ecos = Math.max(0, nextByCategory.ecos - 1);
-        else if (link.startsWith("/parts")) nextByCategory.parts = Math.max(0, nextByCategory.parts - 1);
-        else if (link.startsWith("/vendors")) nextByCategory.vendors = Math.max(0, nextByCategory.vendors - 1);
-        return {
-          total: Math.max(0, prev.total - 1),
-          byType: nextByType,
-          byCategory: nextByCategory,
-        };
-      });
-    } catch (err) {
-      console.error("[notifications] mark read failed", err);
-    }
-  }, [notifications]);
+  const markRead = useCallback(
+    async (notificationId: string) => {
+      try {
+        const r = await fetch("/api/notifications", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notificationId }),
+        });
+        if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
+        );
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+        // Optimistically decrement the matching category/type bucket so
+        // the sidebar badge updates without waiting for a refetch.
+        setCounts((prev) => {
+          const notif = notifications.find((n) => n.id === notificationId);
+          if (!notif || notif.isRead) return prev;
+          const nextByType = { ...prev.byType };
+          if (notif.type in nextByType) {
+            nextByType[notif.type] = Math.max(0, nextByType[notif.type] - 1);
+          }
+          const nextByCategory = { ...prev.byCategory };
+          const link = notif.link || "";
+          if (link.startsWith("/vault"))
+            nextByCategory.vault = Math.max(0, nextByCategory.vault - 1);
+          else if (link.startsWith("/boms"))
+            nextByCategory.boms = Math.max(0, nextByCategory.boms - 1);
+          else if (link.startsWith("/ecos"))
+            nextByCategory.ecos = Math.max(0, nextByCategory.ecos - 1);
+          else if (link.startsWith("/parts"))
+            nextByCategory.parts = Math.max(0, nextByCategory.parts - 1);
+          else if (link.startsWith("/vendors"))
+            nextByCategory.vendors = Math.max(0, nextByCategory.vendors - 1);
+          return {
+            total: Math.max(0, prev.total - 1),
+            byType: nextByType,
+            byCategory: nextByCategory,
+          };
+        });
+      } catch (err) {
+        console.error("[notifications] mark read failed", err);
+      }
+    },
+    [notifications]
+  );
 
-  const clearRef = useCallback(async (refId: string) => {
-    try {
-      const r = await fetch("/api/notifications", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clearRef: refId }),
-      });
-      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
-      // Refetch counts + list rather than trying to patch optimistically —
-      // we don't know how many rows the server updated, and getting the
-      // per-category bucket math wrong would leave a stale badge.
-      fetchCounts();
-      fetchNotifications();
-    } catch (err) {
-      console.error("[notifications] clearRef failed", err);
-    }
-  }, [fetchCounts, fetchNotifications]);
+  const clearRef = useCallback(
+    async (refId: string) => {
+      try {
+        const r = await fetch("/api/notifications", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clearRef: refId }),
+        });
+        if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+        // Refetch counts + list rather than trying to patch optimistically —
+        // we don't know how many rows the server updated, and getting the
+        // per-category bucket math wrong would leave a stale badge.
+        fetchCounts();
+        fetchNotifications();
+      } catch (err) {
+        console.error("[notifications] clearRef failed", err);
+      }
+    },
+    [fetchCounts, fetchNotifications]
+  );
 
   const markAllRead = useCallback(async () => {
     try {

@@ -3,11 +3,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { TenantProvider } from "@/components/providers/tenant-provider";
 import { NotificationProvider } from "@/components/providers/notification-provider";
 
-export default async function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const tenantUser = await getCurrentTenantUser();
 
   return (

@@ -5,35 +5,24 @@ import { logAudit } from "@/lib/audit";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { v4 as uuid } from "uuid";
 import { getFolderAccessScope, canViewFolder, canEditFolder } from "@/lib/folder-access";
+import { categoryForExtension } from "@/lib/file-categories";
 
 // File types the thumbnail extractor knows how to process. Files of these
 // types that are missing `thumbnailKey` get a just-in-time backfill in the
 // list endpoint below — critical for PDFs / SolidWorks files that were
 // uploaded before the extractor supported them.
-const BACKFILLABLE_EXTS = new Set(["pdf", "png", "jpg", "jpeg", "webp", "gif", "bmp", "sldprt", "sldasm", "slddrw"]);
-
-const CATEGORY_MAP: Record<string, string> = {
-  // SolidWorks native
-  sldprt: "PART",
-  sldasm: "ASSEMBLY",
-  slddrw: "DRAWING_2D",
-  // 2D drawings
-  dxf: "DRAWING_2D",
-  dwg: "DRAWING_2D",
-  // 3D models / neutral exchange formats
-  step: "MODEL_3D",
-  stp: "MODEL_3D",
-  iges: "MODEL_3D",
-  igs: "MODEL_3D",
-  stl: "MODEL_3D",
-  obj: "MODEL_3D",
-  // Documents
-  pdf: "DOCUMENT",
-  doc: "DOCUMENT",
-  docx: "DOCUMENT",
-  xls: "DOCUMENT",
-  xlsx: "DOCUMENT",
-};
+const BACKFILLABLE_EXTS = new Set([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "sldprt",
+  "sldasm",
+  "slddrw",
+]);
 
 export async function GET(request: NextRequest) {
   try {
@@ -100,10 +89,12 @@ export async function GET(request: NextRequest) {
       }
       const { data } = await db
         .from("files")
-        .select(`
+        .select(
+          `
           *,
           checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
-        `)
+        `
+        )
         .eq("tenantId", tenantUser.tenantId)
         .is("deletedAt", null)
         .eq("folderId", folderId!)
@@ -122,7 +113,9 @@ export async function GET(request: NextRequest) {
       fileIds.length > 0
         ? db
             .from("file_versions")
-            .select("fileId, version, storageKey, fileSize, createdAt, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)")
+            .select(
+              "fileId, version, storageKey, fileSize, createdAt, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)"
+            )
             .in("fileId", fileIds)
             .order("version", { ascending: false })
         : Promise.resolve({ data: [] }),
@@ -151,12 +144,14 @@ export async function GET(request: NextRequest) {
     const filesWithVersions = (files || []).map((file) => {
       const latest = versionsByFile.get(file.id)?.[0];
       const versions = latest
-        ? [{
-            version: latest.version,
-            fileSize: latest.fileSize,
-            createdAt: latest.createdAt,
-            uploadedBy: latest.uploadedBy,
-          }]
+        ? [
+            {
+              version: latest.version,
+              fileSize: latest.fileSize,
+              createdAt: latest.createdAt,
+              uploadedBy: latest.uploadedBy,
+            },
+          ]
         : [];
       return { ...file, versions };
     });
@@ -212,7 +207,8 @@ export async function GET(request: NextRequest) {
             if (!thumb) {
               // Extraction failed or returned no preview. Stamp the
               // attempt timestamp without a key so we don't retry.
-              await db.from("files")
+              await db
+                .from("files")
                 .update({ thumbnailAttemptedAt: attemptedAt })
                 .eq("id", file.id);
               return;
@@ -224,7 +220,8 @@ export async function GET(request: NextRequest) {
               .upload(newKey, thumb.data, { contentType: thumb.mimeType, upsert: false });
             if (upErr) return;
 
-            await db.from("files")
+            await db
+              .from("files")
               .update({ thumbnailKey: newKey, thumbnailAttemptedAt: attemptedAt })
               .eq("id", file.id);
             // Mutate the in-memory object so this same response includes
@@ -235,10 +232,14 @@ export async function GET(request: NextRequest) {
             // Still stamp the attempt so a transient error (network,
             // storage flake) doesn't trap the file in a reprocess loop.
             // The manual regenerate path will retry on demand.
-            await db.from("files")
+            await db
+              .from("files")
               .update({ thumbnailAttemptedAt: attemptedAt })
               .eq("id", file.id)
-              .then(() => undefined, () => undefined);
+              .then(
+                () => undefined,
+                () => undefined
+              );
           }
         })
       );
@@ -345,7 +346,10 @@ export async function POST(request: NextRequest) {
     }
 
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
-    const category = requestedCategory || CATEGORY_MAP[ext] || "OTHER";
+    // Auto-detect from the extension unless the uploader explicitly chose a
+    // category. The map lives in lib/file-categories.ts so the upload dialog
+    // can show the user the same answer before they submit.
+    const category = requestedCategory || categoryForExtension(ext) || "OTHER";
 
     // Pre-check for duplicate filename in the same folder. Done before
     // the storage upload so we never create orphan blobs for rejected files.
@@ -353,24 +357,28 @@ export async function POST(request: NextRequest) {
       .from("files")
       .select("id, name, currentVersion, isCheckedOut, checkedOutById, isFrozen, lifecycleState")
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .eq("folderId", folderId)
       .eq("name", file.name)
       .maybeSingle();
 
     if (existingFile) {
-      return NextResponse.json({
-        error: "A file with this name already exists in this folder",
-        code: "DUPLICATE_FILE",
-        existingFile: {
-          id: existingFile.id,
-          name: existingFile.name,
-          currentVersion: existingFile.currentVersion,
-          isCheckedOut: existingFile.isCheckedOut,
-          checkedOutById: existingFile.checkedOutById,
-          isFrozen: existingFile.isFrozen,
-          lifecycleState: existingFile.lifecycleState,
+      return NextResponse.json(
+        {
+          error: "A file with this name already exists in this folder",
+          code: "DUPLICATE_FILE",
+          existingFile: {
+            id: existingFile.id,
+            name: existingFile.name,
+            currentVersion: existingFile.currentVersion,
+            isCheckedOut: existingFile.isCheckedOut,
+            checkedOutById: existingFile.checkedOutById,
+            isFrozen: existingFile.isFrozen,
+            lifecycleState: existingFile.lifecycleState,
+          },
         },
-      }, { status: 409 });
+        { status: 409 }
+      );
     }
 
     const { data: lifecycle } = await db
@@ -418,14 +426,16 @@ export async function POST(request: NextRequest) {
           });
         if (thumbUploadError) {
           console.error("Thumbnail storage upload failed:", thumbUploadError);
-          thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+          thumbnailWarning =
+            "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
         } else {
           thumbnailKey = key;
         }
       }
     } catch (e) {
       console.error("Thumbnail generation failed:", e);
-      thumbnailWarning = "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
+      thumbnailWarning =
+        "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
     }
 
     const now = new Date().toISOString();
@@ -444,8 +454,13 @@ export async function POST(request: NextRequest) {
         category,
         currentVersion: 1,
         lifecycleId: lifecycle?.id ?? null,
-        lifecycleState: (requestedState && permissions.includes("*")) ? requestedState : "WIP",
-        isFrozen: (requestedState && permissions.includes("*") && (requestedState === "Released" || requestedState === "Obsolete")) ? true : false,
+        lifecycleState: requestedState && permissions.includes("*") ? requestedState : "WIP",
+        isFrozen:
+          requestedState &&
+          permissions.includes("*") &&
+          (requestedState === "Released" || requestedState === "Obsolete")
+            ? true
+            : false,
         isCheckedOut: false,
         thumbnailKey,
         createdById: tenantUser.id,
@@ -459,10 +474,13 @@ export async function POST(request: NextRequest) {
       if (fileError.code === "23505") {
         // Race condition: another upload of the same name snuck in between
         // the pre-check and the insert. Return the same enriched shape.
-        return NextResponse.json({
-          error: "A file with this name already exists in this folder",
-          code: "DUPLICATE_FILE",
-        }, { status: 409 });
+        return NextResponse.json(
+          {
+            error: "A file with this name already exists in this folder",
+            code: "DUPLICATE_FILE",
+          },
+          { status: 409 }
+        );
       }
       throw fileError;
     }

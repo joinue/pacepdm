@@ -1,6 +1,8 @@
 import { getServiceClient } from "@/lib/db";
 import { getCurrentTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { AuditLogClient } from "./audit-log-client";
+import { PageContainer } from "@/components/ui/page-container";
+import { PageHeader } from "@/components/ui/page-header";
 import { ShieldAlert } from "lucide-react";
 
 export default async function AuditLogPage() {
@@ -16,8 +18,8 @@ export default async function AuditLogPage() {
         <ShieldAlert className="w-12 h-12 text-destructive mb-4" />
         <h2 className="text-xl font-semibold mb-2">Access Denied</h2>
         <p className="text-muted-foreground max-w-md">
-          You do not have permission to view the audit log. Contact your
-          workspace administrator if you believe this is an error.
+          You do not have permission to view the audit log. Contact your workspace administrator if
+          you believe this is an error.
         </p>
       </div>
     );
@@ -33,9 +35,12 @@ export default async function AuditLogPage() {
     .limit(200);
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Audit Log</h2>
+    <PageContainer>
+      <PageHeader
+        title="Audit Log"
+        description="Every change to tenant-visible state, append-only."
+      />
       <AuditLogClient logs={logs || []} />
-    </div>
+    </PageContainer>
   );
 }

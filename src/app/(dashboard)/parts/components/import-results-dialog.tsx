@@ -3,7 +3,12 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 
 interface ImportResult {
@@ -11,7 +16,12 @@ interface ImportResult {
   updated: number;
   failed: number;
   total: number;
-  results: { row: number; partNumber: string; action: "inserted" | "updated" | "failed"; error?: string }[];
+  results: {
+    row: number;
+    partNumber: string;
+    action: "inserted" | "updated" | "failed";
+    error?: string;
+  }[];
 }
 
 interface ImportResultsDialogProps {
@@ -21,7 +31,12 @@ interface ImportResultsDialogProps {
 
 export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProps) {
   return (
-    <Dialog open={!!result} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open={!!result}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Import results</DialogTitle>
@@ -29,12 +44,11 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
             {result && (
               <>
                 {result.total} row{result.total === 1 ? "" : "s"} processed &middot;{" "}
-                <span className="text-green-600 dark:text-green-400 font-medium">{result.inserted} added</span>,{" "}
-                <span className="text-blue-600 dark:text-blue-400 font-medium">{result.updated} updated</span>
+                <span className="text-success font-medium">{result.inserted} added</span>,{" "}
+                <span className="text-info font-medium">{result.updated} updated</span>
                 {result.failed > 0 && (
                   <>
-                    ,{" "}
-                    <span className="text-destructive font-medium">{result.failed} failed</span>
+                    , <span className="text-destructive font-medium">{result.failed} failed</span>
                   </>
                 )}
               </>
@@ -59,8 +73,14 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
                     <td className="py-1.5 pr-2 font-mono">{r.partNumber || "—"}</td>
                     <td className="py-1.5 pr-2">
                       <Badge
-                        variant={r.action === "inserted" ? "success" : r.action === "updated" ? "info" : "error"}
-                        className="text-[9px] px-1 py-0"
+                        variant={
+                          r.action === "inserted"
+                            ? "success"
+                            : r.action === "updated"
+                              ? "info"
+                              : "error"
+                        }
+                        className="text-4xs px-1 py-0"
                       >
                         {r.action}
                       </Badge>
@@ -73,7 +93,9 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

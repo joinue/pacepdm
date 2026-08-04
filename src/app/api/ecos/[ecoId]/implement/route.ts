@@ -45,11 +45,11 @@ export async function POST(
     // The function re-validates this internally as defense in depth.
     const { data: eco } = await db
       .from("ecos")
-      .select("id, tenantId, status, ecoNumber, title, createdById")
+      .select("id, tenantId, status, ecoNumber, title, createdById, deletedAt")
       .eq("id", ecoId)
       .single();
 
-    if (!eco || eco.tenantId !== tenantUser.tenantId) {
+    if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) {
       return NextResponse.json({ error: "ECO not found" }, { status: 404 });
     }
     if (eco.status !== "APPROVED") {

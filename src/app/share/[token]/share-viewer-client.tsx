@@ -167,9 +167,7 @@ export function ShareViewerClient({ token }: { token: string }) {
         <div className="h-4 w-px bg-border" />
         <div className="text-xs text-muted-foreground">
           Shared {resourceLabel}
-          {metadata?.sharedByTenantName && (
-            <> &middot; from {metadata.sharedByTenantName}</>
-          )}
+          {metadata?.sharedByTenantName && <> &middot; from {metadata.sharedByTenantName}</>}
         </div>
       </div>
     </header>
@@ -247,8 +245,8 @@ export function ShareViewerClient({ token }: { token: string }) {
               Password required
             </div>
             <p className="text-xs text-muted-foreground">
-              The person who shared this {metadata?.resourceType === "bom" ? "BOM" : "file"}{" "}
-              has set a password. Enter it below to continue.
+              The person who shared this {metadata?.resourceType === "bom" ? "BOM" : "file"} has set
+              a password. Enter it below to continue.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="share-pw">Password</Label>
@@ -261,9 +259,7 @@ export function ShareViewerClient({ token }: { token: string }) {
                 autoComplete="off"
               />
             </div>
-            {unlockError && (
-              <div className="text-xs text-destructive">{unlockError}</div>
-            )}
+            {unlockError && <div className="text-xs text-destructive">{unlockError}</div>}
             <Button type="submit" disabled={unlocking || !password} className="w-full">
               {unlocking ? "Checking…" : "Unlock"}
             </Button>
@@ -280,11 +276,9 @@ export function ShareViewerClient({ token }: { token: string }) {
       <main className="flex-1 max-w-5xl w-full mx-auto p-6">
         {content?.kind === "file" && <FileContentView content={content} />}
         {content?.kind === "bom" && <BomContentView content={content} token={token} />}
-        {content?.kind === "release" && (
-          <ReleaseContentView content={content} token={token} />
-        )}
+        {content?.kind === "release" && <ReleaseContentView content={content} token={token} />}
       </main>
-      <footer className="border-t text-center py-3 text-[11px] text-muted-foreground">
+      <footer className="border-t text-center py-3 text-2xs text-muted-foreground">
         Powered by <span className="font-semibold">PACE PDM</span>
       </footer>
     </div>
@@ -334,14 +328,8 @@ function FileContentView({ content }: { content: FileContent }) {
             className="max-h-[75vh] max-w-full object-contain"
           />
         ) : content.previewType === "pdf" ? (
-          <object
-            data={content.url}
-            type="application/pdf"
-            className="w-full h-[75vh]"
-          >
-            <div className="text-sm text-muted-foreground p-4">
-              PDF preview failed to load.
-            </div>
+          <object data={content.url} type="application/pdf" className="w-full h-[75vh]">
+            <div className="text-sm text-muted-foreground p-4">PDF preview failed to load.</div>
           </object>
         ) : content.previewType === "cad" ? (
           <CadViewer
@@ -393,13 +381,7 @@ function TextPreview({ url }: { url: string }) {
 
 // ─── BOM view ──────────────────────────────────────────────────────────────
 
-function BomContentView({
-  content,
-  token,
-}: {
-  content: BomContent;
-  token: string;
-}) {
+function BomContentView({ content, token }: { content: BomContent; token: string }) {
   function handleCsvDownload() {
     // Client-side CSV so we don't need a separate server route just for
     // this (and so we never stream a large BOM through the public API).
@@ -495,13 +477,7 @@ function BomContentView({
 
 // ─── Release view ─────────────────────────────────────────────────────────
 
-function ReleaseContentView({
-  content,
-  token,
-}: {
-  content: ReleaseContent;
-  token: string;
-}) {
+function ReleaseContentView({ content, token }: { content: ReleaseContent; token: string }) {
   const { manifest } = content;
   const totalCounts = [
     `${manifest.parts.length} part${manifest.parts.length === 1 ? "" : "s"}`,
@@ -515,9 +491,7 @@ function ReleaseContentView({
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-1">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Release
-          </div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Release</div>
           <h1 className="text-2xl font-semibold truncate">{content.releaseName}</h1>
           <div className="text-sm text-muted-foreground">
             {content.ecoNumber} · released {new Date(content.releasedAt).toLocaleDateString()} ·{" "}
@@ -534,9 +508,7 @@ function ReleaseContentView({
         )}
       </div>
 
-      {content.note && (
-        <div className="rounded-lg border bg-card p-4 text-sm">{content.note}</div>
-      )}
+      {content.note && <div className="rounded-lg border bg-card p-4 text-sm">{content.note}</div>}
 
       {/* Parts */}
       <section className="space-y-2">
@@ -568,9 +540,7 @@ function ReleaseContentView({
                       {p.fromRevision ?? "—"}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{p.toRevision}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {p.lifecycleState}
-                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{p.lifecycleState}</td>
                   </tr>
                 ))}
               </tbody>
@@ -614,7 +584,7 @@ function ReleaseContentView({
                 ))}
               </tbody>
             </table>
-            <div className="text-[11px] text-muted-foreground px-3 py-2 border-t bg-muted/20">
+            <div className="text-2xs text-muted-foreground px-3 py-2 border-t bg-muted/20">
               {content.allowDownload
                 ? "Use the Download ZIP button above to get all files in one archive."
                 : "The sender hasn't enabled downloads on this link."}
@@ -656,7 +626,7 @@ function ReleaseContentView({
         </section>
       )}
 
-      <div className="text-[11px] text-muted-foreground pt-4 border-t">
+      <div className="text-2xs text-muted-foreground pt-4 border-t">
         This release is an immutable snapshot taken when {content.ecoNumber} was implemented.
       </div>
     </div>

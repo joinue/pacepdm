@@ -70,7 +70,9 @@ export function useRealtimeTable({
   // Stash the latest callback in a ref so the effect doesn't re-subscribe
   // every render just because the caller passed a new inline function.
   const onChangeRef = useRef(onChange);
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     if (!enabled) return;

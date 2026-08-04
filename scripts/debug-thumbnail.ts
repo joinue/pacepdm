@@ -20,10 +20,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  extractSolidWorksThumbnailWithReport,
-  extractThumbnail,
-} from "../src/lib/thumbnail";
+import { extractSolidWorksThumbnailWithReport, extractThumbnail } from "../src/lib/thumbnail";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -62,9 +59,7 @@ async function main() {
   const isSw = ["sldprt", "sldasm", "slddrw"].includes(ext);
 
   if (isSw) {
-    const { thumbnail, report } = await extractSolidWorksThumbnailWithReport(
-      arrayBuffer
-    );
+    const { thumbnail, report } = await extractSolidWorksThumbnailWithReport(arrayBuffer);
 
     console.log(`CFB streams found: ${report.streams.length}`);
     console.log("─".repeat(78));
@@ -120,9 +115,7 @@ async function main() {
     // Non-SolidWorks: run the generic dispatcher.
     const result = await extractThumbnail(arrayBuffer, filename);
     if (result) {
-      console.log(
-        `Thumbnail produced: YES (${result.mimeType}, ${result.data.length}b)`
-      );
+      console.log(`Thumbnail produced: YES (${result.mimeType}, ${result.data.length}b)`);
       if (outPath) {
         writeFileSync(outPath, result.data);
         console.log(`Wrote ${result.data.length}b to ${outPath}`);

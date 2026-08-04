@@ -28,7 +28,11 @@ const { tableResults, insertCalls, updateCalls, mockFrom, mockStorage } = vi.hoi
 
     chain.insert = (data: unknown) => {
       insertCalls.push({ table, data });
-      return { select: () => ({ single: () => ({ data: null, error: null }) }), data: null, error: null };
+      return {
+        select: () => ({ single: () => ({ data: null, error: null }) }),
+        data: null,
+        error: null,
+      };
     };
 
     chain.update = (data: unknown) => {
@@ -42,7 +46,9 @@ const { tableResults, insertCalls, updateCalls, mockFrom, mockStorage } = vi.hoi
       return updateChain;
     };
 
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (...args: unknown[]) => unknown;
+    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+      ...args: unknown[]
+    ) => unknown;
 
     return chain;
   }

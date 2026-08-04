@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 type EmailPrefs = {
   approval: boolean;
@@ -29,11 +31,23 @@ const DEFAULT_PREFS: EmailPrefs = {
 };
 
 const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }> = [
-  { key: "approval", label: "Approvals", hint: "You're asked to approve, or a request you made is decided" },
+  {
+    key: "approval",
+    label: "Approvals",
+    hint: "You're asked to approve, or a request you made is decided",
+  },
   { key: "eco", label: "ECOs", hint: "An ECO you're involved in changes state" },
-  { key: "transition", label: "File lifecycle", hint: "Files you own move between lifecycle states" },
+  {
+    key: "transition",
+    label: "File lifecycle",
+    hint: "Files you own move between lifecycle states",
+  },
   { key: "checkout", label: "Checkouts", hint: "A file you own is checked out or checked back in" },
-  { key: "system", label: "System notices", hint: "Low-priority announcements from this workspace" },
+  {
+    key: "system",
+    label: "System notices",
+    hint: "Low-priority announcements from this workspace",
+  },
 ];
 
 export default function ProfilePage() {
@@ -111,9 +125,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <h2 className="text-2xl font-bold">Profile</h2>
-
+    <PageContainer width="narrow">
+      <PageHeader title="Profile" />
       <Card>
         <CardHeader>
           <CardTitle>Account Details</CardTitle>
@@ -126,7 +139,9 @@ export default function ProfilePage() {
             <span className="text-muted-foreground">Email</span>
             <span className="font-medium">{user.email}</span>
             <span className="text-muted-foreground">Role</span>
-            <span><Badge variant="secondary">{user.role}</Badge></span>
+            <span>
+              <Badge variant="secondary">{user.role}</Badge>
+            </span>
             <span className="text-muted-foreground">Workspace</span>
             <span className="font-medium">{user.tenantName}</span>
           </div>
@@ -137,8 +152,8 @@ export default function ProfilePage() {
         <CardHeader>
           <CardTitle>Email Notifications</CardTitle>
           <CardDescription>
-            Pick which in-app notifications also arrive by email. Your workspace admin
-            can disable all emails from settings.
+            Pick which in-app notifications also arrive by email. Your workspace admin can disable
+            all emails from settings.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -152,9 +167,7 @@ export default function ProfilePage() {
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
                       checked={prefs[p.key]}
-                      onCheckedChange={(v) =>
-                        setPrefs((prev) => ({ ...prev, [p.key]: !!v }))
-                      }
+                      onCheckedChange={(v) => setPrefs((prev) => ({ ...prev, [p.key]: !!v }))}
                       className="mt-0.5"
                     />
                     <div>
@@ -210,6 +223,6 @@ export default function ProfilePage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

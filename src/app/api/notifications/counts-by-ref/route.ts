@@ -1,6 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant } from "@/lib/api-route";
+import { z } from "@/lib/validation";
 
 /**
  * Per-refId unread count for the current user, optionally filtered by
@@ -11,39 +10,28 @@ import { getApiTenantUser } from "@/lib/auth";
  * Example: GET /api/notifications/counts-by-ref?prefix=/boms/
  * Returns: { counts: { "<bomId>": 2, "<bomId2>": 1 } }
  */
-export async function GET(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const url = new URL(request.url);
-    const prefix = url.searchParams.get("prefix") || undefined;
+const QuerySchema = z.object({ prefix: z.string().optional() });
 
-    const db = getServiceClient();
-    let q = db
-      .from("notifications")
-      .select("refId")
-      .eq("tenantId", tenantUser.tenantId)
-      .eq("userId", tenantUser.id)
-      .eq("isRead", false)
-      .not("refId", "is", null);
+export const GET = withTenant({ query: QuerySchema }, async ({ db, tenantUser, query }) => {
+  let q = db
+    .from("notifications")
+    .select("refId")
+    .eq("userId", tenantUser.id)
+    .eq("isRead", false)
+    .not("refId", "is", null);
 
-    if (prefix) q = q.like("link", `${prefix}%`);
+  if (query.prefix) q = q.like("link", `${query.prefix}%`);
 
-    const { data, error } = await q;
-    if (error) throw error;
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
 
-    const counts: Record<string, number> = {};
-    for (const row of data || []) {
-      const id = row.refId as string | null;
-      if (!id) continue;
-      counts[id] = (counts[id] || 0) + 1;
-    }
-
-    return NextResponse.json({ counts });
-  } catch (err) {
-    console.error("[notifications.counts-by-ref]", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch counts";
-    return NextResponse.json({ error: message }, { status: 500 });
+  const counts: Record<string, number> = {};
+  for (const row of data || []) {
+    const id = row.refId as string | null;
+    if (!id) continue;
+    counts[id] = (counts[id] || 0) + 1;
   }
-}
+
+  return { counts };
+});

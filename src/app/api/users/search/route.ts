@@ -1,39 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant } from "@/lib/api-route";
+import { z } from "@/lib/validation";
 
-export async function GET(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+const QuerySchema = z.object({ q: z.string().optional() });
 
-    const q = request.nextUrl.searchParams.get("q") || "";
+export const GET = withTenant({ query: QuerySchema }, async ({ db, tenantUser, query }) => {
+  const q = query.q || "";
 
-    const db = getServiceClient();
-    // Empty q returns the first batch of active tenant members (used by the
-    // folder-access picker to populate a dropdown). Non-empty q narrows by
-    // name prefix like before.
-    let query = db
-      .from("tenant_users")
-      .select("id, fullName, email")
-      .eq("tenantId", tenantUser.tenantId)
-      .eq("isActive", true)
-      .neq("id", tenantUser.id)
-      .limit(q.length > 0 ? 10 : 50);
+  // Empty q returns the first batch of active tenant members (used by the
+  // folder-access picker to populate a dropdown). Non-empty q narrows by
+  // name prefix like before.
+  let usersQuery = db
+    .from("tenant_users")
+    .select("id, fullName, email")
+    .eq("isActive", true)
+    .neq("id", tenantUser.id)
+    .limit(q.length > 0 ? 10 : 50);
 
-    if (q.length > 0) {
-      query = query.ilike("fullName", `%${q}%`);
-    }
-
-    const { data: users } = await query;
-
-    return NextResponse.json(users || []);
-  } catch (err) {
-    console.error("GET /api/users/search failed:", err);
-    return NextResponse.json(
-      { error: "Failed to search users" },
-      { status: 500 }
-    );
+  if (q.length > 0) {
+    usersQuery = usersQuery.ilike("fullName", `%${q}%`);
   }
-}
+
+  const { data: users } = await usersQuery;
+  return users || [];
+});

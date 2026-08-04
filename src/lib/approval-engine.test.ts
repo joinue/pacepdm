@@ -40,11 +40,14 @@ const { tableResults, insertCalls, updateCalls, mockFrom } = vi.hoisted(() => {
           return updateChain;
         };
       }
-      updateChain.then = ((resolve: (v: unknown) => void) => resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
+      updateChain.then = ((resolve: (v: unknown) => void) =>
+        resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
       return updateChain;
     };
 
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (...args: unknown[]) => unknown;
+    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+      ...args: unknown[]
+    ) => unknown;
 
     return chain;
   }
@@ -69,7 +72,13 @@ vi.mock("@/lib/notifications", () => ({
 
 vi.mock("uuid", () => ({ v4: () => "mock-uuid" }));
 
-import { startWorkflow, recallRequest, findWorkflowForTrigger, processDecision, rejectForRework } from "./approval-engine";
+import {
+  startWorkflow,
+  recallRequest,
+  findWorkflowForTrigger,
+  processDecision,
+  rejectForRework,
+} from "./approval-engine";
 import { logAudit } from "./audit";
 import { notifyApprovalGroupMembers } from "./notifications";
 
@@ -115,11 +124,17 @@ describe("startWorkflow", () => {
 
   it("creates request and decisions for a single-step workflow", async () => {
     tableResults["approval_workflow_steps"] = {
-      data: [{
-        id: "step-1", groupId: "group-1", stepOrder: 1,
-        approvalMode: "ANY", signatureLabel: "Engineering Approval",
-        deadlineHours: 48, group: { id: "group-1", name: "Engineering" },
-      }],
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Engineering Approval",
+          deadlineHours: 48,
+          group: { id: "group-1", name: "Engineering" },
+        },
+      ],
       error: null,
     };
 
@@ -157,13 +172,21 @@ describe("startWorkflow", () => {
     tableResults["approval_workflow_steps"] = {
       data: [
         {
-          id: "step-1", groupId: "group-1", stepOrder: 1,
-          approvalMode: "ANY", signatureLabel: "Design", deadlineHours: null,
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Design",
+          deadlineHours: null,
           group: { id: "group-1", name: "Design Team" },
         },
         {
-          id: "step-2", groupId: "group-2", stepOrder: 2,
-          approvalMode: "ALL", signatureLabel: "QA", deadlineHours: 24,
+          id: "step-2",
+          groupId: "group-2",
+          stepOrder: 2,
+          approvalMode: "ALL",
+          signatureLabel: "QA",
+          deadlineHours: 24,
           group: { id: "group-2", name: "QA Team" },
         },
       ],
@@ -185,11 +208,17 @@ describe("startWorkflow", () => {
 
   it("notifies step 1 approval group members", async () => {
     tableResults["approval_workflow_steps"] = {
-      data: [{
-        id: "step-1", groupId: "group-1", stepOrder: 1,
-        approvalMode: "ANY", signatureLabel: "Review", deadlineHours: null,
-        group: { id: "group-1", name: "Reviewers" },
-      }],
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Review",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Reviewers" },
+        },
+      ],
       error: null,
     };
 
@@ -206,11 +235,17 @@ describe("startWorkflow", () => {
 
   it("creates audit log entry", async () => {
     tableResults["approval_workflow_steps"] = {
-      data: [{
-        id: "step-1", groupId: "group-1", stepOrder: 1,
-        approvalMode: "ANY", signatureLabel: "OK", deadlineHours: null,
-        group: { id: "group-1", name: "Team" },
-      }],
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "OK",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Team" },
+        },
+      ],
       error: null,
     };
 
@@ -229,11 +264,17 @@ describe("startWorkflow", () => {
 
   it("logs CREATED and STEP_ACTIVATED history events", async () => {
     tableResults["approval_workflow_steps"] = {
-      data: [{
-        id: "step-1", groupId: "group-1", stepOrder: 1,
-        approvalMode: "ANY", signatureLabel: "Approve", deadlineHours: null,
-        group: { id: "group-1", name: "Engineers" },
-      }],
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Approve",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Engineers" },
+        },
+      ],
       error: null,
     };
 
@@ -254,8 +295,10 @@ describe("recallRequest", () => {
   it("returns error when request not found", async () => {
     tableResults["approval_requests"] = { data: null, error: null };
     const result = await recallRequest({
-      requestId: "req-1", tenantId: "tenant-1",
-      userId: "user-1", userFullName: "John Doe",
+      requestId: "req-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "John Doe",
     });
     expect(result.error).toBe("Request not found");
   });
@@ -266,8 +309,10 @@ describe("recallRequest", () => {
       error: null,
     };
     const result = await recallRequest({
-      requestId: "req-1", tenantId: "tenant-1",
-      userId: "user-1", userFullName: "John Doe",
+      requestId: "req-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "John Doe",
     });
     expect(result.error).toBe("Only the requester can recall");
   });
@@ -278,8 +323,10 @@ describe("recallRequest", () => {
       error: null,
     };
     const result = await recallRequest({
-      requestId: "req-1", tenantId: "tenant-1",
-      userId: "user-1", userFullName: "John Doe",
+      requestId: "req-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "John Doe",
     });
     expect(result.error).toBe("Can only recall pending requests");
   });
@@ -291,8 +338,10 @@ describe("recallRequest", () => {
     };
 
     const result = await recallRequest({
-      requestId: "req-1", tenantId: "tenant-1",
-      userId: "user-1", userFullName: "John Doe",
+      requestId: "req-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "John Doe",
     });
 
     expect(result.success).toBe(true);

@@ -40,7 +40,7 @@ export async function POST(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -50,7 +50,10 @@ export async function POST(
     // Released artifact is locked — including its thumbnail. The visual
     // representation is part of what was approved.
     if (file.isFrozen) {
-      return NextResponse.json({ error: "Cannot change the thumbnail of a frozen/released file. Revise it first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot change the thumbnail of a frozen/released file. Revise it first." },
+        { status: 409 }
+      );
     }
 
     const formData = await request.formData();
@@ -71,10 +74,7 @@ export async function POST(
     }
     const MAX_BYTES = 10 * 1024 * 1024;
     if (image.size > MAX_BYTES) {
-      return NextResponse.json(
-        { error: "Image too large — 10 MB max" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Image too large — 10 MB max" }, { status: 400 });
     }
 
     // Normalise via the dispatcher. The image branch in extractThumbnail
@@ -94,25 +94,17 @@ export async function POST(
     // serve the old thumbnail. We don't bother deleting any previous
     // thumbnail object — orphaned thumbnails are cheap and harmless.
     const thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
-    const { error: upError } = await db.storage
-      .from("vault")
-      .upload(thumbnailKey, thumb.data, {
-        contentType: thumb.mimeType,
-        upsert: false,
-      });
+    const { error: upError } = await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+      contentType: thumb.mimeType,
+      upsert: false,
+    });
     if (upError) {
       console.error("Manual thumbnail upload: storage upload failed:", upError);
-      return NextResponse.json(
-        { error: "Failed to upload thumbnail to storage" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to upload thumbnail to storage" }, { status: 500 });
     }
 
     const now = new Date().toISOString();
-    await db
-      .from("files")
-      .update({ thumbnailKey, updatedAt: now })
-      .eq("id", fileId);
+    await db.from("files").update({ thumbnailKey, updatedAt: now }).eq("id", fileId);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

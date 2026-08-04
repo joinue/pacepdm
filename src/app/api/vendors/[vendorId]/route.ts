@@ -1,143 +1,116 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
+import { z, optionalString, uuid } from "@/lib/validation";
 
 function normalizeVendorName(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
 }
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ vendorId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { vendorId } = await params;
-    const db = getServiceClient();
+const UpdateVendorSchema = z
+  .object({
+    name: z.string().optional(),
+    website: optionalString,
+    contactName: optionalString,
+    contactEmail: optionalString,
+    contactPhone: optionalString,
+    notes: optionalString,
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "No changes specified" });
 
-    const { data: vendor } = await db
-      .from("vendors")
-      .select("*")
-      .eq("id", vendorId)
-      .eq("tenantId", tenantUser.tenantId)
-      .single();
+const ParamsSchema = z.object({ vendorId: uuid });
 
-    if (!vendor) {
-      return NextResponse.json({ error: "Vendor not found" }, { status: 404 });
-    }
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
+  const { data: vendor } = await db
+    .from("vendors")
+    .select("*")
+    .eq("id", params.vendorId)
+    .maybeSingle();
 
-    // Surface where this vendor is used so the detail view can show context
-    const { data: links } = await db
-      .from("part_vendors")
-      .select("id, partId, vendorPartNumber, unitCost, currency, leadTimeDays, isPrimary, part:parts!part_vendors_partId_fkey(id, partNumber, name, tenantId)")
-      .eq("vendorId", vendorId);
+  if (!vendor) throw notFound("Vendor not found");
 
-    // Filter to current tenant — defense in depth against cross-tenant joins
-    const usedBy = (links || []).filter((row) => {
-      const part = row.part as unknown as { tenantId: string } | null;
-      return part && part.tenantId === tenantUser.tenantId;
-    });
+  // Surface where this vendor is used so the detail view can show context.
+  // part_vendors has no tenantId of its own; it is reached here only after
+  // the vendor above resolved through the scoped client, and the joined
+  // part's tenant is re-checked below as defense in depth.
+  const { data: links } = await db
+    .from("part_vendors")
+    .select(
+      "id, partId, vendorPartNumber, unitCost, currency, leadTimeDays, isPrimary, part:parts!part_vendors_partId_fkey(id, partNumber, name, tenantId)"
+    )
+    .eq("vendorId", params.vendorId);
 
-    return NextResponse.json({ ...vendor, usedBy });
-  } catch (err) {
-    console.error("GET /api/vendors/[vendorId] failed:", err);
-    return NextResponse.json({ error: "Failed to fetch vendor" }, { status: 500 });
-  }
-}
+  const usedBy = (links || []).filter((row: { part: unknown }) => {
+    const part = row.part as { tenantId: string } | null;
+    return part && part.tenantId === tenantUser.tenantId;
+  });
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ vendorId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.FILE_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+  return { ...vendor, usedBy };
+});
 
-    const { vendorId } = await params;
-    const body = await request.json();
-    const db = getServiceClient();
-
+export const PUT = withTenant(
+  { permission: PERMISSIONS.FILE_EDIT, body: UpdateVendorSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body }) => {
     const { data: existing } = await db
       .from("vendors")
       .select("name")
-      .eq("id", vendorId)
-      .eq("tenantId", tenantUser.tenantId)
-      .single();
-    if (!existing) {
-      return NextResponse.json({ error: "Vendor not found" }, { status: 404 });
-    }
+      .eq("id", params.vendorId)
+      .maybeSingle();
+    if (!existing) throw notFound("Vendor not found");
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+
     if (body.name !== undefined) {
       const name = normalizeVendorName(body.name);
-      if (!name) {
-        return NextResponse.json({ error: "Vendor name cannot be empty" }, { status: 400 });
-      }
+      if (!name) throw badRequest("Vendor name cannot be empty");
       updates.name = name;
     }
-    for (const field of ["website", "contactName", "contactEmail", "contactPhone", "notes"]) {
-      if (body[field] !== undefined) {
-        updates[field] = body[field]?.trim() || null;
-      }
+    for (const field of [
+      "website",
+      "contactName",
+      "contactEmail",
+      "contactPhone",
+      "notes",
+    ] as const) {
+      if (body[field] !== undefined) updates[field] = body[field] ?? null;
     }
 
     const { data: vendor, error } = await db
       .from("vendors")
       .update(updates)
-      .eq("id", vendorId)
+      .eq("id", params.vendorId)
       .select()
       .single();
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A vendor with this name already exists" }, { status: 409 });
+        throw conflict("A vendor with this name already exists");
       }
-      throw error;
+      throw new Error(error.message);
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "vendor.update", entityType: "vendor", entityId: vendorId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "vendor.update",
+      entityType: "vendor",
+      entityId: params.vendorId,
       details: { name: vendor.name },
     });
 
-    return NextResponse.json(vendor);
-  } catch (err) {
-    console.error("PUT /api/vendors/[vendorId] failed:", err);
-    return NextResponse.json({ error: "Failed to update vendor" }, { status: 500 });
+    return vendor;
   }
-}
+);
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ vendorId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.FILE_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const { vendorId } = await params;
-    const db = getServiceClient();
-
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.FILE_EDIT, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
     const { data: existing } = await db
       .from("vendors")
       .select("name")
-      .eq("id", vendorId)
-      .eq("tenantId", tenantUser.tenantId)
-      .single();
-    if (!existing) {
-      return NextResponse.json({ error: "Vendor not found" }, { status: 404 });
-    }
+      .eq("id", params.vendorId)
+      .maybeSingle();
+    if (!existing) throw notFound("Vendor not found");
 
     // Prevent orphaning part_vendors rows. The DB FK is ON DELETE RESTRICT
     // and will refuse the delete, but we check first to return a friendly
@@ -145,26 +118,25 @@ export async function DELETE(
     const { count } = await db
       .from("part_vendors")
       .select("*", { count: "exact", head: true })
-      .eq("vendorId", vendorId);
+      .eq("vendorId", params.vendorId);
     if (count && count > 0) {
-      return NextResponse.json(
-        { error: `Cannot delete — vendor is linked to ${count} part(s). Remove from all parts first.` },
-        { status: 400 }
+      throw badRequest(
+        `Cannot delete — vendor is linked to ${count} part(s). Remove from all parts first.`
       );
     }
 
-    const { error } = await db.from("vendors").delete().eq("id", vendorId);
-    if (error) throw error;
+    const { error } = await db.from("vendors").delete().eq("id", params.vendorId);
+    if (error) throw new Error(error.message);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "vendor.delete", entityType: "vendor", entityId: vendorId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "vendor.delete",
+      entityType: "vendor",
+      entityId: params.vendorId,
       details: { name: existing.name },
     });
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("DELETE /api/vendors/[vendorId] failed:", err);
-    return NextResponse.json({ error: "Failed to delete vendor" }, { status: 500 });
+    return { success: true };
   }
-}
+);

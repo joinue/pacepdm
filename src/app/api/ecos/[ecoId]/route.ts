@@ -1,101 +1,109 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant, badRequest, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { ECO_STATUS_FLOW as VALID_TRANSITIONS } from "@/lib/status-flows";
-import { z, parseBody, optionalString } from "@/lib/validation";
+import { z, optionalString, uuid } from "@/lib/validation";
 
 // Update body: status transitions and field updates can be combined.
 // Field updates are only allowed in DRAFT (enforced after parse). The
 // state-transition rule is also enforced after parse against ECO_STATUS_FLOW.
-const UpdateEcoSchema = z.object({
-  status: z.string().optional(),
-  title: z.string().trim().min(1).optional(),
-  description: optionalString,
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
-  reason: optionalString,
-  changeType: optionalString,
-  costImpact: optionalString,
-  disposition: optionalString,
-  effectivity: optionalString,
-}).refine(
-  (v) => Object.keys(v).length > 0,
-  { message: "No changes specified" }
-);
+const UpdateEcoSchema = z
+  .object({
+    status: z.string().optional(),
+    title: z.string().trim().min(1).optional(),
+    description: optionalString,
+    priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
+    reason: optionalString,
+    changeType: optionalString,
+    costImpact: optionalString,
+    disposition: optionalString,
+    effectivity: optionalString,
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "No changes specified" });
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { ecoId } = await params;
-    const db = getServiceClient();
+const ParamsSchema = z.object({ ecoId: uuid });
 
-    // maybeSingle returns (data: null, error: null) cleanly when the row
-    // doesn't exist, instead of wrapping "0 rows" in an error object. That
-    // lets us tell an empty result apart from an actual query failure
-    // (broken join, connection drop, etc.) without parsing error codes.
-    const { data: eco, error } = await db
+const WITH_CREATOR = "*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)";
+
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) => {
+  // maybeSingle returns (data: null, error: null) cleanly when the row
+  // doesn't exist, instead of wrapping "0 rows" in an error object. That
+  // lets us tell an empty result apart from an actual query failure
+  // (broken join, connection drop, etc.) without parsing error codes.
+  const { data: eco, error } = await db
+    .from("ecos")
+    .select(WITH_CREATOR)
+    .eq("id", params.ecoId)
+    .is("deletedAt", null)
+    .maybeSingle();
+
+  if (error) throw new Error(`Query failed: ${error.message}`);
+  if (!eco) throw notFound("ECO not found");
+
+  return eco;
+});
+
+export const PUT = withTenant(
+  { permission: PERMISSIONS.ECO_EDIT, body: UpdateEcoSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body }) => {
+    const { ecoId } = params;
+    const {
+      status,
+      title,
+      description,
+      priority,
+      reason,
+      changeType,
+      costImpact,
+      disposition,
+      effectivity,
+    } = body;
+
+    const { data: eco } = await db
       .from("ecos")
-      .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
+      .select("*")
       .eq("id", ecoId)
-      .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
       .maybeSingle();
-
-    if (error) {
-      console.error(`[ecos/${ecoId}] GET failed:`, error);
-      return NextResponse.json(
-        { error: `Query failed: ${error.message}` },
-        { status: 500 }
-      );
-    }
-    if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-
-    return NextResponse.json(eco);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch ECO";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
-
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    const { ecoId } = await params;
-
-    if (!hasPermission(permissions, PERMISSIONS.ECO_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const parsed = await parseBody(request, UpdateEcoSchema);
-    if (!parsed.ok) return parsed.response;
-    const { status, title, description, priority, reason, changeType, costImpact, disposition, effectivity } = parsed.data;
-
-    const db = getServiceClient();
-
-    const { data: eco } = await db.from("ecos").select("*").eq("id", ecoId).single();
-    if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) {
-      return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-    }
+    if (!eco) throw notFound("ECO not found");
 
     const now = new Date().toISOString();
 
+    /** The ECO creator hears about every status change. notify() filters the actor. */
+    async function notifyCreator(to: string) {
+      if (!eco.createdById) return;
+      await sideEffect(
+        notify({
+          tenantId: tenantUser.tenantId,
+          userIds: [eco.createdById],
+          title: `ECO ${eco.ecoNumber} ${to.toLowerCase()}`,
+          message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${to}`,
+          type: "eco",
+          link: `/ecos`,
+          refId: eco.id,
+          actorId: tenantUser.id,
+        }),
+        `notify ECO ${eco.ecoNumber} status change`
+      );
+    }
+
     // Field updates are only legal in DRAFT — once submitted, the content is frozen.
-    const hasFieldUpdate = [title, description, priority, reason, changeType, costImpact, disposition, effectivity]
-      .some((v) => v !== undefined);
+    const hasFieldUpdate = [
+      title,
+      description,
+      priority,
+      reason,
+      changeType,
+      costImpact,
+      disposition,
+      effectivity,
+    ].some((v) => v !== undefined);
+
     if (hasFieldUpdate) {
       if (eco.status !== "DRAFT") {
-        return NextResponse.json({ error: "Can only edit fields when ECO is in DRAFT" }, { status: 400 });
+        throw badRequest("Can only edit fields when ECO is in DRAFT");
       }
 
       const updates: Record<string, unknown> = { updatedAt: now };
@@ -109,23 +117,26 @@ export async function PUT(
       if (effectivity !== undefined) updates.effectivity = effectivity;
 
       if (!status) {
-        const { data: updated, error } = await db.from("ecos").update(updates).eq("id", ecoId)
-          .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)").single();
-        if (error) throw error;
-        return NextResponse.json(updated);
+        const { data: updated, error } = await db
+          .from("ecos")
+          .update(updates)
+          .eq("id", ecoId)
+          .select(WITH_CREATOR)
+          .single();
+        if (error) throw new Error(error.message);
+        return updated;
       }
     }
 
-    // Status transition
     if (status) {
       const validNext = VALID_TRANSITIONS[eco.status] || [];
       if (!validNext.includes(status)) {
-        return NextResponse.json({
-          error: `Cannot transition from ${eco.status} to ${status}. Valid: ${validNext.join(", ") || "none"}`,
-        }, { status: 400 });
+        throw badRequest(
+          `Cannot transition from ${eco.status} to ${status}. Valid: ${validNext.join(", ") || "none"}`
+        );
       }
 
-      // Check for approval workflow on SUBMITTED or IN_REVIEW transitions
+      // Check for an approval workflow on SUBMITTED / IN_REVIEW transitions.
       if (status === "SUBMITTED" || status === "IN_REVIEW") {
         const workflow = await findWorkflowForTrigger({
           tenantId: tenantUser.tenantId,
@@ -138,7 +149,9 @@ export async function PUT(
           const result = await startWorkflow({
             tenantId: tenantUser.tenantId,
             userId: tenantUser.id,
-            userFullName: tenantUser.fullName,
+            // `fullName` is nullable on tenant_users (SSO can provision a row
+            // before a name is known). The old untyped client hid that.
+            userFullName: tenantUser.fullName ?? tenantUser.email ?? "Unknown user",
             workflowId: workflow.id,
             type: "ECO",
             entityType: "eco",
@@ -153,46 +166,39 @@ export async function PUT(
             action: "eco.status_change",
             entityType: "eco",
             entityId: ecoId,
-            details: { ecoNumber: eco.ecoNumber, from: eco.status, to: status, workflowTriggered: true },
+            details: {
+              ecoNumber: eco.ecoNumber,
+              from: eco.status,
+              to: status,
+              workflowTriggered: true,
+            },
           });
 
-          // Notify ECO creator (notify() filters the actor automatically).
-          if (eco.createdById) {
-            await sideEffect(
-              notify({
-                tenantId: tenantUser.tenantId,
-                userIds: [eco.createdById],
-                title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
-                message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
-                type: "eco",
-                link: `/ecos`,
-                refId: eco.id,
-                actorId: tenantUser.id,
-              }),
-              `notify ECO ${eco.ecoNumber} status change`
-            );
-          }
+          await notifyCreator(status);
 
-          const { data: updated } = await db.from("ecos")
-            .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
-            .eq("id", ecoId).single();
+          const { data: updated } = await db
+            .from("ecos")
+            .select(WITH_CREATOR)
+            .eq("id", ecoId)
+            .single();
 
-          return NextResponse.json({
+          return {
             ...updated,
             pendingApproval: result.success,
             message: result.success ? "ECO submitted for approval" : undefined,
-          });
+          };
         }
       }
 
       // No workflow — update status directly
-      const { data: updated, error } = await db.from("ecos")
+      const { data: updated, error } = await db
+        .from("ecos")
         .update({ status, updatedAt: now })
         .eq("id", ecoId)
-        .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName, email)")
+        .select(WITH_CREATOR)
         .single();
 
-      if (error) throw error;
+      if (error) throw new Error(error.message);
 
       await logAudit({
         tenantId: tenantUser.tenantId,
@@ -203,67 +209,39 @@ export async function PUT(
         details: { ecoNumber: eco.ecoNumber, from: eco.status, to: status },
       });
 
-      // Notify ECO creator (notify() filters the actor automatically).
-      if (eco.createdById) {
-        await sideEffect(
-          notify({
-            tenantId: tenantUser.tenantId,
-            userIds: [eco.createdById],
-            title: `ECO ${eco.ecoNumber} ${status.toLowerCase()}`,
-            message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${status}`,
-            type: "eco",
-            link: `/ecos`,
-            refId: eco.id,
-            actorId: tenantUser.id,
-          }),
-          `notify ECO ${eco.ecoNumber} status change`
-        );
-      }
+      await notifyCreator(status);
 
-      return NextResponse.json(updated);
+      return updated;
     }
 
-    return NextResponse.json({ error: "No changes specified" }, { status: 400 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update ECO";
-    return NextResponse.json({ error: message }, { status: 500 });
+    throw badRequest("No changes specified");
   }
-}
+);
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    const { ecoId } = await params;
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.ECO_EDIT, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
+    const { ecoId } = params;
 
-    if (!hasPermission(permissions, PERMISSIONS.ECO_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const db = getServiceClient();
-
-    const { data: eco } = await db.from("ecos").select("id, status, ecoNumber, tenantId, deletedAt").eq("id", ecoId).single();
-    if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) {
-      return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-    }
+    const { data: eco } = await db
+      .from("ecos")
+      .select("id, status, ecoNumber")
+      .eq("id", ecoId)
+      .is("deletedAt", null)
+      .maybeSingle();
+    if (!eco) throw notFound("ECO not found");
 
     if (eco.status !== "DRAFT" && eco.status !== "REJECTED" && eco.status !== "CLOSED") {
-      return NextResponse.json({
-        error: "Can only delete ECOs in DRAFT, REJECTED, or CLOSED status",
-      }, { status: 400 });
+      throw badRequest("Can only delete ECOs in DRAFT, REJECTED, or CLOSED status");
     }
 
     // Soft-delete: mark as deleted instead of removing the row.
     // Child rows (eco_items) are left intact for audit trail.
-    const { error: delError } = await db
+    const { error } = await db
       .from("ecos")
       .update({ deletedAt: new Date().toISOString() })
       .eq("id", ecoId);
-    if (delError) throw delError;
+    if (error) throw new Error(error.message);
 
     await logAudit({
       tenantId: tenantUser.tenantId,
@@ -274,9 +252,6 @@ export async function DELETE(
       details: { ecoNumber: eco.ecoNumber },
     });
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to delete ECO";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { success: true };
   }
-}
+);

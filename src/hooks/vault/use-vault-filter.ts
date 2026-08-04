@@ -17,10 +17,7 @@ export function useVaultFilter(files: FileItem[]) {
     return files.filter((f) => {
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        if (
-          !f.name.toLowerCase().includes(q) &&
-          !(f.partNumber || "").toLowerCase().includes(q)
-        ) {
+        if (!f.name.toLowerCase().includes(q) && !(f.partNumber || "").toLowerCase().includes(q)) {
           return false;
         }
       }
@@ -29,10 +26,7 @@ export function useVaultFilter(files: FileItem[]) {
     });
   }, [files, searchQuery, filterState]);
 
-  const lifecycleStates = useMemo(
-    () => [...new Set(files.map((f) => f.lifecycleState))],
-    [files]
-  );
+  const lifecycleStates = useMemo(() => [...new Set(files.map((f) => f.lifecycleState))], [files]);
 
   return {
     searchQuery,

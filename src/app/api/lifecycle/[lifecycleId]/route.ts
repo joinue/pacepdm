@@ -4,13 +4,14 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody } from "@/lib/validation";
 
-const UpdateLifecycleSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  isDefault: z.boolean().optional(),
-}).refine(
-  (v) => v.name !== undefined || v.isDefault !== undefined,
-  { message: "At least one field is required" }
-);
+const UpdateLifecycleSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    isDefault: z.boolean().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.isDefault !== undefined, {
+    message: "At least one field is required",
+  });
 
 export async function PUT(
   request: NextRequest,
@@ -71,7 +72,14 @@ export async function PUT(
       throw error;
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle.update", entityType: "lifecycle", entityId: lifecycleId, details: { name: lifecycle?.name } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle.update",
+      entityType: "lifecycle",
+      entityId: lifecycleId,
+      details: { name: lifecycle?.name },
+    });
 
     return NextResponse.json(lifecycle);
   } catch (err) {
@@ -112,7 +120,8 @@ export async function DELETE(
     const { count } = await db
       .from("files")
       .select("id", { count: "exact", head: true })
-      .eq("lifecycleId", lifecycleId);
+      .eq("lifecycleId", lifecycleId)
+      .is("deletedAt", null);
 
     if (count && count > 0) {
       return NextResponse.json(
@@ -126,7 +135,13 @@ export async function DELETE(
     await db.from("lifecycle_states").delete().eq("lifecycleId", lifecycleId);
     await db.from("lifecycles").delete().eq("id", lifecycleId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle.delete", entityType: "lifecycle", entityId: lifecycleId });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle.delete",
+      entityType: "lifecycle",
+      entityId: lifecycleId,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

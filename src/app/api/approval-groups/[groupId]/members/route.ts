@@ -57,9 +57,12 @@ export async function POST(
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "approval_group.member_add", entityType: "approval_group",
-      entityId: groupId, details: { memberId: userId },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "approval_group.member_add",
+      entityType: "approval_group",
+      entityId: groupId,
+      details: { memberId: userId },
     });
 
     return NextResponse.json({ success: true });
@@ -104,9 +107,12 @@ export async function DELETE(
     await db.from("approval_group_members").delete().eq("groupId", groupId).eq("userId", userId);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "approval_group.member_remove", entityType: "approval_group",
-      entityId: groupId, details: { memberId: userId },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "approval_group.member_remove",
+      entityType: "approval_group",
+      entityId: groupId,
+      details: { memberId: userId },
     });
 
     return NextResponse.json({ success: true });

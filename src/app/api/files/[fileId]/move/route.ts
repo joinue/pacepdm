@@ -28,11 +28,15 @@ export async function PUT(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    const { data: folder } = await db.from("folders").select("id, path, tenantId").eq("id", folderId).single();
+    const { data: folder } = await db
+      .from("folders")
+      .select("id, path, tenantId")
+      .eq("id", folderId)
+      .single();
     if (!folder || folder.tenantId !== tenantUser.tenantId) {
       return NextResponse.json({ error: "Target folder not found" }, { status: 404 });
     }
@@ -57,7 +61,10 @@ export async function PUT(
     // Released/Obsolete files are immutable — folder location is part
     // of the audit trail. Use Revise to drop back to WIP first.
     if (file.isFrozen) {
-      return NextResponse.json({ error: "Cannot move a frozen/released file. Revise it first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot move a frozen/released file. Revise it first." },
+        { status: 409 }
+      );
     }
 
     // Checked-out files can only be moved by the checkout owner (or admins)
@@ -65,20 +72,27 @@ export async function PUT(
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
-    const { error } = await db.from("files")
+    const { error } = await db
+      .from("files")
       .update({ folderId, updatedAt: new Date().toISOString() })
       .eq("id", fileId);
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A file with this name already exists in the target folder" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A file with this name already exists in the target folder" },
+          { status: 409 }
+        );
       }
       throw error;
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "file.move", entityType: "file", entityId: fileId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "file.move",
+      entityType: "file",
+      entityId: fileId,
       details: { name: file.name, toFolder: folder.path },
     });
 

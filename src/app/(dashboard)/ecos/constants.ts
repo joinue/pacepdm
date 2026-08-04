@@ -5,24 +5,18 @@
 // in `src/lib/status-flows.ts` — that's why it lives here rather than in
 // the shared file.
 
-export const statusVariants: Record<string, "muted" | "info" | "warning" | "success" | "error" | "purple"> = {
-  DRAFT: "muted",
-  SUBMITTED: "info",
-  IN_REVIEW: "warning",
-  APPROVED: "success",
-  REJECTED: "error",
-  IMPLEMENTED: "purple",
-  CLOSED: "muted",
-};
+// Status tone comes from the single definition in components/ui/status-badge.tsx.
+// The same ECO status renders here, in global search, and in search results;
+// three copies of the map is how they drift apart.
+import { STATUS_TONES } from "@/components/ui/status-badge";
 
-export const priorityVariants: Record<string, "muted" | "info" | "orange" | "error"> = {
-  LOW: "muted",
-  MEDIUM: "info",
-  HIGH: "orange",
-  CRITICAL: "error",
-};
+export const statusVariants = STATUS_TONES.eco;
+export const priorityVariants = STATUS_TONES.priority;
 
-export const changeTypeLabels: Record<string, { label: string; variant: "info" | "warning" | "error" }> = {
+export const changeTypeLabels: Record<
+  string,
+  { label: string; variant: "info" | "warning" | "error" }
+> = {
   ADD: { label: "Add", variant: "info" },
   MODIFY: { label: "Modify", variant: "warning" },
   REMOVE: { label: "Remove", variant: "error" },

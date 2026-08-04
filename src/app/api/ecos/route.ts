@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
     const idempotencyKey = request.headers.get("idempotency-key") || null;
 
     // Idempotency: return existing ECO if a matching key exists.
+    // Not filtered by deletedAt on purpose — ecos_tenant_idempotency_key
+    // is unique across deleted rows too, so skipping them here would make
+    // a retry-after-delete fall through to an insert that can only 23505.
     if (idempotencyKey) {
       const { data: existing } = await db
         .from("ecos")
@@ -67,7 +70,10 @@ export async function POST(request: NextRequest) {
       if (existing) return NextResponse.json(existing);
     }
 
-    // Generate ECO number based on total count for this tenant
+    // Generate ECO number based on total count for this tenant.
+    // Deliberately counts soft-deleted ECOs too: excluding them would
+    // make the next ECO reuse a number that already exists on a deleted
+    // row, and ECO numbers appear on released documentation.
     const { count } = await db
       .from("ecos")
       .select("*", { count: "exact", head: true })

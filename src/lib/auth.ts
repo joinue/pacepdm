@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import { jitProvisionSsoUser } from "@/lib/sso-jit";
 
 // Re-export shared constants so existing imports from "@/lib/auth" still work
-export { PERMISSIONS, hasPermission, permissionsExceedingActor, DEFAULT_ROLES, DEFAULT_METADATA_FIELDS } from "@/lib/permissions";
+export {
+  PERMISSIONS,
+  hasPermission,
+  permissionsExceedingActor,
+  DEFAULT_ROLES,
+  DEFAULT_METADATA_FIELDS,
+} from "@/lib/permissions";
 
 export async function getSession() {
   const supabase = await createServerSupabaseClient();
@@ -22,7 +28,9 @@ export async function requireAuth() {
 
 export async function getCurrentTenantUser() {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) redirect("/login");
   const tenantUser = await resolveTenantUser(user.id, user.email || null, user.user_metadata);
   if (!tenantUser) redirect("/onboarding");
@@ -35,7 +43,9 @@ export async function getCurrentTenantUser() {
  */
 export async function getApiTenantUser() {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return null;
   return resolveTenantUser(user.id, user.email || null, user.user_metadata);
 }
@@ -71,11 +81,13 @@ async function findTenantUser(authUserId: string) {
   const db = getServiceClient();
   const { data: tenantUser, error } = await db
     .from("tenant_users")
-    .select(`
+    .select(
+      `
       *,
       tenant:tenants(*),
       role:roles(*)
-    `)
+    `
+    )
     .eq("authUserId", authUserId)
     .eq("isActive", true)
     .single();

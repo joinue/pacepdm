@@ -41,22 +41,34 @@ function extractPermissions(role: { permissions: unknown }): string[] {
 }
 
 /**
+ * Postgres error codes meaning "this function does not exist" — the
+ * expected state when migration 012 hasn't been applied in an environment
+ * yet. PGRST202 is PostgREST's schema-cache miss; 42883 is Postgres's own
+ * undefined_function.
+ */
+const MISSING_RPC_CODES = new Set(["PGRST202", "42883"]);
+
+/**
  * Call the get_folder_access_scope RPC and return a strongly-typed scope.
  *
- * Fallback behavior: if the RPC is missing (e.g. migration 012 hasn't been
- * run yet in this environment) or the call otherwise fails, we log loudly
- * and return a fully-open scope. This keeps the vault usable during
- * deployment instead of hard-failing every folder listing with a 500.
- * Once the migration lands, the RPC responds normally and the fallback
- * path is dead code.
+ * Fallback behavior is deliberately narrow. If the RPC is *missing* (i.e.
+ * migration 012 hasn't run here), we return a fully-open scope so the
+ * vault stays usable during a deploy — folder ACLs don't exist yet in that
+ * environment, so opening up doesn't bypass anything.
+ *
+ * Any other failure — a timeout, a dropped connection, pool exhaustion —
+ * fails CLOSED by throwing. This used to catch everything and open up,
+ * which meant a transient DB blip silently disabled folder access control
+ * tenant-wide, handing every restricted folder to every user with nothing
+ * but a console.warn to show for it. A 500 on the folder listing is a much
+ * better outcome than quietly serving restricted CAD files.
  */
 export async function getFolderAccessScope(
   tenantUser: TenantUserForAccess
 ): Promise<FolderAccessScope> {
   const permissions = extractPermissions(tenantUser.role);
   const bypass =
-    hasPermission(permissions, PERMISSIONS.FOLDER_ACCESS_BYPASS) ||
-    permissions.includes("*");
+    hasPermission(permissions, PERMISSIONS.FOLDER_ACCESS_BYPASS) || permissions.includes("*");
 
   const db = getServiceClient();
   let data: unknown;
@@ -70,14 +82,21 @@ export async function getFolderAccessScope(
     if (result.error) throw result.error;
     data = result.data;
   } catch (err) {
-    // PGRST202 / "function does not exist" is the expected pre-migration
-    // state. Any other error is probably a real problem, but failing
-    // closed would lock everyone out of the vault — so we log and open.
-    console.warn(
-      "[folder-access] get_folder_access_scope RPC unavailable — falling back to open scope. Run migration 012 to enable folder ACLs.",
+    const code = (err as { code?: string } | null)?.code;
+    if (code && MISSING_RPC_CODES.has(code)) {
+      console.warn(
+        "[folder-access] get_folder_access_scope RPC does not exist — falling back to open scope. Run migration 012 to enable folder ACLs.",
+        err
+      );
+      return openScope();
+    }
+    // Anything else is a real failure. Fail closed rather than silently
+    // dropping every folder ACL in the tenant.
+    console.error(
+      "[folder-access] get_folder_access_scope failed — refusing to resolve access.",
       err
     );
-    return openScope();
+    throw err;
   }
 
   const raw = (data ?? {}) as {

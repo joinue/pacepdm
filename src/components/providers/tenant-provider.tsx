@@ -22,11 +22,7 @@ export function TenantProvider({
   tenantUser: TenantUserContext;
   children: ReactNode;
 }) {
-  return (
-    <TenantContext.Provider value={tenantUser}>
-      {children}
-    </TenantContext.Provider>
-  );
+  return <TenantContext.Provider value={tenantUser}>{children}</TenantContext.Provider>;
 }
 
 export function useTenantUser() {

@@ -13,19 +13,10 @@ interface EmptyStateProps {
  * Standard empty-state component used across all list pages
  * (Approvals, Search, Notifications, Audit Log, etc.).
  */
-export function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
-  className,
-}: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, action, className }: EmptyStateProps) {
   return (
     <div
-      className={cn(
-        "flex flex-col items-center justify-center text-center py-12 px-4",
-        className
-      )}
+      className={cn("flex flex-col items-center justify-center text-center py-12 px-4", className)}
     >
       {Icon && (
         <Icon
@@ -35,11 +26,7 @@ export function EmptyState({
         />
       )}
       <h3 className="text-sm font-medium">{title}</h3>
-      {description && (
-        <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-          {description}
-        </p>
-      )}
+      {description && <p className="text-xs text-muted-foreground mt-1 max-w-sm">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );

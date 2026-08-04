@@ -93,9 +93,12 @@ export async function POST(
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "lifecycle_state.create", entityType: "lifecycle_state",
-      entityId: state.id, details: { name, lifecycleId },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle_state.create",
+      entityType: "lifecycle_state",
+      entityId: state.id,
+      details: { name, lifecycleId },
     });
 
     return NextResponse.json(state);
@@ -163,7 +166,14 @@ export async function PUT(
 
     if (error) throw error;
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_state.update", entityType: "lifecycle_state", entityId: stateId, details: { name: state?.name, lifecycleId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle_state.update",
+      entityType: "lifecycle_state",
+      entityId: stateId,
+      details: { name: state?.name, lifecycleId },
+    });
 
     return NextResponse.json(state);
   } catch (err) {
@@ -213,7 +223,10 @@ export async function DELETE(
 
     if (transitionCount && transitionCount > 0) {
       return NextResponse.json(
-        { error: "Cannot delete: state is referenced by transitions. Remove those transitions first." },
+        {
+          error:
+            "Cannot delete: state is referenced by transitions. Remove those transitions first.",
+        },
         { status: 409 }
       );
     }
@@ -222,7 +235,8 @@ export async function DELETE(
     const { count: fileCount } = await db
       .from("files")
       .select("id", { count: "exact", head: true })
-      .eq("lifecycleState", stateId);
+      .eq("lifecycleState", stateId)
+      .is("deletedAt", null);
 
     if (fileCount && fileCount > 0) {
       return NextResponse.json(
@@ -233,7 +247,14 @@ export async function DELETE(
 
     await db.from("lifecycle_states").delete().eq("id", stateId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_state.delete", entityType: "lifecycle_state", entityId: stateId, details: { lifecycleId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle_state.delete",
+      entityType: "lifecycle_state",
+      entityId: stateId,
+      details: { lifecycleId },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

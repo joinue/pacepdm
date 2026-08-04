@@ -30,8 +30,20 @@ export async function GET(request: NextRequest) {
 
     // Verify both BOMs belong to tenant
     const [{ data: bomA }, { data: bomB }] = await Promise.all([
-      db.from("boms").select("id, name, revision, status").eq("id", bomAId).eq("tenantId", tenantUser.tenantId).single(),
-      db.from("boms").select("id, name, revision, status").eq("id", bomBId).eq("tenantId", tenantUser.tenantId).single(),
+      db
+        .from("boms")
+        .select("id, name, revision, status")
+        .eq("id", bomAId)
+        .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
+        .single(),
+      db
+        .from("boms")
+        .select("id, name, revision, status")
+        .eq("id", bomBId)
+        .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
+        .single(),
     ]);
 
     if (!bomA || !bomB) {
@@ -39,8 +51,16 @@ export async function GET(request: NextRequest) {
     }
 
     const [{ data: itemsA }, { data: itemsB }] = await Promise.all([
-      db.from("bom_items").select("id, itemNumber, partNumber, name, quantity, unit, unitCost, material, vendor").eq("bomId", bomAId).order("sortOrder"),
-      db.from("bom_items").select("id, itemNumber, partNumber, name, quantity, unit, unitCost, material, vendor").eq("bomId", bomBId).order("sortOrder"),
+      db
+        .from("bom_items")
+        .select("id, itemNumber, partNumber, name, quantity, unit, unitCost, material, vendor")
+        .eq("bomId", bomAId)
+        .order("sortOrder"),
+      db
+        .from("bom_items")
+        .select("id, itemNumber, partNumber, name, quantity, unit, unitCost, material, vendor")
+        .eq("bomId", bomBId)
+        .order("sortOrder"),
     ]);
 
     const a = (itemsA || []) as BomItemRow[];
@@ -65,11 +85,16 @@ export async function GET(request: NextRequest) {
       if (itemB) {
         matchedBIds.add(itemB.id);
         const diffs: string[] = [];
-        if (itemA.quantity !== itemB.quantity) diffs.push(`qty: ${itemA.quantity} → ${itemB.quantity}`);
-        if (itemA.unitCost !== itemB.unitCost) diffs.push(`cost: ${itemA.unitCost ?? "—"} → ${itemB.unitCost ?? "—"}`);
-        if (itemA.partNumber !== itemB.partNumber) diffs.push(`pn: ${itemA.partNumber || "—"} → ${itemB.partNumber || "—"}`);
-        if (itemA.material !== itemB.material) diffs.push(`material: ${itemA.material || "—"} → ${itemB.material || "—"}`);
-        if (itemA.vendor !== itemB.vendor) diffs.push(`vendor: ${itemA.vendor || "—"} → ${itemB.vendor || "—"}`);
+        if (itemA.quantity !== itemB.quantity)
+          diffs.push(`qty: ${itemA.quantity} → ${itemB.quantity}`);
+        if (itemA.unitCost !== itemB.unitCost)
+          diffs.push(`cost: ${itemA.unitCost ?? "—"} → ${itemB.unitCost ?? "—"}`);
+        if (itemA.partNumber !== itemB.partNumber)
+          diffs.push(`pn: ${itemA.partNumber || "—"} → ${itemB.partNumber || "—"}`);
+        if (itemA.material !== itemB.material)
+          diffs.push(`material: ${itemA.material || "—"} → ${itemB.material || "—"}`);
+        if (itemA.vendor !== itemB.vendor)
+          diffs.push(`vendor: ${itemA.vendor || "—"} → ${itemB.vendor || "—"}`);
         if (itemA.name !== itemB.name) diffs.push(`name: ${itemA.name} → ${itemB.name}`);
 
         changes.push({
@@ -81,14 +106,28 @@ export async function GET(request: NextRequest) {
           diffs,
         });
       } else {
-        changes.push({ type: "removed", itemNumber: itemA.itemNumber, name: itemA.name, a: itemA, b: null, diffs: [] });
+        changes.push({
+          type: "removed",
+          itemNumber: itemA.itemNumber,
+          name: itemA.name,
+          a: itemA,
+          b: null,
+          diffs: [],
+        });
       }
     }
 
     // Items in B that weren't matched
     for (const itemB of b) {
       if (!matchedBIds.has(itemB.id)) {
-        changes.push({ type: "added", itemNumber: itemB.itemNumber, name: itemB.name, a: null, b: itemB, diffs: [] });
+        changes.push({
+          type: "added",
+          itemNumber: itemB.itemNumber,
+          name: itemB.name,
+          a: null,
+          b: itemB,
+          diffs: [],
+        });
       }
     }
 

@@ -131,10 +131,7 @@ export function emailDomain(email: string): string | null {
   return email.slice(at + 1).toLowerCase();
 }
 
-function inferFullName(
-  metadata: Record<string, unknown> | undefined,
-  email: string
-): string {
+function inferFullName(metadata: Record<string, unknown> | undefined, email: string): string {
   if (metadata) {
     for (const key of ["full_name", "name", "fullName"]) {
       const v = metadata[key];

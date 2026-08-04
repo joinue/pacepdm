@@ -19,7 +19,8 @@ export async function GET(
   { params }: { params: Promise<{ lifecycleId: string }> }
 ) {
   try {
-    await getApiTenantUser();
+    const tenantUser = await getApiTenantUser();
+    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { lifecycleId } = await params;
     const { searchParams } = new URL(request.url);
     const fromState = searchParams.get("fromState");
@@ -29,6 +30,20 @@ export async function GET(
     }
 
     const db = getServiceClient();
+
+    // Tenant-scope the lifecycle before reading anything hanging off it.
+    // lifecycle_states and lifecycle_transitions carry no tenantId of
+    // their own, so this lookup is the only thing standing between a
+    // caller and another tenant's lifecycle configuration.
+    const { data: lifecycle } = await db
+      .from("lifecycles")
+      .select("id")
+      .eq("id", lifecycleId)
+      .eq("tenantId", tenantUser.tenantId)
+      .maybeSingle();
+    if (!lifecycle) {
+      return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
+    }
 
     // Get the state ID for the current state name
     const { data: stateRow } = await db
@@ -118,9 +133,12 @@ export async function POST(
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "lifecycle_transition.create", entityType: "lifecycle_transition",
-      entityId: transition.id, details: { name, lifecycleId },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle_transition.create",
+      entityType: "lifecycle_transition",
+      entityId: transition.id,
+      details: { name, lifecycleId },
     });
 
     return NextResponse.json(transition);
@@ -168,7 +186,14 @@ export async function DELETE(
       .eq("id", transitionId)
       .eq("lifecycleId", lifecycleId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "lifecycle_transition.delete", entityType: "lifecycle_transition", entityId: transitionId, details: { lifecycleId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle_transition.delete",
+      entityType: "lifecycle_transition",
+      entityId: transitionId,
+      details: { lifecycleId },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

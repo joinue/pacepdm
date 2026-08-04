@@ -73,18 +73,28 @@ export function CheckInDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Check In File</DialogTitle>
-          <DialogDescription>
-            Upload a new version or cancel the check-out.
-          </DialogDescription>
+          <DialogDescription>Upload a new version or cancel the check-out.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleCheckIn}>
           <div className="space-y-4 py-4">
             <div
               className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}
               onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(true);
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+              }}
               onDrop={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -104,7 +114,9 @@ export function CheckInDialog({
                 <div>
                   <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">
-                    {isDragging ? "Drop file here" : "Drag a file here, or click to browse (optional)"}
+                    {isDragging
+                      ? "Drop file here"
+                      : "Drag a file here, or click to browse (optional)"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Leave empty to cancel check-out without changes
@@ -131,19 +143,11 @@ export function CheckInDialog({
             </div>
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>
-              {loading
-                ? "Checking in..."
-                : file
-                ? "Check In New Version"
-                : "Undo Check-Out"}
+              {loading ? "Checking in..." : file ? "Check In New Version" : "Undo Check-Out"}
             </Button>
           </DialogFooter>
         </form>

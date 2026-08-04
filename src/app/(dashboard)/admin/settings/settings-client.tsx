@@ -7,11 +7,17 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Save, Building2, HardDrive, FileType, Bell, Hash } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 export interface TenantSettings {
   maxUploadSizeMb: number;
@@ -79,9 +85,8 @@ export function SettingsClient({
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <h2 className="text-2xl font-bold">Settings</h2>
-
+    <PageContainer width="narrow">
+      <PageHeader title="Settings" />
       <form onSubmit={handleSave} className="space-y-6">
         {/* Workspace */}
         <Card>
@@ -95,12 +100,7 @@ export function SettingsClient({
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Company Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
+              <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
             <div className="space-y-2">
               <Label>Workspace ID</Label>
@@ -117,9 +117,7 @@ export function SettingsClient({
               <HardDrive className="w-4 h-4 text-primary" />
               File Management
             </CardTitle>
-            <CardDescription>
-              Control upload limits and file handling behavior
-            </CardDescription>
+            <CardDescription>Control upload limits and file handling behavior</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -173,9 +171,7 @@ export function SettingsClient({
               <FileType className="w-4 h-4 text-primary" />
               Revision & Naming
             </CardTitle>
-            <CardDescription>
-              Configure how file revisions and releases are labeled
-            </CardDescription>
+            <CardDescription>Configure how file revisions and releases are labeled</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -219,9 +215,7 @@ export function SettingsClient({
               <Hash className="w-4 h-4 text-primary" />
               Part Numbering
             </CardTitle>
-            <CardDescription>
-              How new parts get a number when created
-            </CardDescription>
+            <CardDescription>How new parts get a number when created</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -258,14 +252,24 @@ export function SettingsClient({
                   min={1}
                   max={12}
                   value={settings.partNumberPadding}
-                  onChange={(e) => updateSetting("partNumberPadding", parseInt(e.target.value) || 5)}
+                  onChange={(e) =>
+                    updateSetting("partNumberPadding", parseInt(e.target.value) || 5)
+                  }
                 />
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Preview: <span className="font-mono">{settings.partNumberPrefix}{"1".padStart(settings.partNumberPadding, "0")}</span>
+              Preview:{" "}
+              <span className="font-mono">
+                {settings.partNumberPrefix}
+                {"1".padStart(settings.partNumberPadding, "0")}
+              </span>
               {", "}
-              <span className="font-mono">{settings.partNumberPrefix}{"2".padStart(settings.partNumberPadding, "0")}</span>, …
+              <span className="font-mono">
+                {settings.partNumberPrefix}
+                {"2".padStart(settings.partNumberPadding, "0")}
+              </span>
+              , …
             </p>
           </CardContent>
         </Card>
@@ -277,9 +281,7 @@ export function SettingsClient({
               <Bell className="w-4 h-4 text-primary" />
               Notifications
             </CardTitle>
-            <CardDescription>
-              Configure how workspace members receive notifications
-            </CardDescription>
+            <CardDescription>Configure how workspace members receive notifications</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <label className="flex items-start gap-3 cursor-pointer">
@@ -300,7 +302,9 @@ export function SettingsClient({
               <Label>Digest Frequency</Label>
               <Select
                 value={settings.digestFrequency}
-                onValueChange={(v) => updateSetting("digestFrequency", v as "REALTIME" | "DAILY" | "WEEKLY")}
+                onValueChange={(v) =>
+                  updateSetting("digestFrequency", v as "REALTIME" | "DAILY" | "WEEKLY")
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -323,6 +327,6 @@ export function SettingsClient({
           {saving ? "Saving..." : "Save All Settings"}
         </Button>
       </form>
-    </div>
+    </PageContainer>
   );
 }

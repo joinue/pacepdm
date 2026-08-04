@@ -83,9 +83,7 @@ describe("notify", () => {
     });
 
     expect(mockInsert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ link: "/approvals" }),
-      ])
+      expect.arrayContaining([expect.objectContaining({ link: "/approvals" })])
     );
   });
 

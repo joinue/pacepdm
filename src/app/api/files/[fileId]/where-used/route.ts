@@ -1,8 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant, notFound } from "@/lib/api-route";
 import { requireFileAccess } from "@/lib/folder-access-guards";
 import { getFileWhereUsed } from "@/lib/where-used";
+import { z, uuid } from "@/lib/validation";
 
 /**
  * GET /api/files/[fileId]/where-used
@@ -16,37 +15,28 @@ import { getFileWhereUsed } from "@/lib/where-used";
  *   - `linkedParts`    — parts that have this file attached via part_files
  *   - `ecos`           — ECOs that have touched this file via eco_items
  *
- * Access is gated through `requireFileAccess` so folder-level
- * permissions are honored. The heavy lifting lives in `lib/where-used.ts`.
+ * Role permissions are not enough here: folder ACLs are a second, independent
+ * gate, so the file is re-checked through `requireFileAccess`. The heavy
+ * lifting lives in `lib/where-used.ts`.
  */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ fileId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { fileId } = await params;
-    const db = getServiceClient();
 
-    const { data: file } = await db
-      .from("files")
-      .select("id, tenantId, folderId")
-      .eq("id", fileId)
-      .single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
-    const access = await requireFileAccess(tenantUser, file, "view");
-    if (!access.ok) return access.response;
+const ParamsSchema = z.object({ fileId: uuid });
 
-    const result = await getFileWhereUsed(db, tenantUser.tenantId, fileId);
-    return NextResponse.json(result);
-  } catch (err) {
-    console.error("Failed to fetch where-used data:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch where-used data";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
+  const { data: file } = await db
+    .from("files")
+    .select("id, tenantId, folderId, deletedAt")
+    .eq("id", params.fileId)
+    .is("deletedAt", null)
+    .maybeSingle();
+  if (!file) throw notFound("File not found");
+
+  const access = await requireFileAccess(tenantUser, file, "view");
+  if (!access.ok) return access.response;
+
+  return getFileWhereUsed(
+    db.unscoped("where-used takes a raw client and filters every joined row by the tenantId given"),
+    tenantUser.tenantId,
+    params.fileId
+  );
+});

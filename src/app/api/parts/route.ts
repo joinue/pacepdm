@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
         if (!key) return { ...row, thumbnailUrl: null };
         const { data: signed } = await db.storage.from("vault").createSignedUrl(key, 300);
         return { ...row, thumbnailUrl: signed?.signedUrl || null };
-      }),
+      })
     );
 
     return NextResponse.json(withThumbs);
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     if (!partNumber && numberSettings.mode === "MANUAL") {
       return NextResponse.json(
         { error: "Part number is required (this workspace is in manual numbering mode)" },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -152,20 +152,26 @@ export async function POST(request: NextRequest) {
       // supplied it, surface as 409. Otherwise loop and allocate the next
       // sequence value.
       if (body.partNumber) {
-        return NextResponse.json({ error: "A part with this number already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A part with this number already exists" },
+          { status: 409 }
+        );
       }
       partNumber = null;
     }
     if (!part) {
       return NextResponse.json(
         { error: lastError?.message || "Could not allocate a unique part number" },
-        { status: 409 },
+        { status: 409 }
       );
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "part.create", entityType: "part", entityId: part.id,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.create",
+      entityType: "part",
+      entityId: part.id,
       details: { partNumber: part.partNumber, name: part.name, category: part.category },
     });
 

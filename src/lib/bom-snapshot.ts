@@ -113,11 +113,11 @@ export async function captureBomSnapshot(
   // into the snapshot row (not relying on the live BOM for display).
   const { data: bom, error: bomError } = await db
     .from("boms")
-    .select("id, tenantId, name, revision, status")
+    .select("id, tenantId, name, revision, status, deletedAt")
     .eq("id", bomId)
     .maybeSingle();
   if (bomError) throw bomError;
-  if (!bom || bom.tenantId !== tenantId) {
+  if (!bom || bom.tenantId !== tenantId || bom.deletedAt) {
     throw new Error("BOM not found or not in tenant");
   }
 
@@ -147,31 +147,30 @@ export async function captureBomSnapshot(
   const items: BomSnapshotItem[] = rawItems.map((r) => {
     // Supabase returns joined rows as a single object OR a single-element
     // array depending on FK cardinality; normalize both shapes up front.
-    const part = narrowJoin(r.part) as
-      | {
-          id: string;
-          partNumber: string;
-          name: string;
-          revision: string;
-          lifecycleState: string;
-          category: string;
-          material: string | null;
-          unit: string | null;
-          unitCost: number | null;
-        }
-      | null;
-    const file = narrowJoin(r.file) as
-      | {
-          id: string;
-          name: string;
-          partNumber: string | null;
-          revision: string;
-          lifecycleState: string;
-        }
-      | null;
-    const linkedBom = narrowJoin(r.linkedBom) as
-      | { id: string; name: string; revision: string; status: string }
-      | null;
+    const part = narrowJoin(r.part) as {
+      id: string;
+      partNumber: string;
+      name: string;
+      revision: string;
+      lifecycleState: string;
+      category: string;
+      material: string | null;
+      unit: string | null;
+      unitCost: number | null;
+    } | null;
+    const file = narrowJoin(r.file) as {
+      id: string;
+      name: string;
+      partNumber: string | null;
+      revision: string;
+      lifecycleState: string;
+    } | null;
+    const linkedBom = narrowJoin(r.linkedBom) as {
+      id: string;
+      name: string;
+      revision: string;
+      status: string;
+    } | null;
 
     return {
       id: r.id as string,
@@ -204,7 +203,7 @@ export async function captureBomSnapshot(
     // logic in the existing items GET endpoint.
     const cost =
       (item.part?.unitCost ?? item.unitCost) != null
-        ? (item.part?.unitCost ?? item.unitCost) as number
+        ? ((item.part?.unitCost ?? item.unitCost) as number)
         : 0;
     flatTotalCost += cost * (item.quantity || 0);
     if (!currency) {

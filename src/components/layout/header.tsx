@@ -8,15 +8,30 @@ import { useRouter, usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuGroup, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Sun, Moon, Menu, PanelLeft, Bell, ChevronRight, CheckCheck } from "lucide-react";
+import {
+  LogOut,
+  User,
+  Sun,
+  Moon,
+  Menu,
+  PanelLeft,
+  Bell,
+  ChevronRight,
+  CheckCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useHasMounted } from "@/hooks/use-has-mounted";
 import Link from "next/link";
@@ -83,7 +98,14 @@ export function Header({
   const pathname = usePathname();
   const supabase = createClient();
   const { resolvedTheme, setTheme } = useTheme();
-  const { unreadCount, notifications, loading: loadingNotifs, refresh, markRead, markAllRead } = useNotifications();
+  const {
+    unreadCount,
+    notifications,
+    loading: loadingNotifs,
+    refresh,
+    markRead,
+    markAllRead,
+  } = useNotifications();
   const mounted = useHasMounted();
 
   const segments = pathname.split("/").filter(Boolean);
@@ -119,15 +141,20 @@ export function Header({
         const name = data.name || data.title || data.ecoNumber || null;
         if (name) setDynamicLabel(name);
       })
-      .catch(() => { /* leave the uuid as-is on failure */ });
-    return () => { cancelled = true; };
+      .catch(() => {
+        /* leave the uuid as-is on failure */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [dynamicSegment]);
 
   const crumbs = segments.map((seg, i) => {
     const isLast = i === segments.length - 1;
-    const label = isLast && dynamicSegment?.id === seg && dynamicLabel
-      ? dynamicLabel
-      : breadcrumbLabels[seg] || seg;
+    const label =
+      isLast && dynamicSegment?.id === seg && dynamicLabel
+        ? dynamicLabel
+        : breadcrumbLabels[seg] || seg;
     return {
       label,
       href: "/" + segments.slice(0, i + 1).join("/"),
@@ -152,7 +179,11 @@ export function Header({
     }
   }
 
-  async function handleClickNotification(notif: { id: string; isRead: boolean; link: string | null }) {
+  async function handleClickNotification(notif: {
+    id: string;
+    isRead: boolean;
+    link: string | null;
+  }) {
     if (!notif.isRead) {
       await markRead(notif.id);
     }
@@ -238,9 +269,7 @@ export function Header({
                 variant="ghost"
                 size="sm"
                 aria-label={
-                  unreadCount > 0
-                    ? `Notifications, ${unreadCount} unread`
-                    : "Notifications"
+                  unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
                 }
                 aria-haspopup="dialog"
                 aria-expanded={notifOpen}
@@ -250,7 +279,7 @@ export function Header({
                 {unreadCount > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary text-primary-foreground text-[9px] font-bold rounded-full flex items-center justify-center"
+                    className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-primary text-primary-foreground text-4xs font-bold rounded-full flex items-center justify-center"
                   >
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
@@ -258,7 +287,9 @@ export function Header({
                 {/* Screen-reader live region so assistive tech hears the
                     count change without having to re-enter the button. */}
                 <span className="sr-only" aria-live="polite">
-                  {unreadCount > 0 ? `${unreadCount} unread notifications` : "No unread notifications"}
+                  {unreadCount > 0
+                    ? `${unreadCount} unread notifications`
+                    : "No unread notifications"}
                 </span>
               </Button>
             }
@@ -324,7 +355,7 @@ export function Header({
                         </div>
                         {/* Actor avatar (falls back to a Bell icon for system events) */}
                         <Avatar className="w-6 h-6 mt-0.5 shrink-0">
-                          <AvatarFallback className="text-[9px] bg-foreground/8 text-foreground font-medium">
+                          <AvatarFallback className="text-4xs bg-foreground/8 text-foreground font-medium">
                             {actorInitials ?? <Bell className="w-3 h-3" />}
                           </AvatarFallback>
                         </Avatar>
@@ -334,13 +365,15 @@ export function Header({
                             <span className="text-sm font-medium truncate">{notif.title}</span>
                             <Badge
                               variant={typeBadgeVariant[notif.type] || "muted"}
-                              className="text-[10px] h-4 px-1.5 shrink-0"
+                              className="text-3xs h-4 px-1.5 shrink-0"
                             >
                               {notif.type}
                             </Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground line-clamp-2">{notif.message}</p>
-                          <span className="text-[10px] text-muted-foreground/60 mt-0.5 block">
+                          <p className="text-xs text-muted-foreground line-clamp-2">
+                            {notif.message}
+                          </p>
+                          <span className="text-3xs text-muted-foreground/60 mt-0.5 block">
                             {formatRelativeTime(notif.createdAt)}
                           </span>
                         </div>
@@ -384,11 +417,11 @@ export function Header({
             render={
               <Button variant="ghost" className="flex items-center gap-2 h-8 px-2">
                 <Avatar className="w-6 h-6">
-                  <AvatarFallback className="text-[10px] bg-foreground/8 text-foreground font-medium">
+                  <AvatarFallback className="text-3xs bg-foreground/8 text-foreground font-medium">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-[13px] hidden sm:inline">{user.fullName}</span>
+                <span className="text-sm hidden sm:inline">{user.fullName}</span>
               </Button>
             }
           />
@@ -398,7 +431,7 @@ export function Header({
                 <div className="flex flex-col">
                   <span className="text-sm font-medium">{user.fullName}</span>
                   <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
-                  <span className="text-[11px] text-muted-foreground/60 font-normal mt-0.5">
+                  <span className="text-2xs text-muted-foreground/60 font-normal mt-0.5">
                     {user.role}
                   </span>
                 </div>

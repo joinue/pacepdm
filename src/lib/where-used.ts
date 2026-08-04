@@ -100,7 +100,9 @@ export interface FileWhereUsed {
 type AnyRow = Record<string, unknown>;
 type DbClient = SupabaseClient;
 
-function sortEcosByRecency<T extends { implementedAt: string | null; createdAt: string }>(rows: T[]): T[] {
+function sortEcosByRecency<T extends { implementedAt: string | null; createdAt: string }>(
+  rows: T[]
+): T[] {
   // Most recent first. implementedAt wins when set (that's the real
   // "when did this affect production" timestamp); otherwise fall back to
   // the ECO's creation date so drafts still sort chronologically.
@@ -124,22 +126,35 @@ export async function getPartWhereUsed(
   const [bomsResult, filesResult, ecosResult] = await Promise.all([
     db
       .from("bom_items")
-      .select("quantity, unit, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId)")
+      .select(
+        "quantity, unit, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId, deletedAt)"
+      )
       .eq("partId", partId),
     db
       .from("part_files")
-      .select("role, isPrimary, file:files!part_files_fileId_fkey(id, name, fileType, category, revision, lifecycleState, tenantId)")
+      .select(
+        "role, isPrimary, file:files!part_files_fileId_fkey(id, name, fileType, category, revision, lifecycleState, tenantId, deletedAt)"
+      )
       .eq("partId", partId),
     db
       .from("eco_items")
-      .select("changeType, fromRevision, toRevision, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId)")
+      .select(
+        "changeType, fromRevision, toRevision, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId, deletedAt)"
+      )
       .eq("partId", partId),
   ]);
 
   const boms: WhereUsedBom[] = [];
   for (const row of (bomsResult.data ?? []) as AnyRow[]) {
-    const bom = row.bom as { id: string; name: string; revision: string; status: string; tenantId: string } | null;
-    if (!bom || bom.tenantId !== tenantId) continue;
+    const bom = row.bom as {
+      id: string;
+      name: string;
+      revision: string;
+      status: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!bom || bom.tenantId !== tenantId || bom.deletedAt) continue;
     boms.push({
       bomId: bom.id,
       bomName: bom.name,
@@ -152,18 +167,17 @@ export async function getPartWhereUsed(
 
   const linkedFiles: WhereUsedFile[] = [];
   for (const row of (filesResult.data ?? []) as AnyRow[]) {
-    const file = row.file as
-      | {
-          id: string;
-          name: string;
-          fileType: string;
-          category: string;
-          revision: string;
-          lifecycleState: string;
-          tenantId: string;
-        }
-      | null;
-    if (!file || file.tenantId !== tenantId) continue;
+    const file = row.file as {
+      id: string;
+      name: string;
+      fileType: string;
+      category: string;
+      revision: string;
+      lifecycleState: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!file || file.tenantId !== tenantId || file.deletedAt) continue;
     linkedFiles.push({
       fileId: file.id,
       name: file.name,
@@ -178,18 +192,17 @@ export async function getPartWhereUsed(
 
   const ecos: WhereUsedEco[] = [];
   for (const row of (ecosResult.data ?? []) as AnyRow[]) {
-    const eco = row.eco as
-      | {
-          id: string;
-          ecoNumber: string;
-          title: string;
-          status: string;
-          implementedAt: string | null;
-          createdAt: string;
-          tenantId: string;
-        }
-      | null;
-    if (!eco || eco.tenantId !== tenantId) continue;
+    const eco = row.eco as {
+      id: string;
+      ecoNumber: string;
+      title: string;
+      status: string;
+      implementedAt: string | null;
+      createdAt: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!eco || eco.tenantId !== tenantId || eco.deletedAt) continue;
     ecos.push({
       ecoId: eco.id,
       ecoNumber: eco.ecoNumber,
@@ -247,7 +260,8 @@ async function walkParentAssemblies(
     const { data: boms } = await db
       .from("boms")
       .select("id, fileId, tenantId")
-      .in("id", bomIds);
+      .in("id", bomIds)
+      .is("deletedAt", null);
 
     const fileIds = Array.from(
       new Set(
@@ -264,23 +278,24 @@ async function walkParentAssemblies(
     // without a second round-trip.
     const { data: links } = await db
       .from("part_files")
-      .select("partId, part:parts!part_files_partId_fkey(id, partNumber, name, revision, lifecycleState, category, tenantId)")
+      .select(
+        "partId, part:parts!part_files_partId_fkey(id, partNumber, name, revision, lifecycleState, category, tenantId, deletedAt)"
+      )
       .in("fileId", fileIds);
 
     const nextFrontier: string[] = [];
     for (const row of (links ?? []) as AnyRow[]) {
-      const part = row.part as
-        | {
-            id: string;
-            partNumber: string;
-            name: string;
-            revision: string;
-            lifecycleState: string;
-            category: string;
-            tenantId: string;
-          }
-        | null;
-      if (!part || part.tenantId !== tenantId) continue;
+      const part = row.part as {
+        id: string;
+        partNumber: string;
+        name: string;
+        revision: string;
+        lifecycleState: string;
+        category: string;
+        tenantId: string;
+        deletedAt: string | null;
+      } | null;
+      if (!part || part.tenantId !== tenantId || part.deletedAt) continue;
       if (visited.has(part.id)) continue;
       visited.add(part.id);
       found.push({
@@ -313,7 +328,9 @@ export async function getFileWhereUsed(
   const [bomItemsResult, representsResult, partsResult, ecosResult] = await Promise.all([
     db
       .from("bom_items")
-      .select("quantity, unit, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId)")
+      .select(
+        "quantity, unit, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId, deletedAt)"
+      )
       .eq("fileId", fileId),
     // Files that ARE the drawing the BOM is attached to — boms.fileId.
     // This is a qualitatively different signal ("this file represents
@@ -321,21 +338,33 @@ export async function getFileWhereUsed(
     db
       .from("boms")
       .select("id, name, revision, status, tenantId")
-      .eq("fileId", fileId),
+      .eq("fileId", fileId)
+      .is("deletedAt", null),
     db
       .from("part_files")
-      .select("role, isPrimary, part:parts!part_files_partId_fkey(id, partNumber, name, revision, lifecycleState, category, tenantId)")
+      .select(
+        "role, isPrimary, part:parts!part_files_partId_fkey(id, partNumber, name, revision, lifecycleState, category, tenantId, deletedAt)"
+      )
       .eq("fileId", fileId),
     db
       .from("eco_items")
-      .select("changeType, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId)")
+      .select(
+        "changeType, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId, deletedAt)"
+      )
       .eq("fileId", fileId),
   ]);
 
   const boms: WhereUsedBom[] = [];
   for (const row of (bomItemsResult.data ?? []) as AnyRow[]) {
-    const bom = row.bom as { id: string; name: string; revision: string; status: string; tenantId: string } | null;
-    if (!bom || bom.tenantId !== tenantId) continue;
+    const bom = row.bom as {
+      id: string;
+      name: string;
+      revision: string;
+      status: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!bom || bom.tenantId !== tenantId || bom.deletedAt) continue;
     boms.push({
       bomId: bom.id,
       bomName: bom.name,
@@ -364,18 +393,17 @@ export async function getFileWhereUsed(
 
   const linkedParts: WhereUsedPart[] = [];
   for (const row of (partsResult.data ?? []) as AnyRow[]) {
-    const part = row.part as
-      | {
-          id: string;
-          partNumber: string;
-          name: string;
-          revision: string;
-          lifecycleState: string;
-          category: string;
-          tenantId: string;
-        }
-      | null;
-    if (!part || part.tenantId !== tenantId) continue;
+    const part = row.part as {
+      id: string;
+      partNumber: string;
+      name: string;
+      revision: string;
+      lifecycleState: string;
+      category: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!part || part.tenantId !== tenantId || part.deletedAt) continue;
     linkedParts.push({
       partId: part.id,
       partNumber: part.partNumber,
@@ -390,18 +418,17 @@ export async function getFileWhereUsed(
 
   const ecos: WhereUsedEco[] = [];
   for (const row of (ecosResult.data ?? []) as AnyRow[]) {
-    const eco = row.eco as
-      | {
-          id: string;
-          ecoNumber: string;
-          title: string;
-          status: string;
-          implementedAt: string | null;
-          createdAt: string;
-          tenantId: string;
-        }
-      | null;
-    if (!eco || eco.tenantId !== tenantId) continue;
+    const eco = row.eco as {
+      id: string;
+      ecoNumber: string;
+      title: string;
+      status: string;
+      implementedAt: string | null;
+      createdAt: string;
+      tenantId: string;
+      deletedAt: string | null;
+    } | null;
+    if (!eco || eco.tenantId !== tenantId || eco.deletedAt) continue;
     ecos.push({
       ecoId: eco.id,
       ecoNumber: eco.ecoNumber,

@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
       // Fetch the request first so we can authorize before exposing the
       // timeline and decisions (which may include reviewer comments and
       // rework reasons that aren't safe to leak tenant-wide).
-      const { data: req } = await db.from("approval_requests").select(`
+      const { data: req } = await db
+        .from("approval_requests")
+        .select(
+          `
         *,
         requestedBy:tenant_users!approval_requests_requestedById_fkey(fullName, email),
         decisions:approval_decisions(
@@ -33,7 +36,11 @@ export async function GET(request: NextRequest) {
           step:approval_workflow_steps!approval_decisions_stepId_fkey(stepOrder, signatureLabel)
         ),
         workflow:approval_workflows!approval_requests_workflowId_fkey(name)
-      `).eq("id", requestId).eq("tenantId", tenantUser.tenantId).single();
+      `
+        )
+        .eq("id", requestId)
+        .eq("tenantId", tenantUser.tenantId)
+        .single();
 
       if (!req) return NextResponse.json({ error: "Request not found" }, { status: 404 });
 
@@ -50,6 +57,7 @@ export async function GET(request: NextRequest) {
           .select("folderId")
           .eq("id", req.entityId)
           .eq("tenantId", tenantUser.tenantId)
+          .is("deletedAt", null)
           .single();
         if (!file) {
           return NextResponse.json({ error: "Request not found" }, { status: 404 });
@@ -65,11 +73,13 @@ export async function GET(request: NextRequest) {
     // Get all my requests (submitted by me)
     const { data: myRequests } = await db
       .from("approval_requests")
-      .select(`
+      .select(
+        `
         id, type, entityType, entityId, title, status, currentStepOrder, createdAt, updatedAt, completedAt,
         workflow:approval_workflows!approval_requests_workflowId_fkey(name),
         decisions:approval_decisions(id, status, signatureLabel, group:approval_groups!approval_decisions_groupId_fkey(name))
-      `)
+      `
+      )
       .eq("tenantId", tenantUser.tenantId)
       .eq("requestedById", tenantUser.id)
       .order("createdAt", { ascending: false })

@@ -6,17 +6,32 @@
  * Schedule: every 30 min via vercel.json.
  * Auth: Vercel attaches `Authorization: Bearer ${CRON_SECRET}` when
  *       CRON_SECRET is set in project env. We reject anything else so
- *       the endpoint isn't a public notification spammer.
+ *       the endpoint isn't a public notification spammer — including
+ *       the case where CRON_SECRET itself is missing, which fails
+ *       closed (401) rather than skipping the check.
  * Dedup: `approval_reminders` (decisionId, kind='overdue') PK prevents
  *        a second reminder from ever being sent for the same decision.
  */
 
 import { NextRequest } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { getServiceClient } from "@/lib/db";
 import { notify } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/**
+ * Constant-time string compare. Length is compared first and leaks, which
+ * is fine — the secret's length isn't the secret. Matches the comparison
+ * style used for share-link tokens in lib/share-tokens.ts.
+ */
+function timingSafeEquals(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
 
 interface PendingDecision {
   id: string;
@@ -32,11 +47,17 @@ interface PendingDecision {
 
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return new Response("unauthorized", { status: 401 });
-    }
+  // Fail closed. A missing CRON_SECRET used to skip the check entirely,
+  // which turned a typo'd or unset env var in any environment into a
+  // public endpoint that fans out in-app notifications and email to
+  // every member of every overdue approval group.
+  if (!secret) {
+    console.error("[cron/approval-reminders] CRON_SECRET is not set — refusing to run");
+    return new Response("unauthorized", { status: 401 });
+  }
+  const auth = request.headers.get("authorization");
+  if (!timingSafeEquals(auth ?? "", `Bearer ${secret}`)) {
+    return new Response("unauthorized", { status: 401 });
   }
 
   const db = getServiceClient();

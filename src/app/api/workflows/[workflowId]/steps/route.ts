@@ -50,32 +50,46 @@ export async function POST(
       return NextResponse.json({ error: "Group not found" }, { status: 404 });
     }
     if (!group.isActive) {
-      return NextResponse.json({ error: "Cannot add an archived group to a workflow" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Cannot add an archived group to a workflow" },
+        { status: 400 }
+      );
     }
 
     // Get next step order
-    const { data: existing } = await db.from("approval_workflow_steps")
-      .select("stepOrder").eq("workflowId", workflowId).order("stepOrder", { ascending: false }).limit(1);
+    const { data: existing } = await db
+      .from("approval_workflow_steps")
+      .select("stepOrder")
+      .eq("workflowId", workflowId)
+      .order("stepOrder", { ascending: false })
+      .limit(1);
 
     const nextOrder = (existing && existing.length > 0 ? existing[0].stepOrder : 0) + 1;
 
-    const { data: step, error } = await db.from("approval_workflow_steps").insert({
-      id: uuid(),
-      workflowId,
-      groupId: body.groupId,
-      stepOrder: body.stepOrder ?? nextOrder,
-      approvalMode: body.approvalMode || "ANY",
-      signatureLabel: body.signatureLabel?.trim() || "Approved",
-      deadlineHours: body.deadlineHours ?? null,
-      createdAt: new Date().toISOString(),
-    }).select("*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)").single();
+    const { data: step, error } = await db
+      .from("approval_workflow_steps")
+      .insert({
+        id: uuid(),
+        workflowId,
+        groupId: body.groupId,
+        stepOrder: body.stepOrder ?? nextOrder,
+        approvalMode: body.approvalMode || "ANY",
+        signatureLabel: body.signatureLabel?.trim() || "Approved",
+        deadlineHours: body.deadlineHours ?? null,
+        createdAt: new Date().toISOString(),
+      })
+      .select("*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)")
+      .single();
 
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "workflow_step.create", entityType: "workflow_step",
-      entityId: step.id, details: { workflowId, groupId: body.groupId },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow_step.create",
+      entityType: "workflow_step",
+      entityId: step.id,
+      details: { workflowId, groupId: body.groupId },
     });
 
     return NextResponse.json(step);
@@ -120,16 +134,29 @@ export async function DELETE(
     await db.from("approval_workflow_steps").delete().eq("id", stepId).eq("workflowId", workflowId);
 
     // Re-order remaining steps
-    const { data: remaining } = await db.from("approval_workflow_steps")
-      .select("id").eq("workflowId", workflowId).order("stepOrder");
+    const { data: remaining } = await db
+      .from("approval_workflow_steps")
+      .select("id")
+      .eq("workflowId", workflowId)
+      .order("stepOrder");
 
     if (remaining) {
       for (let i = 0; i < remaining.length; i++) {
-        await db.from("approval_workflow_steps").update({ stepOrder: i + 1 }).eq("id", remaining[i].id);
+        await db
+          .from("approval_workflow_steps")
+          .update({ stepOrder: i + 1 })
+          .eq("id", remaining[i].id);
       }
     }
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow_step.delete", entityType: "workflow_step", entityId: stepId, details: { workflowId } });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow_step.delete",
+      entityType: "workflow_step",
+      entityId: stepId,
+      details: { workflowId },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -28,7 +28,7 @@ export async function POST(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -43,10 +43,7 @@ export async function POST(
     }
 
     if (file.isCheckedOut && file.checkedOutById !== tenantUser.id) {
-      return NextResponse.json(
-        { error: "File is checked out by another user" },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "File is checked out by another user" }, { status: 409 });
     }
 
     const formData = await request.formData();
@@ -91,14 +88,16 @@ export async function POST(
         });
         if (thumbUploadError) {
           console.error("Thumbnail storage upload failed:", thumbUploadError);
-          thumbnailWarning = "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
+          thumbnailWarning =
+            "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
         } else {
           thumbnailKey = key;
         }
       }
     } catch (e) {
       console.error("Thumbnail generation failed:", e);
-      thumbnailWarning = "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
+      thumbnailWarning =
+        "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
     }
 
     // Create version record
@@ -115,14 +114,17 @@ export async function POST(
     });
 
     // Update file record — clear any checkout and bump version
-    await db.from("files").update({
-      currentVersion: newVersion,
-      isCheckedOut: false,
-      checkedOutById: null,
-      checkedOutAt: null,
-      updatedAt: now,
-      thumbnailKey,
-    }).eq("id", fileId);
+    await db
+      .from("files")
+      .update({
+        currentVersion: newVersion,
+        isCheckedOut: false,
+        checkedOutById: null,
+        checkedOutAt: null,
+        updatedAt: now,
+        thumbnailKey,
+      })
+      .eq("id", fileId);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

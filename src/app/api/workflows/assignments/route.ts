@@ -54,20 +54,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data, error } = await db.from("approval_workflow_assignments").insert({
-      id: uuid(),
-      tenantId: tenantUser.tenantId,
-      workflowId,
-      transitionId: transitionId || null,
-      ecoTrigger: ecoTrigger || null,
-      createdAt: new Date().toISOString(),
-    }).select().single();
+    const { data, error } = await db
+      .from("approval_workflow_assignments")
+      .insert({
+        id: uuid(),
+        tenantId: tenantUser.tenantId,
+        workflowId,
+        transitionId: transitionId || null,
+        ecoTrigger: ecoTrigger || null,
+        createdAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "workflow_assignment.create", entityType: "workflow_assignment",
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow_assignment.create",
+      entityType: "workflow_assignment",
       entityId: data.id,
       details: { workflowId, transitionId: transitionId ?? null, ecoTrigger: ecoTrigger ?? null },
     });
@@ -95,9 +101,19 @@ export async function DELETE(request: NextRequest) {
 
     const db = getServiceClient();
 
-    await db.from("approval_workflow_assignments").delete().eq("id", assignmentId).eq("tenantId", tenantUser.tenantId);
+    await db
+      .from("approval_workflow_assignments")
+      .delete()
+      .eq("id", assignmentId)
+      .eq("tenantId", tenantUser.tenantId);
 
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "workflow_assignment.delete", entityType: "workflow_assignment", entityId: assignmentId });
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow_assignment.delete",
+      entityType: "workflow_assignment",
+      entityId: assignmentId,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

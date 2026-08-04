@@ -76,7 +76,10 @@ export async function fetchJson<T = unknown>(
 
   if (!response.ok) {
     const message =
-      (data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string"
+      (data &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof (data as { error: unknown }).error === "string"
         ? (data as { error: string }).error
         : null) ||
       (typeof data === "string" && data) ||

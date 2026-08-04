@@ -41,9 +41,7 @@ function MentionInput({
       return;
     }
     try {
-      const res = await fetch(
-        `/api/users/search?q=${encodeURIComponent(query)}`
-      );
+      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
       setShowDropdown(Array.isArray(data) && data.length > 0);
@@ -174,9 +172,7 @@ function MentionInput({
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-                index === selectedIndex
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50"
+                index === selectedIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
               )}
               onMouseDown={(e) => {
                 e.preventDefault(); // prevent textarea blur
@@ -193,9 +189,7 @@ function MentionInput({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">{user.fullName}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {user.email}
-                </p>
+                <p className="truncate text-xs text-muted-foreground">{user.email}</p>
               </div>
             </button>
           ))}

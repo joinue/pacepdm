@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
+import { withPublicRoute } from "@/lib/api-route";
 
-export async function GET() {
+/**
+ * Liveness / configuration check. Public by necessity — it is what tells you a
+ * deployment is misconfigured, so it cannot require the configuration to be
+ * correct first. Reports only whether each variable is present, never its value.
+ */
+export const GET = withPublicRoute({ name: "GET /api/health" }, async ({ db }) => {
   const checks: Record<string, string> = {};
 
   checks.SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "MISSING";
@@ -9,7 +14,6 @@ export async function GET() {
   checks.SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING";
 
   try {
-    const db = getServiceClient();
     const { data, error } = await db.from("tenants").select("id").limit(1);
     if (error) throw error;
     checks.database = `connected (${data.length} tenants found)`;
@@ -23,4 +27,4 @@ export async function GET() {
     { status: healthy ? "ok" : "error", checks },
     { status: healthy ? 200 : 500 }
   );
-}
+});

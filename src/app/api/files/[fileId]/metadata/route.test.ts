@@ -30,15 +30,22 @@ const { tableResults, updateCalls, mockFrom } = vi.hoisted(() => {
       updateCalls.push(entry);
       const updateChain: Record<string, (...args: unknown[]) => unknown> = {};
       updateChain.eq = () => updateChain;
-      updateChain.then = ((resolve: (v: unknown) => void) => resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
+      updateChain.then = ((resolve: (v: unknown) => void) =>
+        resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
       return updateChain;
     };
 
     chain.insert = () => {
-      return { select: () => ({ single: () => ({ data: null, error: null }) }), data: null, error: null };
+      return {
+        select: () => ({ single: () => ({ data: null, error: null }) }),
+        data: null,
+        error: null,
+      };
     };
 
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (...args: unknown[]) => unknown;
+    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+      ...args: unknown[]
+    ) => unknown;
 
     return chain;
   }
@@ -161,10 +168,25 @@ describe("PUT /api/files/[fileId]/metadata", () => {
     expect(res.status).toBe(200);
   });
 
-  it("allows admin to edit metadata on checked-out file", async () => {
+  // Admins are NOT exempt from the checkout lock. An admin who needs to
+  // edit someone else's checked-out file force-checks-it-out first, which
+  // makes the takeover explicit and auditable instead of silent.
+  it("blocks admin from editing a file checked out by another user", async () => {
     mockTenantUser.current = admin;
     tableResults["files"] = {
       data: { ...wipFile, isCheckedOut: true, checkedOutById: "user-other" },
+      error: null,
+    };
+    const res = await PUT(makeRequest({ description: "admin edit" }), { params });
+    expect(res.status).toBe(423);
+    const body = await res.json();
+    expect(body.error).toMatch(/checked out by another user/i);
+  });
+
+  it("allows admin to edit a file they hold the checkout on", async () => {
+    mockTenantUser.current = admin;
+    tableResults["files"] = {
+      data: { ...wipFile, isCheckedOut: true, checkedOutById: admin.id },
       error: null,
     };
     const res = await PUT(makeRequest({ description: "admin edit" }), { params });

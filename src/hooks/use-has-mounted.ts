@@ -20,7 +20,7 @@ import { useSyncExternalStore } from "react";
 export function useHasMounted(): boolean {
   return useSyncExternalStore(
     () => () => {}, // no subscription needed — there's nothing to listen to
-    () => true,     // client snapshot
-    () => false     // server snapshot
+    () => true, // client snapshot
+    () => false // server snapshot
   );
 }

@@ -1,6 +1,11 @@
 import { getServiceClient } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { notify, notifyApprovalGroupMembers, notifyFileTransition, markNotificationsReadByRef } from "@/lib/notifications";
+import {
+  notify,
+  notifyApprovalGroupMembers,
+  notifyFileTransition,
+  markNotificationsReadByRef,
+} from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -166,7 +171,12 @@ export async function startWorkflow(params: StartWorkflowParams) {
 
   // Log history
   await addHistory(requestId, "CREATED", params.userId, `Workflow started: ${params.title}`);
-  await addHistory(requestId, "STEP_ACTIVATED", null, `Step 1: ${(steps[0] as WorkflowStep).group.name} — ${(steps[0] as WorkflowStep).signatureLabel}`);
+  await addHistory(
+    requestId,
+    "STEP_ACTIVATED",
+    null,
+    `Step 1: ${(steps[0] as WorkflowStep).group.name} — ${(steps[0] as WorkflowStep).signatureLabel}`
+  );
 
   // Notify step 1 group members
   await notifyApprovalGroupMembers({
@@ -269,7 +279,12 @@ export async function processDecision({
   // name separately from `user.fullName`, so prefixing it here would
   // double it up in the timeline.
   void userFullName;
-  await addHistory(requestId, status, userId, `${decision.signatureLabel || "Approved"} — ${status}${comment ? ` — "${comment}"` : ""}`);
+  await addHistory(
+    requestId,
+    status,
+    userId,
+    `${decision.signatureLabel || "Approved"} — ${status}${comment ? ` — "${comment}"` : ""}`
+  );
 
   // Now evaluate the step based on approvalMode
   const stepId = decision.stepId;
@@ -296,9 +311,14 @@ export async function processDecision({
     stepApproved = true;
   } else if (approvalMode === "ALL") {
     // All members of the group must approve
-    const { data: groupMembers } = await db.from("approval_group_members").select("userId").eq("groupId", decision.groupId);
+    const { data: groupMembers } = await db
+      .from("approval_group_members")
+      .select("userId")
+      .eq("groupId", decision.groupId);
     const memberIds = (groupMembers || []).map((m) => m.userId);
-    const approvedBy = allStepDecisions.filter((d) => d.status === "APPROVED").map((d) => d.deciderId);
+    const approvedBy = allStepDecisions
+      .filter((d) => d.status === "APPROVED")
+      .map((d) => d.deciderId);
     stepApproved = memberIds.every((id) => approvedBy.includes(id));
     stepResolved = stepApproved; // Only resolved when all have approved
     // If not all approved yet, we need to create decisions for remaining members
@@ -316,7 +336,10 @@ export async function processDecision({
       }
     }
   } else if (approvalMode === "MAJORITY") {
-    const { data: groupMembers } = await db.from("approval_group_members").select("userId").eq("groupId", decision.groupId);
+    const { data: groupMembers } = await db
+      .from("approval_group_members")
+      .select("userId")
+      .eq("groupId", decision.groupId);
     const totalMembers = (groupMembers || []).length;
     const approvedCount = allStepDecisions.filter((d) => d.status === "APPROVED").length;
     const majority = Math.ceil(totalMembers / 2);
@@ -327,11 +350,16 @@ export async function processDecision({
   if (!stepResolved) {
     // Step not yet resolved — return partial progress
     await logAudit({
-      tenantId, userId,
+      tenantId,
+      userId,
       action: `approval.${status.toLowerCase()}`,
       entityType: request.entityType,
       entityId: request.entityId,
-      details: { title: request.title, comment: comment || null, signatureLabel: decision.signatureLabel || null },
+      details: {
+        title: request.title,
+        comment: comment || null,
+        signatureLabel: decision.signatureLabel || null,
+      },
     });
 
     return { success: true, requestComplete: false, requestStatus: "PENDING", stepResolved: false };
@@ -339,13 +367,21 @@ export async function processDecision({
 
   if (!stepApproved) {
     // Step rejected — reject the entire request
-    await db.from("approval_requests").update({
-      status: "REJECTED",
-      updatedAt: now,
-      completedAt: now,
-    }).eq("id", requestId);
+    await db
+      .from("approval_requests")
+      .update({
+        status: "REJECTED",
+        updatedAt: now,
+        completedAt: now,
+      })
+      .eq("id", requestId);
 
-    await addHistory(requestId, "REJECTED", userId, `Request rejected at step: ${decision.signatureLabel}`);
+    await addHistory(
+      requestId,
+      "REJECTED",
+      userId,
+      `Request rejected at step: ${decision.signatureLabel}`
+    );
 
     // Notify requester
     await notify({
@@ -363,7 +399,8 @@ export async function processDecision({
     await handleRequestCompletion(request, "REJECTED", tenantId, userId);
 
     await logAudit({
-      tenantId, userId,
+      tenantId,
+      userId,
       action: `approval.rejected`,
       entityType: request.entityType,
       entityId: request.entityId,
@@ -399,9 +436,11 @@ export async function processDecision({
     }
 
     // Look up the step's deadline
-    const { data: nextStepFull } = await db.from("approval_workflow_steps")
+    const { data: nextStepFull } = await db
+      .from("approval_workflow_steps")
       .select("*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)")
-      .eq("id", nextStep.stepId).single();
+      .eq("id", nextStep.stepId)
+      .single();
 
     if (nextStepFull?.deadlineHours) {
       const deadlineAt = new Date(Date.now() + nextStepFull.deadlineHours * 3600000).toISOString();
@@ -410,13 +449,20 @@ export async function processDecision({
       }
     }
 
-    await db.from("approval_requests").update({
-      currentStepOrder: nextStepData.stepOrder,
-      updatedAt: now,
-    }).eq("id", requestId);
+    await db
+      .from("approval_requests")
+      .update({
+        currentStepOrder: nextStepData.stepOrder,
+        updatedAt: now,
+      })
+      .eq("id", requestId);
 
-    await addHistory(requestId, "STEP_ACTIVATED", null,
-      `Step ${nextStepData.stepOrder}: ${nextStepFull?.group?.name || "Unknown"} — ${nextStepFull?.signatureLabel || "Approved"}`);
+    await addHistory(
+      requestId,
+      "STEP_ACTIVATED",
+      null,
+      `Step ${nextStepData.stepOrder}: ${nextStepFull?.group?.name || "Unknown"} — ${nextStepFull?.signatureLabel || "Approved"}`
+    );
 
     // Notify next step's group
     if (nextStepFull) {
@@ -432,22 +478,36 @@ export async function processDecision({
     }
 
     await logAudit({
-      tenantId, userId,
+      tenantId,
+      userId,
       action: `approval.step.approved`,
       entityType: request.entityType,
       entityId: request.entityId,
-      details: { title: request.title, step: currentStepOrder, signatureLabel: decision.signatureLabel },
+      details: {
+        title: request.title,
+        step: currentStepOrder,
+        signatureLabel: decision.signatureLabel,
+      },
     });
 
-    return { success: true, requestComplete: false, requestStatus: "PENDING", stepResolved: true, nextStep: nextStepData.stepOrder };
+    return {
+      success: true,
+      requestComplete: false,
+      requestStatus: "PENDING",
+      stepResolved: true,
+      nextStep: nextStepData.stepOrder,
+    };
   }
 
   // No more steps — workflow complete, request approved
-  await db.from("approval_requests").update({
-    status: "APPROVED",
-    updatedAt: now,
-    completedAt: now,
-  }).eq("id", requestId);
+  await db
+    .from("approval_requests")
+    .update({
+      status: "APPROVED",
+      updatedAt: now,
+      completedAt: now,
+    })
+    .eq("id", requestId);
 
   await addHistory(requestId, "COMPLETED", userId, "All approval steps completed — approved");
 
@@ -467,7 +527,8 @@ export async function processDecision({
   await handleRequestCompletion(request, "APPROVED", tenantId, userId);
 
   await logAudit({
-    tenantId, userId,
+    tenantId,
+    userId,
     action: `approval.completed`,
     entityType: request.entityType,
     entityId: request.entityId,
@@ -492,18 +553,28 @@ export async function recallRequest({
   const db = getServiceClient();
   const now = new Date().toISOString();
 
-  const { data: request } = await db.from("approval_requests").select("*")
-    .eq("id", requestId).eq("tenantId", tenantId).single();
+  const { data: request } = await db
+    .from("approval_requests")
+    .select("*")
+    .eq("id", requestId)
+    .eq("tenantId", tenantId)
+    .single();
 
   if (!request) return { error: "Request not found" };
   if (request.requestedById !== userId) return { error: "Only the requester can recall" };
   if (request.status !== "PENDING") return { error: "Can only recall pending requests" };
 
-  await db.from("approval_requests").update({ status: "RECALLED", updatedAt: now, completedAt: now }).eq("id", requestId);
+  await db
+    .from("approval_requests")
+    .update({ status: "RECALLED", updatedAt: now, completedAt: now })
+    .eq("id", requestId);
 
   // Reset all pending/waiting decisions
-  await db.from("approval_decisions").update({ status: "RECALLED" })
-    .eq("requestId", requestId).in("status", ["PENDING", "WAITING"]);
+  await db
+    .from("approval_decisions")
+    .update({ status: "RECALLED" })
+    .eq("requestId", requestId)
+    .in("status", ["PENDING", "WAITING"]);
 
   void userFullName; // UI renders actor from user.fullName — don't double it
   await addHistory(requestId, "RECALLED", userId, `Request recalled`);
@@ -528,7 +599,11 @@ export async function rejectForRework({
   const db = getServiceClient();
   const now = new Date().toISOString();
 
-  const { data: decision } = await db.from("approval_decisions").select("*, request:approval_requests!approval_decisions_requestId_fkey(*)").eq("id", decisionId).single();
+  const { data: decision } = await db
+    .from("approval_decisions")
+    .select("*, request:approval_requests!approval_decisions_requestId_fkey(*)")
+    .eq("id", decisionId)
+    .single();
 
   if (!decision) return { error: "Decision not found" };
   // Defense in depth — see processDecision for the rationale.
@@ -536,25 +611,36 @@ export async function rejectForRework({
   if (decision.status !== "PENDING") return { error: "Step already decided" };
 
   // Verify membership
-  const { data: membership } = await db.from("approval_group_members").select("id").eq("groupId", decision.groupId).eq("userId", userId).single();
+  const { data: membership } = await db
+    .from("approval_group_members")
+    .select("id")
+    .eq("groupId", decision.groupId)
+    .eq("userId", userId)
+    .single();
   if (!membership) return { error: "Not in approval group" };
 
   const request = decision.request;
 
   // Mark decision as rework
-  await db.from("approval_decisions").update({
-    status: "REWORK",
-    deciderId: userId,
-    comment,
-    decidedAt: now,
-  }).eq("id", decisionId);
+  await db
+    .from("approval_decisions")
+    .update({
+      status: "REWORK",
+      deciderId: userId,
+      comment,
+      decidedAt: now,
+    })
+    .eq("id", decisionId);
 
   // Clear the decider's own "Approval Required" notification now that
   // they've acted on this request.
   await markNotificationsReadByRef({ tenantId, userId, refId: request.id });
 
   // Set request to REWORK status
-  await db.from("approval_requests").update({ status: "REWORK", updatedAt: now }).eq("id", request.id);
+  await db
+    .from("approval_requests")
+    .update({ status: "REWORK", updatedAt: now })
+    .eq("id", request.id);
 
   await addHistory(request.id, "REWORK_REQUESTED", userId, `Rework requested: "${comment}"`);
 
@@ -588,8 +674,12 @@ export async function resubmitAfterRework({
   const db = getServiceClient();
   const now = new Date().toISOString();
 
-  const { data: request } = await db.from("approval_requests").select("*")
-    .eq("id", requestId).eq("tenantId", tenantId).single();
+  const { data: request } = await db
+    .from("approval_requests")
+    .select("*")
+    .eq("id", requestId)
+    .eq("tenantId", tenantId)
+    .single();
 
   if (!request) return { error: "Request not found" };
   if (request.requestedById !== userId) return { error: "Only the requester can resubmit" };
@@ -599,31 +689,45 @@ export async function resubmitAfterRework({
   await markNotificationsReadByRef({ tenantId, userId, refId: requestId });
 
   // Reset all decisions — step 1 to PENDING, rest to WAITING
-  const { data: decisions } = await db.from("approval_decisions")
-    .select("*, step:approval_workflow_steps!approval_decisions_stepId_fkey(stepOrder, deadlineHours, groupId)")
+  const { data: decisions } = await db
+    .from("approval_decisions")
+    .select(
+      "*, step:approval_workflow_steps!approval_decisions_stepId_fkey(stepOrder, deadlineHours, groupId)"
+    )
     .eq("requestId", requestId);
 
-  for (const d of (decisions || [])) {
-    const step = d.step as unknown as { stepOrder: number; deadlineHours: number | null; groupId: string };
-    const deadlineAt = step.stepOrder === 1 && step.deadlineHours
-      ? new Date(Date.now() + step.deadlineHours * 3600000).toISOString()
-      : null;
+  for (const d of decisions || []) {
+    const step = d.step as unknown as {
+      stepOrder: number;
+      deadlineHours: number | null;
+      groupId: string;
+    };
+    const deadlineAt =
+      step.stepOrder === 1 && step.deadlineHours
+        ? new Date(Date.now() + step.deadlineHours * 3600000).toISOString()
+        : null;
 
-    await db.from("approval_decisions").update({
-      status: step.stepOrder === 1 ? "PENDING" : "WAITING",
-      deciderId: null,
-      comment: null,
-      decidedAt: null,
-      deadlineAt,
-    }).eq("id", d.id);
+    await db
+      .from("approval_decisions")
+      .update({
+        status: step.stepOrder === 1 ? "PENDING" : "WAITING",
+        deciderId: null,
+        comment: null,
+        decidedAt: null,
+        deadlineAt,
+      })
+      .eq("id", d.id);
   }
 
-  await db.from("approval_requests").update({
-    status: "PENDING",
-    currentStepOrder: 1,
-    updatedAt: now,
-    completedAt: null,
-  }).eq("id", requestId);
+  await db
+    .from("approval_requests")
+    .update({
+      status: "PENDING",
+      currentStepOrder: 1,
+      updatedAt: now,
+      completedAt: null,
+    })
+    .eq("id", requestId);
 
   void userFullName;
   await addHistory(requestId, "RESUBMITTED", userId, `Resubmitted after rework`);
@@ -654,7 +758,7 @@ async function handleRequestCompletion(
   request: { entityType: string; entityId: string; transitionId: string | null },
   status: "APPROVED" | "REJECTED",
   tenantId: string,
-  userId: string,
+  userId: string
 ) {
   const db = getServiceClient();
   const now = new Date().toISOString();
@@ -662,7 +766,9 @@ async function handleRequestCompletion(
   if (status === "APPROVED" && request.entityType === "file" && request.transitionId) {
     const { data: transition } = await db
       .from("lifecycle_transitions")
-      .select("*, toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name), fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name)")
+      .select(
+        "*, toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name), fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name)"
+      )
       .eq("id", request.transitionId)
       .single();
 
@@ -712,7 +818,8 @@ async function handleRequestCompletion(
       }
 
       await logAudit({
-        tenantId, userId,
+        tenantId,
+        userId,
         action: "file.transition.approved",
         entityType: "file",
         entityId: request.entityId,
@@ -722,14 +829,22 @@ async function handleRequestCompletion(
   }
 
   if (request.entityType === "eco") {
-    await db.from("ecos").update({
-      status: status === "APPROVED" ? "APPROVED" : "REJECTED",
-      updatedAt: now,
-    }).eq("id", request.entityId);
+    await db
+      .from("ecos")
+      .update({
+        status: status === "APPROVED" ? "APPROVED" : "REJECTED",
+        updatedAt: now,
+      })
+      .eq("id", request.entityId);
   }
 }
 
-async function addHistory(requestId: string, event: string, userId: string | null, details: string) {
+async function addHistory(
+  requestId: string,
+  event: string,
+  userId: string | null,
+  details: string
+) {
   const db = getServiceClient();
   await db.from("approval_history").insert({
     id: uuid(),
@@ -765,8 +880,11 @@ export async function findWorkflowForTrigger({
 }) {
   const db = getServiceClient();
 
-  let query = db.from("approval_workflow_assignments")
-    .select("*, workflow:approval_workflows!approval_workflow_assignments_workflowId_fkey(id, name, isActive)")
+  let query = db
+    .from("approval_workflow_assignments")
+    .select(
+      "*, workflow:approval_workflows!approval_workflow_assignments_workflowId_fkey(id, name, isActive)"
+    )
     .eq("tenantId", tenantId);
 
   if (transitionId) {
@@ -781,7 +899,11 @@ export async function findWorkflowForTrigger({
   if (!data || data.length === 0) return null;
 
   const assignment = data[0];
-  const workflow = assignment.workflow as unknown as { id: string; name: string; isActive: boolean };
+  const workflow = assignment.workflow as unknown as {
+    id: string;
+    name: string;
+    isActive: boolean;
+  };
   if (!workflow.isActive) return null;
 
   return workflow;

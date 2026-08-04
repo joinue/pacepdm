@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
-import {
-  getReleaseById,
-  buildReleaseZipStream,
-  releaseZipFilename,
-} from "@/lib/releases";
+import { getReleaseById, buildReleaseZipStream, releaseZipFilename } from "@/lib/releases";
 
 /**
  * GET /api/releases/[releaseId]/zip

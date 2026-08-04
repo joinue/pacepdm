@@ -34,9 +34,9 @@ export default function TermsOfUsePage() {
             <h2>Agreement to terms</h2>
             <p>
               By accessing or using PACE PDM (the &quot;Service&quot;), operated by Joinue LLC
-              (&quot;Joinue,&quot; &quot;we,&quot; &quot;us,&quot; or &quot;our&quot;), you agree
-              to be bound by these Terms of Use (&quot;Terms&quot;). If you do not agree to all
-              of these Terms, you may not access or use the Service.
+              (&quot;Joinue,&quot; &quot;we,&quot; &quot;us,&quot; or &quot;our&quot;), you agree to
+              be bound by these Terms of Use (&quot;Terms&quot;). If you do not agree to all of
+              these Terms, you may not access or use the Service.
             </p>
           </section>
 
@@ -54,8 +54,8 @@ export default function TermsOfUsePage() {
             <h2>Eligibility</h2>
             <p>
               You must be at least 18 years old to create an account and use the Service. By
-              creating an account, you represent that you are at least 18 years of age and have
-              the legal capacity to enter into these Terms.
+              creating an account, you represent that you are at least 18 years of age and have the
+              legal capacity to enter into these Terms.
             </p>
           </section>
 
@@ -73,16 +73,18 @@ export default function TermsOfUsePage() {
           <section>
             <h2>Your content</h2>
             <p>
-              <strong>You retain all ownership rights to the files, data, and content you upload
-              to the Service.</strong> We do not claim any intellectual property rights over your
-              content. By uploading content, you grant us a limited, non-exclusive license to
-              store, process, transmit, and display it solely for the purpose of providing the
-              Service to you.
+              <strong>
+                You retain all ownership rights to the files, data, and content you upload to the
+                Service.
+              </strong>{" "}
+              We do not claim any intellectual property rights over your content. By uploading
+              content, you grant us a limited, non-exclusive license to store, process, transmit,
+              and display it solely for the purpose of providing the Service to you.
             </p>
             <p>
-              You are solely responsible for ensuring you have the right to upload, store, and
-              share any content you place in the Service. You represent and warrant that your
-              content does not violate any third party&apos;s rights.
+              You are solely responsible for ensuring you have the right to upload, store, and share
+              any content you place in the Service. You represent and warrant that your content does
+              not violate any third party&apos;s rights.
             </p>
           </section>
 
@@ -90,18 +92,33 @@ export default function TermsOfUsePage() {
             <h2>Acceptable use</h2>
             <p>You agree not to:</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Use the Service for any unlawful purpose or in violation of any applicable law</li>
-              <li>Attempt to gain unauthorized access to the Service, other accounts, or related systems</li>
+              <li>
+                Use the Service for any unlawful purpose or in violation of any applicable law
+              </li>
+              <li>
+                Attempt to gain unauthorized access to the Service, other accounts, or related
+                systems
+              </li>
               <li>Interfere with or disrupt the Service, servers, or networks connected to it</li>
               <li>Upload content that contains malware, viruses, or other harmful code</li>
-              <li>Use the Service to store or distribute content that infringes on intellectual property rights</li>
-              <li>Resell, sublicense, or redistribute access to the Service without our prior written consent</li>
-              <li>Use automated means (bots, scrapers) to access the Service without our permission</li>
-              <li>Attempt to reverse-engineer, decompile, or extract the source code of the Service</li>
+              <li>
+                Use the Service to store or distribute content that infringes on intellectual
+                property rights
+              </li>
+              <li>
+                Resell, sublicense, or redistribute access to the Service without our prior written
+                consent
+              </li>
+              <li>
+                Use automated means (bots, scrapers) to access the Service without our permission
+              </li>
+              <li>
+                Attempt to reverse-engineer, decompile, or extract the source code of the Service
+              </li>
             </ul>
             <p>
-              We reserve the right to suspend or terminate your access at any time, with or
-              without notice, if we reasonably believe you have violated these Terms.
+              We reserve the right to suspend or terminate your access at any time, with or without
+              notice, if we reasonably believe you have violated these Terms.
             </p>
           </section>
 
@@ -109,10 +126,10 @@ export default function TermsOfUsePage() {
             <h2>Shared content and public links</h2>
             <p>
               The Service allows you to generate public share links for files, BOMs, and release
-              packages. You are solely responsible for managing access to shared content,
-              including setting appropriate expiration dates and passwords. We are not responsible
-              or liable for any unauthorized access to, or use of, content you choose to share
-              via public links.
+              packages. You are solely responsible for managing access to shared content, including
+              setting appropriate expiration dates and passwords. We are not responsible or liable
+              for any unauthorized access to, or use of, content you choose to share via public
+              links.
             </p>
           </section>
 
@@ -124,9 +141,9 @@ export default function TermsOfUsePage() {
               maintenance, updates, technical issues, or circumstances beyond our control.
             </p>
             <p>
-              We reserve the right to modify, suspend, or discontinue the Service (or any part
-              of it) at any time, with or without notice. We will not be liable to you or any
-              third party for any modification, suspension, or discontinuation of the Service.
+              We reserve the right to modify, suspend, or discontinue the Service (or any part of
+              it) at any time, with or without notice. We will not be liable to you or any third
+              party for any modification, suspension, or discontinuation of the Service.
             </p>
           </section>
 
@@ -134,21 +151,22 @@ export default function TermsOfUsePage() {
             <h2>Data handling</h2>
             <p>
               We process and store your data in accordance with our{" "}
-              <Link href="/privacy" className="text-primary hover:underline">Privacy Policy</Link>,
-              which is incorporated into these Terms by reference. You acknowledge and agree
-              that your data is stored on third-party infrastructure and that we rely on
-              third-party providers for hosting, storage, and security.
+              <Link href="/privacy" className="text-primary hover:underline">
+                Privacy Policy
+              </Link>
+              , which is incorporated into these Terms by reference. You acknowledge and agree that
+              your data is stored on third-party infrastructure and that we rely on third-party
+              providers for hosting, storage, and security.
             </p>
           </section>
 
           <section>
             <h2>No warranty on data integrity</h2>
             <p>
-              WHILE WE TAKE REASONABLE MEASURES TO PROTECT YOUR DATA, WE DO NOT WARRANT OR
-              GUARANTEE THE INTEGRITY, ACCURACY, OR AVAILABILITY OF ANY DATA STORED IN THE
-              SERVICE. YOU ARE SOLELY RESPONSIBLE FOR MAINTAINING INDEPENDENT BACKUPS OF YOUR
-              CRITICAL DATA. WE SHALL NOT BE LIABLE FOR ANY LOSS, CORRUPTION, OR UNAVAILABILITY
-              OF DATA FOR ANY REASON.
+              WHILE WE TAKE REASONABLE MEASURES TO PROTECT YOUR DATA, WE DO NOT WARRANT OR GUARANTEE
+              THE INTEGRITY, ACCURACY, OR AVAILABILITY OF ANY DATA STORED IN THE SERVICE. YOU ARE
+              SOLELY RESPONSIBLE FOR MAINTAINING INDEPENDENT BACKUPS OF YOUR CRITICAL DATA. WE SHALL
+              NOT BE LIABLE FOR ANY LOSS, CORRUPTION, OR UNAVAILABILITY OF DATA FOR ANY REASON.
             </p>
           </section>
 
@@ -158,56 +176,55 @@ export default function TermsOfUsePage() {
               THE SERVICE IS PROVIDED &quot;AS IS&quot; AND &quot;AS AVAILABLE&quot; WITHOUT
               WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING BUT NOT
               LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
-              TITLE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE
-              UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE OF HARMFUL COMPONENTS. YOUR USE OF
-              THE SERVICE IS AT YOUR SOLE RISK.
+              TITLE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED,
+              ERROR-FREE, SECURE, OR FREE OF HARMFUL COMPONENTS. YOUR USE OF THE SERVICE IS AT YOUR
+              SOLE RISK.
             </p>
           </section>
 
           <section>
             <h2>Limitation of liability</h2>
             <p>
-              TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, JOINUE LLC AND ITS OWNER,
-              OFFICERS, EMPLOYEES, AGENTS, AND AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT,
-              INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED
-              TO LOSS OF PROFITS, REVENUE, DATA, BUSINESS OPPORTUNITIES, OR GOODWILL, ARISING
-              OUT OF OR RELATED TO YOUR USE OF OR INABILITY TO USE THE SERVICE, REGARDLESS OF
-              THE THEORY OF LIABILITY (CONTRACT, TORT, STRICT LIABILITY, OR OTHERWISE), EVEN IF
-              WE HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+              TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, JOINUE LLC AND ITS OWNER, OFFICERS,
+              EMPLOYEES, AGENTS, AND AFFILIATES SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+              SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF
+              PROFITS, REVENUE, DATA, BUSINESS OPPORTUNITIES, OR GOODWILL, ARISING OUT OF OR RELATED
+              TO YOUR USE OF OR INABILITY TO USE THE SERVICE, REGARDLESS OF THE THEORY OF LIABILITY
+              (CONTRACT, TORT, STRICT LIABILITY, OR OTHERWISE), EVEN IF WE HAVE BEEN ADVISED OF THE
+              POSSIBILITY OF SUCH DAMAGES.
             </p>
             <p>
-              OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATED TO THE SERVICE SHALL NOT
-              EXCEED THE LESSER OF: (A) THE AMOUNT YOU ACTUALLY PAID US IN THE TWELVE (12)
-              MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM, OR (B) ONE HUNDRED DOLLARS
-              ($100 USD).
+              OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATED TO THE SERVICE SHALL NOT EXCEED
+              THE LESSER OF: (A) THE AMOUNT YOU ACTUALLY PAID US IN THE TWELVE (12) MONTHS PRECEDING
+              THE EVENT GIVING RISE TO THE CLAIM, OR (B) ONE HUNDRED DOLLARS ($100 USD).
             </p>
           </section>
 
           <section>
             <h2>Indemnification</h2>
             <p>
-              You agree to indemnify, defend, and hold harmless Joinue LLC and its owner from
-              and against any and all claims, damages, losses, costs, and expenses (including
-              reasonable attorneys&apos; fees) arising out of or related to: (a) your use of the
-              Service, (b) your content, (c) your violation of these Terms, or (d) your
-              violation of any rights of a third party.
+              You agree to indemnify, defend, and hold harmless Joinue LLC and its owner from and
+              against any and all claims, damages, losses, costs, and expenses (including reasonable
+              attorneys&apos; fees) arising out of or related to: (a) your use of the Service, (b)
+              your content, (c) your violation of these Terms, or (d) your violation of any rights
+              of a third party.
             </p>
           </section>
 
           <section>
             <h2>Dispute resolution</h2>
             <p>
-              Any dispute arising out of or relating to these Terms or the Service shall be
-              resolved through binding arbitration administered under the rules of the American
-              Arbitration Association, conducted on an individual basis in the State of Delaware.
-              You agree to waive any right to participate in a class action or class-wide
-              arbitration. The arbitrator&apos;s decision shall be final and binding. Judgment on
-              the award may be entered in any court of competent jurisdiction.
+              Any dispute arising out of or relating to these Terms or the Service shall be resolved
+              through binding arbitration administered under the rules of the American Arbitration
+              Association, conducted on an individual basis in the State of Delaware. You agree to
+              waive any right to participate in a class action or class-wide arbitration. The
+              arbitrator&apos;s decision shall be final and binding. Judgment on the award may be
+              entered in any court of competent jurisdiction.
             </p>
             <p>
-              Notwithstanding the above, either party may seek injunctive or equitable relief in
-              any court of competent jurisdiction to protect its intellectual property rights or
-              to prevent irreparable harm.
+              Notwithstanding the above, either party may seek injunctive or equitable relief in any
+              court of competent jurisdiction to protect its intellectual property rights or to
+              prevent irreparable harm.
             </p>
           </section>
 
@@ -215,8 +232,8 @@ export default function TermsOfUsePage() {
             <h2>Force majeure</h2>
             <p>
               We shall not be liable for any failure or delay in performing our obligations under
-              these Terms due to causes beyond our reasonable control, including but not limited
-              to natural disasters, acts of government, internet or infrastructure outages,
+              these Terms due to causes beyond our reasonable control, including but not limited to
+              natural disasters, acts of government, internet or infrastructure outages,
               cyberattacks, pandemics, or failures of third-party service providers.
             </p>
           </section>
@@ -249,8 +266,8 @@ export default function TermsOfUsePage() {
           <section>
             <h2>Entire agreement</h2>
             <p>
-              These Terms, together with the Privacy Policy, constitute the entire agreement
-              between you and Joinue LLC regarding the Service and supersede all prior agreements,
+              These Terms, together with the Privacy Policy, constitute the entire agreement between
+              you and Joinue LLC regarding the Service and supersede all prior agreements,
               representations, and understandings. If any provision of these Terms is found to be
               unenforceable, the remaining provisions will continue in full force and effect.
             </p>
@@ -259,8 +276,8 @@ export default function TermsOfUsePage() {
           <section>
             <h2>Governing law</h2>
             <p>
-              These Terms are governed by and construed in accordance with the laws of the State
-              of Delaware, without regard to its conflict of law provisions.
+              These Terms are governed by and construed in accordance with the laws of the State of
+              Delaware, without regard to its conflict of law provisions.
             </p>
           </section>
 
@@ -268,7 +285,10 @@ export default function TermsOfUsePage() {
             <h2>Contact</h2>
             <p>
               For questions about these Terms of Use, contact{" "}
-              <a href="mailto:marc@joinue.com" className="text-primary hover:underline">marc@joinue.com</a>.
+              <a href="mailto:marc@joinue.com" className="text-primary hover:underline">
+                marc@joinue.com
+              </a>
+              .
             </p>
           </section>
         </div>
@@ -276,10 +296,16 @@ export default function TermsOfUsePage() {
 
       <footer className="border-t border-white/6">
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="text-xs text-muted-foreground/70">&copy; {new Date().getFullYear()} Joinue LLC</span>
+          <span className="text-xs text-muted-foreground/70">
+            &copy; {new Date().getFullYear()} Joinue LLC
+          </span>
           <div className="flex items-center gap-5 text-xs text-muted-foreground/70">
-            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="text-foreground font-medium">Terms of Use</Link>
+            <Link href="/privacy" className="hover:text-foreground transition-colors">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="text-foreground font-medium">
+              Terms of Use
+            </Link>
           </div>
         </div>
       </footer>

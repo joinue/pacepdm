@@ -9,15 +9,15 @@ import type { BOMItem } from "./types";
  *
  * Used by the part/file search inputs in the Add Item dialog.
  */
-export function useDebounce<T extends (...args: Parameters<T>) => void>(
-  fn: T,
-  delay: number
-): T {
+export function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback((...args: Parameters<T>) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => fn(...args), delay);
-  }, [fn, delay]) as T;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => fn(...args), delay);
+    },
+    [fn, delay]
+  ) as T;
 }
 
 /**

@@ -42,10 +42,7 @@ export async function DELETE(
       try {
         await deleteSupabaseSamlProvider(existing.providerId);
       } catch (err) {
-        console.error(
-          `[sso.delete] Supabase provider ${existing.providerId} cleanup failed:`,
-          err
-        );
+        console.error(`[sso.delete] Supabase provider ${existing.providerId} cleanup failed:`, err);
       }
     }
 

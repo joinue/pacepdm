@@ -87,8 +87,7 @@ export async function sendNotificationEmail(
   }
 
   const replyTo =
-    (typeof tenantSettings.emailReplyTo === "string" && tenantSettings.emailReplyTo) ||
-    undefined;
+    (typeof tenantSettings.emailReplyTo === "string" && tenantSettings.emailReplyTo) || undefined;
 
   const appUrl = process.env.APP_URL || "";
   const absoluteLink = params.link
@@ -130,10 +129,7 @@ export async function sendNotificationEmail(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const err = `resend ${res.status}: ${body.slice(0, 200)}`;
-      await db
-        .from("notifications")
-        .update({ emailError: err })
-        .eq("id", params.notificationId);
+      await db.from("notifications").update({ emailError: err }).eq("id", params.notificationId);
       return { ok: false, reason: err };
     }
 

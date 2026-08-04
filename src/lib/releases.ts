@@ -95,9 +95,7 @@ export interface CreateReleaseArgs {
  * row is a documentation gap, not a correctness problem, and the caller
  * can choose to expose a "retry release capture" admin action later.
  */
-export async function createReleaseFromEco(
-  args: CreateReleaseArgs
-): Promise<ReleaseRow | null> {
+export async function createReleaseFromEco(args: CreateReleaseArgs): Promise<ReleaseRow | null> {
   const { db, tenantId, ecoId, userId } = args;
 
   // ── Step 1: pull the ECO header for the denormalized fields on the
@@ -105,10 +103,10 @@ export async function createReleaseFromEco(
   //           defensive tenant check.
   const { data: eco } = await db
     .from("ecos")
-    .select("id, tenantId, ecoNumber, title")
+    .select("id, tenantId, ecoNumber, title, deletedAt")
     .eq("id", ecoId)
     .single();
-  if (!eco || eco.tenantId !== tenantId) {
+  if (!eco || eco.tenantId !== tenantId || eco.deletedAt) {
     throw new Error(`createReleaseFromEco: ECO ${ecoId} not found in tenant`);
   }
 
@@ -123,7 +121,10 @@ export async function createReleaseFromEco(
     .eq("ecoId", ecoId);
   if (itemsError) throw itemsError;
 
-  const partItemById = new Map<string, { fromRevision: string | null; toRevision: string | null }>();
+  const partItemById = new Map<
+    string,
+    { fromRevision: string | null; toRevision: string | null }
+  >();
   const directFileIds = new Set<string>();
   for (const item of items ?? []) {
     if (item.partId) {
@@ -136,12 +137,18 @@ export async function createReleaseFromEco(
   }
 
   // ── Step 3: parts — read post-implement state for every partId touched.
+  //
+  // Soft-deleted parts, files, and BOMs are excluded from the manifest
+  // throughout this builder. A release is minted at implement time and is
+  // meant to describe what actually shipped; carrying a deleted row into
+  // it would also give the release zip a storage key nothing can stream.
   const parts: ReleasePart[] = [];
   if (partItemById.size > 0) {
     const { data: partRows, error: partErr } = await db
       .from("parts")
       .select("id, partNumber, name, revision, lifecycleState, category")
-      .in("id", Array.from(partItemById.keys()));
+      .in("id", Array.from(partItemById.keys()))
+      .is("deletedAt", null);
     if (partErr) throw partErr;
     for (const p of partRows ?? []) {
       const item = partItemById.get(p.id as string);
@@ -178,7 +185,8 @@ export async function createReleaseFromEco(
     const { data: fileRows, error: fileErr } = await db
       .from("files")
       .select("id, name, fileType, currentVersion, revision, lifecycleState, tenantId")
-      .in("id", Array.from(allFileIds));
+      .in("id", Array.from(allFileIds))
+      .is("deletedAt", null);
     if (fileErr) throw fileErr;
     for (const f of fileRows ?? []) {
       if (f.tenantId !== tenantId) continue;
@@ -217,7 +225,8 @@ export async function createReleaseFromEco(
       .from("boms")
       .select("id, name, revision, status")
       .in("fileId", Array.from(allFileIds))
-      .eq("tenantId", tenantId);
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null);
     if (bomErr) throw bomErr;
     for (const b of bomRows ?? []) {
       try {
@@ -241,10 +250,7 @@ export async function createReleaseFromEco(
       } catch (err) {
         // Snapshot of one BOM failed — log and continue. A missing BOM
         // snapshot is less serious than a missing release row.
-        console.error(
-          `[releases] BOM snapshot failed for bom ${b.id} in ECO ${ecoId}:`,
-          err
-        );
+        console.error(`[releases] BOM snapshot failed for bom ${b.id} in ECO ${ecoId}:`, err);
       }
     }
   }
@@ -276,11 +282,7 @@ export async function createReleaseFromEco(
     // can't actually happen because the ECO is already IMPLEMENTED) would
     // hit this; treat as a no-op success.
     if ((insertErr as { code?: string }).code === "23505") {
-      const { data: existing } = await db
-        .from("releases")
-        .select("*")
-        .eq("ecoId", ecoId)
-        .single();
+      const { data: existing } = await db.from("releases").select("*").eq("ecoId", ecoId).single();
       return (existing as ReleaseRow | null) ?? null;
     }
     throw insertErr;

@@ -23,7 +23,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { X, Download, Save, FileText, Package, ClipboardList, ArrowLeft, MoreHorizontal, LogOut, LogIn, ArrowRightLeft, Pencil, Trash2, RotateCcw, Sparkles, Loader2, ImagePlus, Plus, Search, LockOpen } from "lucide-react";
+import {
+  X,
+  Download,
+  Save,
+  FileText,
+  Package,
+  ClipboardList,
+  ArrowLeft,
+  MoreHorizontal,
+  LogOut,
+  LogIn,
+  ArrowRightLeft,
+  Pencil,
+  Trash2,
+  RotateCcw,
+  Sparkles,
+  Loader2,
+  ImagePlus,
+  Plus,
+  Search,
+  LockOpen,
+} from "lucide-react";
 import { useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -36,19 +57,14 @@ import { CadViewer } from "@/components/vault/cad-viewer";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { Link as LinkIcon } from "lucide-react";
 
-const FILE_CATEGORY_LABELS: Record<string, string> = {
-  PART: "Part",
-  ASSEMBLY: "Assembly",
-  DRAWING: "Drawing PDF",
-  DRAWING_2D: "2D Drawing",
-  MODEL_3D: "3D Model",
-  DOCUMENT: "Document",
-  SIMULATION: "Simulation",
-  FIRMWARE: "Firmware",
-  SOFTWARE: "Software",
-  PURCHASED: "Purchased Part",
-  OTHER: "Other",
-};
+// Labels, the category list, and the extension mapping all come from
+// lib/file-categories.ts. They used to be restated here and in the upload
+// dialog, which is how a .SLDDRW ended up labelled "3D Model".
+import {
+  CATEGORY_LABELS as FILE_CATEGORY_LABELS,
+  FILE_CATEGORIES,
+  categoryLabel,
+} from "@/lib/file-categories";
 
 // --- Preview components ---
 
@@ -79,6 +95,13 @@ function FilePreview({
   const [refreshKey, setRefreshKey] = useState(0);
   const [regenerating, setRegenerating] = useState(false);
   const [uploadingThumb, setUploadingThumb] = useState(false);
+  // Set true when the <img> for an image-type preview fails to load. The
+  // preview endpoint returns canPreview:true whenever the file has a
+  // thumbnailKey, but the bytes behind that key can be corrupt — a
+  // broken-img placeholder with no recovery affordance is a dead end for
+  // the user. When this flips on we render the canPreview=false branch
+  // so "Try auto-extract" / "Upload thumbnail" become reachable.
+  const [imageBroken, setImageBroken] = useState(false);
   const thumbInputRef = useRef<HTMLInputElement>(null);
 
   // Note: setLoading(true) is omitted from the effect body because the lint
@@ -97,6 +120,9 @@ function FilePreview({
       .then((d) => {
         if (!cancelled) {
           setPreview(d);
+          // New URL → assume the image will load again; the onError
+          // handler will flip this back on if it doesn't.
+          setImageBroken(false);
           setLoading(false);
         }
       })
@@ -170,8 +196,12 @@ function FilePreview({
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground text-center py-12">Loading preview...</p>;
-  if (!preview || !preview.canPreview) {
+  if (loading)
+    return <p className="text-sm text-muted-foreground text-center py-12">Loading preview...</p>;
+  // Treat a broken <img> the same as canPreview:false so the user gets
+  // the action buttons. Same branch covers the legitimate "no preview"
+  // case, so the failure modes converge on one recoverable UI.
+  if (!preview || !preview.canPreview || (preview.previewType === "image" && imageBroken)) {
     // Message distinguishes three real cases so we don't mislead users
     // into thinking a supported format is unsupported:
     //
@@ -201,16 +231,26 @@ function FilePreview({
         <FileText className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
         <p className="text-sm text-muted-foreground">{headline}</p>
         <div className="mt-3 flex gap-2 justify-center flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => {
-            fetch(`/api/files/${fileId}/download`).then(r => r.json()).then(d => { if (d.url) window.open(d.url, "_blank"); });
-          }}>
-            <Download className="w-3.5 h-3.5 mr-1.5" />Download file
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              fetch(`/api/files/${fileId}/download`)
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.url) window.open(d.url, "_blank");
+                });
+            }}
+          >
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            Download file
           </Button>
           <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={regenerating}>
-            {regenerating
-              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-              : <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-            }
+            {regenerating ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            )}
             {regenerating ? "Regenerating..." : "Try auto-extract"}
           </Button>
           <Button
@@ -219,10 +259,11 @@ function FilePreview({
             onClick={() => thumbInputRef.current?.click()}
             disabled={uploadingThumb}
           >
-            {uploadingThumb
-              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-              : <ImagePlus className="w-3.5 h-3.5 mr-1.5" />
-            }
+            {uploadingThumb ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <ImagePlus className="w-3.5 h-3.5 mr-1.5" />
+            )}
             {uploadingThumb ? "Uploading..." : "Upload thumbnail"}
           </Button>
           <input
@@ -246,20 +287,37 @@ function FilePreview({
 
   if (preview.previewType === "image") {
     return (
-      <div className={`flex items-center justify-center bg-muted/30 rounded-lg p-4 ${className || ""}`}>
+      <div
+        className={`flex items-center justify-center bg-muted/30 rounded-lg p-4 ${className || ""}`}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={preview.url} alt="File preview" className="max-w-full max-h-full object-contain rounded" />
+        <img
+          src={preview.url}
+          alt="File preview"
+          className="max-w-full max-h-full object-contain rounded"
+          onError={() => setImageBroken(true)}
+        />
       </div>
     );
   }
 
   if (preview.previewType === "pdf") {
     return (
-      <object data={preview.url} type="application/pdf" className={`w-full rounded-lg border ${className || ""}`} style={{ minHeight: "400px" }}>
+      <object
+        data={preview.url}
+        type="application/pdf"
+        className={`w-full rounded-lg border ${className || ""}`}
+        style={{ minHeight: "400px" }}
+      >
         <div className="flex flex-col items-center justify-center h-full gap-3 p-4">
           <FileText className="w-10 h-10 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">PDF preview unavailable in this browser</p>
-          <a href={preview.url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">
+          <a
+            href={preview.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary underline"
+          >
             Open PDF directly
           </a>
         </div>
@@ -300,7 +358,9 @@ function TextPreview({ url, className }: { url: string; className?: string }) {
   if (!content) return <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>;
 
   return (
-    <pre className={`text-xs bg-muted/30 rounded-lg p-3 overflow-auto whitespace-pre-wrap font-mono ${className || ""}`}>
+    <pre
+      className={`text-xs bg-muted/30 rounded-lg p-3 overflow-auto whitespace-pre-wrap font-mono ${className || ""}`}
+    >
       {content}
     </pre>
   );
@@ -388,12 +448,27 @@ export function FileDetailPanel({
   const [category, setCategory] = useState("");
   const [metadataValues, setMetadataValues] = useState<Record<string, string>>({});
   const [whereUsedData, setWhereUsedData] = useState<FileWhereUsed | null>(null);
-  const [linkedParts, setLinkedParts] = useState<{ id: string; role: string; isPrimary: boolean; part: { id: string; partNumber: string; name: string; lifecycleState: string; category: string } }[]>([]);
+  const [linkedParts, setLinkedParts] = useState<
+    {
+      id: string;
+      role: string;
+      isPrimary: boolean;
+      part: {
+        id: string;
+        partNumber: string;
+        name: string;
+        lifecycleState: string;
+        category: string;
+      };
+    }[]
+  >([]);
   const router = useRouter();
   // Inline "link to part" state inside the panel
   const [showLinkPart, setShowLinkPart] = useState(false);
   const [linkPartSearch, setLinkPartSearch] = useState("");
-  const [linkPartResults, setLinkPartResults] = useState<{ id: string; partNumber: string; name: string }[]>([]);
+  const [linkPartResults, setLinkPartResults] = useState<
+    { id: string; partNumber: string; name: string }[]
+  >([]);
   const [linkPartSearching, setLinkPartSearching] = useState(false);
   const [linkPartRole, setLinkPartRole] = useState("DRAWING");
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -401,17 +476,19 @@ export function FileDetailPanel({
   // (which is the lightweight summary embedded in the file fetch) — this one
   // is the richer view rendered in the Versions tab so engineers can see
   // "v3 (rev B) — released by ECO-0042".
-  const [revisions, setRevisions] = useState<{
-    id: string;
-    version: number;
-    revision: string | null;
-    fileSize: number;
-    comment: string | null;
-    createdAt: string;
-    ecoId: string | null;
-    uploadedBy: { fullName: string };
-    eco: { id: string; ecoNumber: string; title: string; status: string } | null;
-  }[]>([]);
+  const [revisions, setRevisions] = useState<
+    {
+      id: string;
+      version: number;
+      revision: string | null;
+      fileSize: number;
+      comment: string | null;
+      createdAt: string;
+      ecoId: string | null;
+      uploadedBy: { fullName: string };
+      eco: { id: string; ecoNumber: string; title: string; status: string } | null;
+    }[]
+  >([]);
 
   // Reusable refresh function — called after mutations (save, transition, etc).
   // Returns a promise so callers can await completion.
@@ -476,12 +553,16 @@ export function FileDetailPanel({
   useRealtimeTable({
     table: "files",
     filter: `id=eq.${fileId}`,
-    onChange: () => { void refreshFile(); },
+    onChange: () => {
+      void refreshFile();
+    },
   });
   useRealtimeTable({
     table: "file_versions",
     filter: `fileId=eq.${fileId}`,
-    onChange: () => { void refreshFile(); },
+    onChange: () => {
+      void refreshFile();
+    },
   });
 
   async function handleSaveMetadata() {
@@ -514,7 +595,9 @@ export function FileDetailPanel({
     const qs = version ? `?version=${version}` : "";
     fetch(`/api/files/${fileId}/download${qs}`)
       .then((r) => r.json())
-      .then((d) => { if (d.url) window.open(d.url, "_blank"); });
+      .then((d) => {
+        if (d.url) window.open(d.url, "_blank");
+      });
   }
 
   function formatFileSize(bytes: number): string {
@@ -529,7 +612,11 @@ export function FileDetailPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error || "Failed to restore"); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error || "Failed to restore");
+      return;
+    }
     const d = await res.json();
     toast.success(`Restored to version ${version} (now v${d.newVersion})`);
     refreshFile();
@@ -538,32 +625,51 @@ export function FileDetailPanel({
 
   async function handleCheckout() {
     const res = await fetch(`/api/files/${fileId}/checkout`, { method: "POST" });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("File checked out");
     refreshFile();
     onRefresh();
   }
 
   async function handleAdminUnlock() {
-    if (!confirm(`This will cancel ${file?.checkedOutBy?.fullName ?? "the user"}'s checkout and discard any pending changes. Continue?`)) return;
+    if (
+      !confirm(
+        `This will cancel ${file?.checkedOutBy?.fullName ?? "the user"}'s checkout and discard any pending changes. Continue?`
+      )
+    )
+      return;
     const res = await fetch(`/api/files/${fileId}/checkin`, {
       method: "POST",
       body: new FormData(), // no file = undo checkout
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Checkout unlocked");
     refreshFile();
     onRefresh();
   }
 
   async function doLinkPartSearch(q: string) {
-    if (q.length < 2) { setLinkPartResults([]); setLinkPartSearching(false); return; }
+    if (q.length < 2) {
+      setLinkPartResults([]);
+      setLinkPartSearching(false);
+      return;
+    }
     setLinkPartSearching(true);
     try {
       const res = await fetch(`/api/parts?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setLinkPartResults((Array.isArray(data) ? data : []).slice(0, 8));
-    } catch { setLinkPartResults([]); }
+    } catch {
+      setLinkPartResults([]);
+    }
     setLinkPartSearching(false);
   }
 
@@ -573,7 +679,11 @@ export function FileDetailPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ partId, role: linkPartRole }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Part linked");
     setShowLinkPart(false);
     setLinkPartSearch("");
@@ -587,7 +697,11 @@ export function FileDetailPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ partId }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Part unlinked");
     void refreshFile();
   }
@@ -612,36 +726,43 @@ export function FileDetailPanel({
   // is permanent.
   const actionsDropdown = (
     <DropdownMenu>
-      <DropdownMenuTrigger render={
-        <Button variant="outline" size="sm" className="shrink-0">
-          <MoreHorizontal className="w-4 h-4" />
-        </Button>
-      } />
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="shrink-0">
+            <MoreHorizontal className="w-4 h-4" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
-          <LinkIcon className="w-4 h-4 mr-2" />Share link
+          <LinkIcon className="w-4 h-4 mr-2" />
+          Share link
         </DropdownMenuItem>
         {(showCheckOut || showCheckIn || onChangeState || onRename || onDelete) && (
           <DropdownMenuSeparator />
         )}
         {showCheckOut && (
           <DropdownMenuItem onClick={handleCheckout}>
-            <LogOut className="w-4 h-4 mr-2" />Check Out
+            <LogOut className="w-4 h-4 mr-2" />
+            Check Out
           </DropdownMenuItem>
         )}
         {showCheckIn && (
           <DropdownMenuItem onClick={onCheckIn}>
-            <LogIn className="w-4 h-4 mr-2" />Check In
+            <LogIn className="w-4 h-4 mr-2" />
+            Check In
           </DropdownMenuItem>
         )}
         {lockedByOther && isAdmin && (
           <DropdownMenuItem onClick={handleAdminUnlock} className="text-destructive">
-            <LockOpen className="w-4 h-4 mr-2" />Unlock
+            <LockOpen className="w-4 h-4 mr-2" />
+            Unlock
           </DropdownMenuItem>
         )}
         {onChangeState && (
           <DropdownMenuItem onClick={onChangeState} disabled={lockedByOther}>
-            <ArrowRightLeft className="w-4 h-4 mr-2" />Change State
+            <ArrowRightLeft className="w-4 h-4 mr-2" />
+            Change State
           </DropdownMenuItem>
         )}
         {(showCheckOut || showCheckIn || onChangeState) && (onRename || onDelete) && (
@@ -649,12 +770,14 @@ export function FileDetailPanel({
         )}
         {onRename && (
           <DropdownMenuItem onClick={onRename} disabled={lockedByOther}>
-            <Pencil className="w-4 h-4 mr-2" />Rename
+            <Pencil className="w-4 h-4 mr-2" />
+            Rename
           </DropdownMenuItem>
         )}
         {onDelete && (
           <DropdownMenuItem onClick={onDelete} className="text-destructive">
-            <Trash2 className="w-4 h-4 mr-2" />Delete
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -665,14 +788,18 @@ export function FileDetailPanel({
   const sidebarContent = (
     <Tabs defaultValue="properties" className="flex flex-col min-h-0 h-full">
       <TabsList className="w-full shrink-0">
-        <TabsTrigger value="properties" className="flex-1 text-xs">Properties</TabsTrigger>
-        <TabsTrigger value="versions" className="flex-1 text-xs">Versions</TabsTrigger>
+        <TabsTrigger value="properties" className="flex-1 text-xs">
+          Properties
+        </TabsTrigger>
+        <TabsTrigger value="versions" className="flex-1 text-xs">
+          Versions
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="properties" className="flex-1 overflow-auto mt-2">
         <div className="space-y-4">
           {file.isFrozen && (
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded p-2 text-xs text-blue-700 dark:text-blue-300">
+            <div className="bg-info/10 border border-info/30 rounded p-2 text-xs text-info">
               This file is {file.lifecycleState}. Properties are locked. Use Change State to revise.
             </div>
           )}
@@ -681,7 +808,9 @@ export function FileDetailPanel({
             <span className="text-muted-foreground">Type</span>
             <span>{file.fileType.toUpperCase()}</span>
             <span className="text-muted-foreground">Revision</span>
-            <span className="font-mono">{file.revision}.{file.currentVersion}</span>
+            <span className="font-mono">
+              {file.revision}.{file.currentVersion}
+            </span>
             <span className="text-muted-foreground">State</span>
             <Badge variant="secondary">{file.lifecycleState}</Badge>
             <span className="text-muted-foreground">Location</span>
@@ -691,7 +820,9 @@ export function FileDetailPanel({
           </div>
 
           {file.isCheckedOut && file.checkedOutBy && (
-            <div className={`border rounded p-2 text-sm ${lockedByOther ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300" : "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800"}`}>
+            <div
+              className={`border rounded p-2 text-sm ${lockedByOther ? "bg-destructive/10 border-destructive/30 text-destructive" : "bg-warning/10 border-warning/30"}`}
+            >
               {lockedByOther
                 ? `Locked — checked out by ${file.checkedOutBy.fullName}. Properties are read-only.`
                 : `Checked out by ${file.checkedOutBy.fullName}`}
@@ -703,22 +834,20 @@ export function FileDetailPanel({
           <div className="space-y-3">
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
-              <Select value={category} onValueChange={(v) => setCategory(v ?? "")} disabled={editDisabled}>
+              <Select
+                value={category}
+                onValueChange={(v) => setCategory(v ?? "")}
+                disabled={editDisabled}
+              >
                 <SelectTrigger className="h-8 text-sm">
-                  <SelectValue>{(v) => FILE_CATEGORY_LABELS[v as string] ?? ""}</SelectValue>
+                  <SelectValue>{(v) => (v ? categoryLabel(v as string) : "")}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="PART">Part</SelectItem>
-                  <SelectItem value="ASSEMBLY">Assembly</SelectItem>
-                  <SelectItem value="DRAWING">Drawing PDF</SelectItem>
-                  <SelectItem value="DRAWING_2D">2D Drawing</SelectItem>
-                  <SelectItem value="MODEL_3D">3D Model</SelectItem>
-                  <SelectItem value="DOCUMENT">Document</SelectItem>
-                  <SelectItem value="SIMULATION">Simulation</SelectItem>
-                  <SelectItem value="FIRMWARE">Firmware</SelectItem>
-                  <SelectItem value="SOFTWARE">Software</SelectItem>
-                  <SelectItem value="PURCHASED">Purchased Part</SelectItem>
-                  <SelectItem value="OTHER">Other</SelectItem>
+                  {FILE_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {FILE_CATEGORY_LABELS[c]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -731,7 +860,12 @@ export function FileDetailPanel({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    onClick={() => { setShowLinkPart((v) => !v); setLinkPartSearch(""); setLinkPartResults([]); setLinkPartRole("DRAWING"); }}
+                    onClick={() => {
+                      setShowLinkPart((v) => !v);
+                      setLinkPartSearch("");
+                      setLinkPartResults([]);
+                      setLinkPartRole("DRAWING");
+                    }}
                   >
                     <Plus className="w-3 h-3" />
                   </Button>
@@ -740,9 +874,22 @@ export function FileDetailPanel({
 
               {showLinkPart && (
                 <div className="space-y-1.5 mb-2">
-                  <Select value={linkPartRole} onValueChange={(v) => setLinkPartRole(v ?? "DRAWING")}>
+                  <Select
+                    value={linkPartRole}
+                    onValueChange={(v) => setLinkPartRole(v ?? "DRAWING")}
+                  >
                     <SelectTrigger className="h-7 text-xs">
-                      <SelectValue>{(v: string) => ({ DRAWING: "Drawing", MODEL_3D: "3D Model", SPEC_SHEET: "Spec Sheet", DATASHEET: "Datasheet", OTHER: "Other" })[v] ?? v}</SelectValue>
+                      <SelectValue>
+                        {(v: string) =>
+                          ({
+                            DRAWING: "Drawing",
+                            MODEL_3D: "3D Model",
+                            SPEC_SHEET: "Spec Sheet",
+                            DATASHEET: "Datasheet",
+                            OTHER: "Other",
+                          })[v] ?? v
+                        }
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="DRAWING">Drawing</SelectItem>
@@ -756,12 +903,19 @@ export function FileDetailPanel({
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
                     <Input
                       value={linkPartSearch}
-                      onChange={(e) => { setLinkPartSearch(e.target.value); void doLinkPartSearch(e.target.value); }}
+                      onChange={(e) => {
+                        setLinkPartSearch(e.target.value);
+                        void doLinkPartSearch(e.target.value);
+                      }}
                       placeholder="Search parts..."
                       className="pl-7 h-7 text-xs"
                     />
                   </div>
-                  {linkPartSearching && <div className="flex justify-center py-1"><Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" /></div>}
+                  {linkPartSearching && (
+                    <div className="flex justify-center py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
                   {linkPartResults.length > 0 && (
                     <div className="border rounded-lg max-h-36 overflow-y-auto">
                       {linkPartResults.map((p) => (
@@ -777,9 +931,13 @@ export function FileDetailPanel({
                       ))}
                     </div>
                   )}
-                  {linkPartSearch.length >= 2 && !linkPartSearching && linkPartResults.length === 0 && (
-                    <p className="text-xs text-muted-foreground text-center py-1">No parts found</p>
-                  )}
+                  {linkPartSearch.length >= 2 &&
+                    !linkPartSearching &&
+                    linkPartResults.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-1">
+                        No parts found
+                      </p>
+                    )}
                 </div>
               )}
 
@@ -790,9 +948,11 @@ export function FileDetailPanel({
                   {linkedParts.map((lp) => (
                     <div key={lp.id} className="flex items-center gap-2 text-xs group">
                       <Package className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <Link href="/parts" className="font-mono hover:underline shrink-0">{lp.part.partNumber}</Link>
+                      <Link href="/parts" className="font-mono hover:underline shrink-0">
+                        {lp.part.partNumber}
+                      </Link>
                       <span className="truncate text-muted-foreground flex-1">{lp.part.name}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0">{lp.role}</span>
+                      <span className="text-3xs text-muted-foreground shrink-0">{lp.role}</span>
                       {!editDisabled && (
                         <button
                           onClick={() => handleUnlinkPart(lp.part.id)}
@@ -808,12 +968,29 @@ export function FileDetailPanel({
             </div>
 
             <div className="space-y-1">
-              <Label htmlFor="pn" className="text-xs">Part Number</Label>
-              <Input id="pn" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} className="h-8 text-sm" disabled={editDisabled} />
+              <Label htmlFor="pn" className="text-xs">
+                Part Number
+              </Label>
+              <Input
+                id="pn"
+                value={partNumber}
+                onChange={(e) => setPartNumber(e.target.value)}
+                className="h-8 text-sm"
+                disabled={editDisabled}
+              />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="desc" className="text-xs">Description</Label>
-              <Textarea id="desc" value={description} onChange={(e) => setDescription(e.target.value)} className="text-sm" rows={2} disabled={editDisabled} />
+              <Label htmlFor="desc" className="text-xs">
+                Description
+              </Label>
+              <Textarea
+                id="desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="text-sm"
+                rows={2}
+                disabled={editDisabled}
+              />
             </div>
           </div>
 
@@ -827,12 +1004,18 @@ export function FileDetailPanel({
                 {field.fieldType === "SELECT" && field.options ? (
                   <Select
                     value={metadataValues[field.id] || ""}
-                    onValueChange={(v) => setMetadataValues((prev) => ({ ...prev, [field.id]: v ?? "" }))}
+                    onValueChange={(v) =>
+                      setMetadataValues((prev) => ({ ...prev, [field.id]: v ?? "" }))
+                    }
                   >
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select..." />
+                    </SelectTrigger>
                     <SelectContent>
                       {field.options.map((opt) => (
-                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -840,7 +1023,9 @@ export function FileDetailPanel({
                   <Input
                     type={field.fieldType === "NUMBER" ? "number" : "text"}
                     value={metadataValues[field.id] || ""}
-                    onChange={(e) => setMetadataValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                    onChange={(e) =>
+                      setMetadataValues((prev) => ({ ...prev, [field.id]: e.target.value }))
+                    }
                     className="h-8 text-sm"
                   />
                 )}
@@ -848,28 +1033,36 @@ export function FileDetailPanel({
             ))}
           </div>
 
-          <Button onClick={handleSaveMetadata} disabled={saving || editDisabled} className="w-full" size="sm">
+          <Button
+            onClick={handleSaveMetadata}
+            disabled={saving || editDisabled}
+            className="w-full"
+            size="sm"
+          >
             <Save className="w-4 h-4 mr-2" />
             {saving ? "Saving..." : "Save Properties"}
           </Button>
 
-          {whereUsedData && (whereUsedData.boms.length + whereUsedData.representsBoms.length + whereUsedData.ecos.length > 0) && (
-            <>
-              <Separator />
-              <WhereUsedSection
-                boms={whereUsedData.boms}
-                representsBoms={whereUsedData.representsBoms}
-                ecos={whereUsedData.ecos}
-                onNavigateBom={() => router.push("/boms")}
-                onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
-              />
-            </>
-          )}
+          {whereUsedData &&
+            whereUsedData.boms.length +
+              whereUsedData.representsBoms.length +
+              whereUsedData.ecos.length >
+              0 && (
+              <>
+                <Separator />
+                <WhereUsedSection
+                  boms={whereUsedData.boms}
+                  representsBoms={whereUsedData.representsBoms}
+                  ecos={whereUsedData.ecos}
+                  onNavigateBom={() => router.push("/boms")}
+                  onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
+                />
+              </>
+            )}
           {/* The old scattered "Used in BOMs" and "Referenced in ECOs" blocks
               were merged into the WhereUsedSection above. The linkedParts
               section stays separate (higher up in this tab) because it has
               inline add/unlink management controls, not just display. */}
-
         </div>
       </TabsContent>
 
@@ -878,34 +1071,55 @@ export function FileDetailPanel({
           {/* Prefer the richer /revisions response (includes ecoId + linked
               ECO) over the inline file.versions summary, but fall back to it
               if the revisions fetch hasn't returned yet. */}
-          {(revisions.length > 0 ? revisions : file.versions.map((v) => ({
-            id: v.id,
-            version: v.version,
-            revision: null,
-            fileSize: v.fileSize,
-            comment: v.comment,
-            createdAt: v.createdAt,
-            ecoId: null,
-            uploadedBy: v.uploadedBy,
-            eco: null,
-          }))).map((v) => {
+          {(revisions.length > 0
+            ? revisions
+            : file.versions.map((v) => ({
+                id: v.id,
+                version: v.version,
+                revision: null,
+                fileSize: v.fileSize,
+                comment: v.comment,
+                createdAt: v.createdAt,
+                ecoId: null,
+                uploadedBy: v.uploadedBy,
+                eco: null,
+              }))
+          ).map((v) => {
             const isCurrent = v.version === file.currentVersion;
             return (
-              <div key={v.id} className={`border rounded p-3 text-sm space-y-1 ${isCurrent ? "border-primary/30 bg-primary/5" : ""}`}>
+              <div
+                key={v.id}
+                className={`border rounded p-3 text-sm space-y-1 ${isCurrent ? "border-primary/30 bg-primary/5" : ""}`}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">
                       {v.revision ? `Rev ${v.revision}.${v.version}` : `Version ${v.version}`}
                     </span>
-                    {isCurrent && <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Current</Badge>}
+                    {isCurrent && (
+                      <Badge variant="secondary" className="text-3xs px-1.5 py-0">
+                        Current
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
                     {!isCurrent && !file.isFrozen && !file.isCheckedOut && (
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleRestore(v.version)}>
-                        <RotateCcw className="w-3 h-3 mr-1" />Restore
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => handleRestore(v.version)}
+                      >
+                        <RotateCcw className="w-3 h-3 mr-1" />
+                        Restore
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" className="h-7" onClick={() => handleDownload(v.version)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7"
+                      onClick={() => handleDownload(v.version)}
+                    >
                       <Download className="w-3 h-3" />
                     </Button>
                   </div>
@@ -925,13 +1139,14 @@ export function FileDetailPanel({
                     Released by {v.eco.ecoNumber} &mdash; {v.eco.title}
                   </Link>
                 )}
-                {v.comment && <p className="text-muted-foreground italic">&ldquo;{v.comment}&rdquo;</p>}
+                {v.comment && (
+                  <p className="text-muted-foreground italic">&ldquo;{v.comment}&rdquo;</p>
+                )}
               </div>
             );
           })}
         </div>
       </TabsContent>
-
     </Tabs>
   );
 
@@ -957,10 +1172,18 @@ export function FileDetailPanel({
             </Button>
             <div className="min-w-0 flex-1">
               <h3 className="font-semibold truncate">{file.name}</h3>
-              <p className="text-xs text-muted-foreground truncate">{file.folder.path} &middot; Rev {file.revision}.{file.currentVersion}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {file.folder.path} &middot; Rev {file.revision}.{file.currentVersion}
+              </p>
             </div>
-            <Button variant="outline" size="sm" className="shrink-0" onClick={() => handleDownload()}>
-              <Download className="w-3.5 h-3.5 mr-1.5" />Download
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => handleDownload()}
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Download
             </Button>
             {actionsDropdown}
           </div>
@@ -972,12 +1195,12 @@ export function FileDetailPanel({
                 fileId={fileId}
                 className="h-full"
                 shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
-                onCadThumbnailCaptured={() => { void refreshFile(); }}
+                onCadThumbnailCaptured={() => {
+                  void refreshFile();
+                }}
               />
             </div>
-            <div className="w-80 lg:w-96 border-l p-4 overflow-auto shrink-0">
-              {sidebarContent}
-            </div>
+            <div className="w-80 lg:w-96 border-l p-4 overflow-auto shrink-0">{sidebarContent}</div>
           </div>
         </div>
         {shareDialog}
@@ -1007,8 +1230,12 @@ export function FileDetailPanel({
         <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0">
           <div className="px-4 pt-3 shrink-0">
             <TabsList className="w-full">
-              <TabsTrigger value="preview" className="flex-1 text-xs">Preview</TabsTrigger>
-              <TabsTrigger value="details" className="flex-1 text-xs">Details</TabsTrigger>
+              <TabsTrigger value="preview" className="flex-1 text-xs">
+                Preview
+              </TabsTrigger>
+              <TabsTrigger value="details" className="flex-1 text-xs">
+                Details
+              </TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="preview" className="flex-1 overflow-auto p-4 mt-0">
@@ -1016,7 +1243,9 @@ export function FileDetailPanel({
               fileId={fileId}
               className="min-h-[50vh]"
               shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
-              onCadThumbnailCaptured={() => { void refreshFile(); }}
+              onCadThumbnailCaptured={() => {
+                void refreshFile();
+              }}
             />
           </TabsContent>
           <TabsContent value="details" className="flex-1 overflow-auto p-4 mt-0">

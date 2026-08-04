@@ -1,62 +1,44 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant, conflict } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { requireFileAccess } from "@/lib/folder-access-guards";
+import { loadFile } from "@/lib/folder-access-guards";
+import { z, uuid } from "@/lib/validation";
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ fileId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    const { fileId } = await params;
+const ParamsSchema = z.object({ fileId: uuid });
 
-    if (!hasPermission(permissions, PERMISSIONS.FILE_DELETE)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const db = getServiceClient();
-
-    const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
-
-    const access = await requireFileAccess(tenantUser, file, "edit");
-    if (!access.ok) return access.response;
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.FILE_DELETE, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
+    // `loadFile` already excludes soft-deleted rows, so a second delete of the
+    // same file now 404s as "File not found" rather than "File already
+    // deleted". Same status, and it stops the endpoint confirming that a
+    // deleted file ever existed.
+    const file = await loadFile(db, tenantUser, params.fileId, "edit");
 
     if (file.isCheckedOut) {
-      return NextResponse.json({ error: "Cannot delete a checked-out file" }, { status: 409 });
+      throw conflict("Cannot delete a checked-out file");
     }
-
     if (file.lifecycleState === "Released") {
-      return NextResponse.json({ error: "Cannot delete a released file. Mark it as obsolete first." }, { status: 409 });
-    }
-
-    if (file.deletedAt) {
-      return NextResponse.json({ error: "File already deleted" }, { status: 404 });
+      throw conflict("Cannot delete a released file. Mark it as obsolete first.");
     }
 
     // Soft-delete: mark the file as deleted instead of removing the row.
     // Child rows (versions, metadata) are left intact for audit trail.
-    const { error: updateError } = await db
+    const { error } = await db
       .from("files")
       .update({ deletedAt: new Date().toISOString() })
-      .eq("id", fileId);
-    if (updateError) throw updateError;
+      .eq("id", params.fileId);
+    if (error) throw new Error(error.message);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "file.delete", entityType: "file", entityId: fileId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "file.delete",
+      entityType: "file",
+      entityId: params.fileId,
       details: { name: file.name },
     });
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("DELETE /api/files/[fileId] failed:", err);
-    return NextResponse.json({ error: "Failed to delete file" }, { status: 500 });
+    return { success: true };
   }
-}
+);

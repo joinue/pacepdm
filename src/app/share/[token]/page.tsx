@@ -9,11 +9,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function SharePage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   return <ShareViewerClient token={token} />;
 }

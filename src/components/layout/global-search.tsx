@@ -12,16 +12,9 @@ import {
   CommandItem,
   CommandSeparator,
 } from "@/components/ui/command";
-import {
-  FileText,
-  Layers,
-  Search,
-  ArrowRight,
-  ClipboardList,
-  Cpu,
-  FolderOpen,
-} from "lucide-react";
+import { FileText, Layers, Search, ArrowRight, ClipboardList, Cpu, FolderOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 interface FileResult {
   id: string;
@@ -59,23 +52,6 @@ interface FolderResult {
   name: string;
   path: string;
 }
-
-const lifecycleColors: Record<string, string> = {
-  WIP: "warning",
-  "In Review": "info",
-  Released: "success",
-  Obsolete: "error",
-};
-
-const ecoStatusColors: Record<string, string> = {
-  DRAFT: "muted",
-  SUBMITTED: "info",
-  IN_REVIEW: "warning",
-  APPROVED: "success",
-  REJECTED: "error",
-  IMPLEMENTED: "purple",
-  CLOSED: "muted",
-};
 
 export function GlobalSearch() {
   const [open, setOpen] = useState(false);
@@ -128,36 +104,33 @@ export function GlobalSearch() {
     setFolders([]);
   }, []);
 
-  const search = useCallback(
-    async (q: string) => {
-      if (!q.trim()) {
-        setFiles([]);
-        setEcos([]);
-        setParts([]);
-        setBoms([]);
-        setFolders([]);
-        return;
-      }
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        setFiles((data.files || []).slice(0, 5));
-        setEcos((data.ecos || []).slice(0, 5));
-        setParts((data.parts || []).slice(0, 5));
-        setBoms((data.boms || []).slice(0, 5));
-        setFolders((data.folders || []).slice(0, 5));
-      } catch {
-        setFiles([]);
-        setEcos([]);
-        setParts([]);
-        setBoms([]);
-        setFolders([]);
-      }
-      setLoading(false);
-    },
-    []
-  );
+  const search = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setFiles([]);
+      setEcos([]);
+      setParts([]);
+      setBoms([]);
+      setFolders([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setFiles((data.files || []).slice(0, 5));
+      setEcos((data.ecos || []).slice(0, 5));
+      setParts((data.parts || []).slice(0, 5));
+      setBoms((data.boms || []).slice(0, 5));
+      setFolders((data.folders || []).slice(0, 5));
+    } catch {
+      setFiles([]);
+      setEcos([]);
+      setParts([]);
+      setBoms([]);
+      setFolders([]);
+    }
+    setLoading(false);
+  }, []);
 
   function handleValueChange(value: string) {
     setQuery(value);
@@ -201,7 +174,12 @@ export function GlobalSearch() {
     }
   }
 
-  const hasResults = files.length > 0 || ecos.length > 0 || parts.length > 0 || boms.length > 0 || folders.length > 0;
+  const hasResults =
+    files.length > 0 ||
+    ecos.length > 0 ||
+    parts.length > 0 ||
+    boms.length > 0 ||
+    folders.length > 0;
   const hasQuery = query.trim().length > 0;
 
   return (
@@ -213,8 +191,8 @@ export function GlobalSearch() {
       >
         <Search className="w-3 h-3" />
         <span>Search...</span>
-        <kbd className="pointer-events-none ml-1 inline-flex h-4.5 items-center gap-0.5 rounded border border-border/60 bg-background/80 px-1 font-mono text-[10px] font-medium text-muted-foreground/70">
-          <span className="text-[11px]">⌘</span>K
+        <kbd className="pointer-events-none ml-1 inline-flex h-4.5 items-center gap-0.5 rounded border border-border/60 bg-background/80 px-1 font-mono text-3xs font-medium text-muted-foreground/70">
+          <span className="text-2xs">⌘</span>K
         </kbd>
       </button>
 
@@ -242,9 +220,7 @@ export function GlobalSearch() {
           />
           <CommandList>
             {loading && hasQuery && (
-              <div className="py-4 text-center text-xs text-muted-foreground">
-                Searching...
-              </div>
+              <div className="py-4 text-center text-xs text-muted-foreground">Searching...</div>
             )}
 
             {!loading && hasQuery && !hasResults && (
@@ -278,23 +254,16 @@ export function GlobalSearch() {
                     <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm truncate">{file.name}</span>
-                      <span className="text-[11px] text-muted-foreground truncate">
+                      <span className="text-2xs text-muted-foreground truncate">
                         {file.partNumber && `${file.partNumber} · `}
                         {file.folder?.path || file.category}
                       </span>
                     </div>
-                    <Badge
-                      variant={
-                        (lifecycleColors[file.lifecycleState] as
-                          | "warning"
-                          | "info"
-                          | "success"
-                          | "error") || "secondary"
-                      }
-                      className="ml-auto text-[10px] px-1.5 py-0 shrink-0"
-                    >
-                      {file.lifecycleState}
-                    </Badge>
+                    <StatusBadge
+                      status={file.lifecycleState}
+                      kind="lifecycle"
+                      className="ml-auto text-3xs px-1.5 py-0 shrink-0"
+                    />
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -313,24 +282,15 @@ export function GlobalSearch() {
                       <ClipboardList className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div className="flex flex-col min-w-0">
                         <span className="text-sm truncate">{eco.title}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-2xs text-muted-foreground truncate">
                           {eco.ecoNumber}
                         </span>
                       </div>
-                      <Badge
-                        variant={
-                          (ecoStatusColors[eco.status] as
-                            | "warning"
-                            | "info"
-                            | "success"
-                            | "error"
-                            | "purple"
-                            | "muted") || "secondary"
-                        }
-                        className="ml-auto text-[10px] px-1.5 py-0 shrink-0"
-                      >
-                        {eco.status.replace("_", " ")}
-                      </Badge>
+                      <StatusBadge
+                        status={eco.status}
+                        kind="eco"
+                        className="ml-auto text-3xs px-1.5 py-0 shrink-0"
+                      />
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -350,22 +310,15 @@ export function GlobalSearch() {
                       <Cpu className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div className="flex flex-col min-w-0">
                         <span className="text-sm truncate">{part.name}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-2xs text-muted-foreground truncate">
                           {part.partNumber} · {part.category}
                         </span>
                       </div>
-                      <Badge
-                        variant={
-                          (lifecycleColors[part.lifecycleState] as
-                            | "warning"
-                            | "info"
-                            | "success"
-                            | "error") || "secondary"
-                        }
-                        className="ml-auto text-[10px] px-1.5 py-0 shrink-0"
-                      >
-                        {part.lifecycleState}
-                      </Badge>
+                      <StatusBadge
+                        status={part.lifecycleState}
+                        kind="lifecycle"
+                        className="ml-auto text-3xs px-1.5 py-0 shrink-0"
+                      />
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -389,7 +342,7 @@ export function GlobalSearch() {
                       {bom.status && (
                         <Badge
                           variant="secondary"
-                          className="ml-auto text-[10px] px-1.5 py-0 shrink-0"
+                          className="ml-auto text-3xs px-1.5 py-0 shrink-0"
                         >
                           {bom.status}
                         </Badge>
@@ -402,7 +355,9 @@ export function GlobalSearch() {
 
             {folders.length > 0 && (
               <>
-                {(files.length > 0 || ecos.length > 0 || parts.length > 0 || boms.length > 0) && <CommandSeparator />}
+                {(files.length > 0 || ecos.length > 0 || parts.length > 0 || boms.length > 0) && (
+                  <CommandSeparator />
+                )}
                 <CommandGroup heading="Folders">
                   {folders.map((folder) => (
                     <CommandItem
@@ -413,7 +368,7 @@ export function GlobalSearch() {
                       <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
                       <div className="flex flex-col min-w-0">
                         <span className="text-sm truncate">{folder.name}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-2xs text-muted-foreground truncate">
                           {folder.path}
                         </span>
                       </div>
@@ -427,14 +382,9 @@ export function GlobalSearch() {
               <>
                 <CommandSeparator />
                 <CommandGroup>
-                  <CommandItem
-                    value="full-search"
-                    onSelect={goToFullSearch}
-                  >
+                  <CommandItem value="full-search" onSelect={goToFullSearch}>
                     <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm">
-                      See all results for &ldquo;{query}&rdquo;
-                    </span>
+                    <span className="text-sm">See all results for &ldquo;{query}&rdquo;</span>
                   </CommandItem>
                 </CommandGroup>
               </>

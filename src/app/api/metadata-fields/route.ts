@@ -1,9 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
-import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { z, nonEmptyString } from "@/lib/validation";
 
 const CreateFieldSchema = z.object({
   name: nonEmptyString,
@@ -14,28 +13,16 @@ const CreateFieldSchema = z.object({
 
 const DeleteFieldSchema = z.object({ fieldId: nonEmptyString });
 
-export async function POST(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-
-    if (!hasPermission(permissions, PERMISSIONS.ADMIN_METADATA)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const parsed = await parseBody(request, CreateFieldSchema);
-    if (!parsed.ok) return parsed.response;
-    const { name, fieldType, options, isRequired } = parsed.data;
-
-    const db = getServiceClient();
+export const POST = withTenant(
+  { permission: PERMISSIONS.ADMIN_METADATA, body: CreateFieldSchema },
+  async ({ db, tenantUser, body }) => {
     const now = new Date().toISOString();
+    const fieldType = body.fieldType || "TEXT";
 
     // Get next sort order
     const { data: existing } = await db
       .from("metadata_fields")
       .select("sortOrder")
-      .eq("tenantId", tenantUser.tenantId)
       .order("sortOrder", { ascending: false })
       .limit(1);
 
@@ -45,11 +32,10 @@ export async function POST(request: NextRequest) {
       .from("metadata_fields")
       .insert({
         id: uuid(),
-        tenantId: tenantUser.tenantId,
-        name,
-        fieldType: fieldType || "TEXT",
-        options: options ?? null,
-        isRequired: isRequired || false,
+        name: body.name,
+        fieldType,
+        options: body.options ?? null,
+        isRequired: body.isRequired || false,
         isSystem: false,
         sortOrder: nextSort,
         appliesTo: [],
@@ -60,59 +46,49 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      if (error.code === "23505") {
-        return NextResponse.json({ error: "A field with this name already exists" }, { status: 409 });
-      }
-      throw error;
+      if (error.code === "23505") throw conflict("A field with this name already exists");
+      throw new Error(error.message);
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "metadata_field.create", entityType: "metadata_field",
-      entityId: field.id, details: { name, fieldType: fieldType || "TEXT" },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "metadata_field.create",
+      entityType: "metadata_field",
+      entityId: field.id,
+      details: { name: body.name, fieldType },
     });
 
-    return NextResponse.json(field);
-  } catch (err) {
-    console.error("Failed to create field:", err);
-    const message = err instanceof Error ? err.message : "Failed to create field";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return field;
   }
-}
+);
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.ADMIN_METADATA, body: DeleteFieldSchema },
+  async ({ db, tenantUser, body }) => {
+    const { data: field } = await db
+      .from("metadata_fields")
+      .select("*")
+      .eq("id", body.fieldId)
+      .maybeSingle();
 
-    if (!hasPermission(permissions, PERMISSIONS.ADMIN_METADATA)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    if (!field) throw notFound("Field not found");
+    if (field.isSystem) throw badRequest("Cannot delete system fields");
 
-    const parsed = await parseBody(request, DeleteFieldSchema);
-    if (!parsed.ok) return parsed.response;
-    const { fieldId } = parsed.data;
+    // lint-conventions-allow: child-table-direct-query — parent resolved above through
+    // the scoped client, which 404s on another tenant's fieldId before we reach here.
+    await db.from("metadata_values").delete().eq("fieldId", body.fieldId);
+    await db.from("metadata_fields").delete().eq("id", body.fieldId);
 
-    const db = getServiceClient();
+    await logAudit({
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "metadata_field.delete",
+      entityType: "metadata_field",
+      entityId: body.fieldId,
+      details: { name: field.name },
+    });
 
-    const { data: field } = await db.from("metadata_fields").select("*").eq("id", fieldId).single();
-    if (!field || field.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json({ error: "Field not found" }, { status: 404 });
-    }
-    if (field.isSystem) {
-      return NextResponse.json({ error: "Cannot delete system fields" }, { status: 400 });
-    }
-
-    await db.from("metadata_values").delete().eq("fieldId", fieldId);
-    await db.from("metadata_fields").delete().eq("id", fieldId);
-
-    await logAudit({ tenantId: tenantUser.tenantId, userId: tenantUser.id, action: "metadata_field.delete", entityType: "metadata_field", entityId: fieldId, details: { name: field.name } });
-
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("Failed to delete field:", err);
-    const message = err instanceof Error ? err.message : "Failed to delete field";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { success: true };
   }
-}
+);

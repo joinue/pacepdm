@@ -48,7 +48,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           <AlertTriangle className="w-8 h-8 text-destructive mb-3" />
           <h3 className="text-sm font-medium">Something went wrong</h3>
           <p className="text-xs text-muted-foreground mt-1 max-w-md">
-            {this.state.error.message || "An unexpected error occurred while rendering this section."}
+            {this.state.error.message ||
+              "An unexpected error occurred while rendering this section."}
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={this.reset}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />

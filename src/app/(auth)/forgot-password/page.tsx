@@ -54,8 +54,9 @@ export default function ForgotPasswordPage() {
                 <Mail className="w-7 h-7 sm:w-6 sm:h-6 text-primary" />
               </div>
               <p className="text-sm text-muted-foreground">
-                We sent a password reset link to <span className="font-medium text-foreground">{email}</span>.
-                Check your inbox and follow the link to reset your password.
+                We sent a password reset link to{" "}
+                <span className="font-medium text-foreground">{email}</span>. Check your inbox and
+                follow the link to reset your password.
               </p>
             </div>
           ) : (
@@ -68,7 +69,9 @@ export default function ForgotPasswordPage() {
                 )}
 
                 <div className="space-y-2 sm:space-y-1.5">
-                  <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
+                  <Label htmlFor="email" className="text-sm sm:text-xs">
+                    Email
+                  </Label>
                   <Input
                     id="email"
                     type="email"
@@ -82,7 +85,11 @@ export default function ForgotPasswordPage() {
                   />
                 </div>
 
-                <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+                <Button
+                  type="submit"
+                  className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+                  disabled={loading}
+                >
                   {loading ? "Sending..." : "Send Reset Link"}
                 </Button>
               </div>
@@ -90,7 +97,10 @@ export default function ForgotPasswordPage() {
           )}
 
           <div className="flex justify-center mt-6 sm:mt-4">
-            <Link href="/login" className="text-sm sm:text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+            <Link
+              href="/login"
+              className="text-sm sm:text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+            >
               <ArrowLeft className="w-4 h-4 sm:w-3 sm:h-3" />
               Back to sign in
             </Link>

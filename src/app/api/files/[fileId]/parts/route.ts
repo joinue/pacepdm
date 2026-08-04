@@ -28,12 +28,15 @@ export async function GET(
       .select("id")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
     const { data } = await db
       .from("part_files")
-      .select("id, role, isPrimary, createdAt, part:parts!part_files_partId_fkey(id, partNumber, name, lifecycleState, category)")
+      .select(
+        "id, role, isPrimary, createdAt, part:parts!part_files_partId_fkey(id, partNumber, name, lifecycleState, category)"
+      )
       .eq("fileId", fileId);
 
     return NextResponse.json(data || []);
@@ -69,11 +72,16 @@ export async function POST(
       .select("id, name, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
     // Checked-out files can only have links changed by the checkout owner (or admins)
-    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+    if (
+      fileRecord.isCheckedOut &&
+      fileRecord.checkedOutById !== tenantUser.id &&
+      !permissions.includes("*")
+    ) {
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
@@ -83,21 +91,29 @@ export async function POST(
       .select("id, partNumber, name")
       .eq("id", body.partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!partRecord) return NextResponse.json({ error: "Part not found" }, { status: 404 });
 
-    const { data: pf, error } = await db.from("part_files").insert({
-      id: uuid(),
-      partId: body.partId,
-      fileId,
-      role: body.role || "DRAWING",
-      isPrimary: false,
-      createdAt: new Date().toISOString(),
-    }).select().single();
+    const { data: pf, error } = await db
+      .from("part_files")
+      .insert({
+        id: uuid(),
+        partId: body.partId,
+        fileId,
+        role: body.role || "DRAWING",
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "This file is already linked to this part" }, { status: 409 });
+        return NextResponse.json(
+          { error: "This file is already linked to this part" },
+          { status: 409 }
+        );
       }
       throw error;
     }
@@ -144,10 +160,15 @@ export async function DELETE(
       .select("id, isCheckedOut, checkedOutById")
       .eq("id", fileId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!fileRecord) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
-    if (fileRecord.isCheckedOut && fileRecord.checkedOutById !== tenantUser.id && !permissions.includes("*")) {
+    if (
+      fileRecord.isCheckedOut &&
+      fileRecord.checkedOutById !== tenantUser.id &&
+      !permissions.includes("*")
+    ) {
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
@@ -157,6 +178,7 @@ export async function DELETE(
       .select("partNumber, name")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
 
     await db.from("part_files").delete().eq("partId", partId).eq("fileId", fileId);

@@ -50,10 +50,7 @@ function consume(key: string, config: LimiterConfig): boolean {
     buckets.set(key, bucket);
   } else {
     const elapsedSec = (nowMs - bucket.lastRefillMs) / 1000;
-    bucket.tokens = Math.min(
-      config.capacity,
-      bucket.tokens + elapsedSec * config.refillPerSec
-    );
+    bucket.tokens = Math.min(config.capacity, bucket.tokens + elapsedSec * config.refillPerSec);
     bucket.lastRefillMs = nowMs;
   }
   if (bucket.tokens < 1) return false;

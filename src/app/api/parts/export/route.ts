@@ -60,9 +60,7 @@ export async function GET(request: NextRequest) {
       .order("partNumber");
 
     if (q) {
-      query = query.or(
-        `name.ilike.%${q}%,partNumber.ilike.%${q}%,description.ilike.%${q}%`
-      );
+      query = query.or(`name.ilike.%${q}%,partNumber.ilike.%${q}%,description.ilike.%${q}%`);
     }
     if (category && category !== "all") query = query.eq("category", category);
     if (state && state !== "all") query = query.eq("lifecycleState", state);
@@ -70,10 +68,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.limit(EXPORT_LIMIT);
     if (error) {
       console.error("[parts/export] query failed:", error);
-      return NextResponse.json(
-        { error: `Query failed: ${error.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Query failed: ${error.message}` }, { status: 500 });
     }
 
     const rows = (data ?? []).map((row) =>

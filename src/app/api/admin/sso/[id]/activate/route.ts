@@ -5,13 +5,14 @@ import { logAudit } from "@/lib/audit";
 import { z, parseBody } from "@/lib/validation";
 import { createSupabaseSamlProvider } from "@/lib/sso-admin";
 
-const ActivateSchema = z.object({
-  metadataUrl: z.string().url().optional(),
-  metadataXml: z.string().min(10).optional(),
-}).refine(
-  (v) => !!v.metadataUrl || !!v.metadataXml,
-  { message: "Provide metadataUrl or metadataXml" }
-);
+const ActivateSchema = z
+  .object({
+    metadataUrl: z.string().url().optional(),
+    metadataXml: z.string().min(10).optional(),
+  })
+  .refine((v) => !!v.metadataUrl || !!v.metadataXml, {
+    message: "Provide metadataUrl or metadataXml",
+  });
 
 /**
  * Ingest the IdP SAML metadata and register the provider with
@@ -20,10 +21,7 @@ const ActivateSchema = z.object({
  * users. The Supabase-side provider is bound to this single domain,
  * so two tenants cannot share a provider even if their IdPs overlap.
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -55,7 +53,10 @@ export async function POST(
       // Already has a provider. For MVP we refuse to double-create;
       // admin can delete and re-add to change metadata.
       return NextResponse.json(
-        { error: "This domain already has a registered provider. Remove and re-add it to change the metadata." },
+        {
+          error:
+            "This domain already has a registered provider. Remove and re-add it to change the metadata.",
+        },
         { status: 409 }
       );
     }

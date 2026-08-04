@@ -12,12 +12,7 @@ import { logAudit } from "@/lib/audit";
 // shared with the files module, under `{tenantId}/thumbnails/parts/`.
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB — thumbnails should be small
-const ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-]);
+const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function extFromMime(mime: string): string {
   if (mime === "image/jpeg") return "jpg";
@@ -29,7 +24,7 @@ function extFromMime(mime: string): string {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ partId: string }> },
+  { params }: { params: Promise<{ partId: string }> }
 ) {
   try {
     const tenantUser = await getApiTenantUser();
@@ -47,6 +42,7 @@ export async function POST(
       .select("id, partNumber, thumbnailKey")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!part) return NextResponse.json({ error: "Part not found" }, { status: 404 });
 
@@ -75,7 +71,10 @@ export async function POST(
     // row already points at the new key.
     const oldKey = (part as { thumbnailKey: string | null }).thumbnailKey;
     if (oldKey) {
-      await db.storage.from("vault").remove([oldKey]).catch(() => undefined);
+      await db.storage
+        .from("vault")
+        .remove([oldKey])
+        .catch(() => undefined);
     }
 
     const { error: updErr } = await db
@@ -107,7 +106,7 @@ export async function POST(
 
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: Promise<{ partId: string }> },
+  { params }: { params: Promise<{ partId: string }> }
 ) {
   try {
     const tenantUser = await getApiTenantUser();
@@ -125,12 +124,16 @@ export async function DELETE(
       .select("id, partNumber, thumbnailKey")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!part) return NextResponse.json({ error: "Part not found" }, { status: 404 });
 
     const oldKey = (part as { thumbnailKey: string | null }).thumbnailKey;
     if (oldKey) {
-      await db.storage.from("vault").remove([oldKey]).catch(() => undefined);
+      await db.storage
+        .from("vault")
+        .remove([oldKey])
+        .catch(() => undefined);
     }
 
     await db

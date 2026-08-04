@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant, notFound } from "@/lib/api-route";
 import { getReleaseForEco } from "@/lib/releases";
+import { z, uuid } from "@/lib/validation";
 
 /**
  * GET /api/ecos/[ecoId]/release
@@ -10,25 +9,15 @@ import { getReleaseForEco } from "@/lib/releases";
  * implemented yet. Used by the ECO detail page to surface a "View release"
  * link once implementation has happened.
  */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { ecoId } = await params;
-    const db = getServiceClient();
-    const release = await getReleaseForEco(db, tenantUser.tenantId, ecoId);
-    if (!release) {
-      return NextResponse.json({ error: "No release for this ECO" }, { status: 404 });
-    }
-    return NextResponse.json(release);
-  } catch (err) {
-    console.error("Failed to fetch release:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch release";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+
+const ParamsSchema = z.object({ ecoId: uuid });
+
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
+  const release = await getReleaseForEco(
+    db.unscoped("releases helper takes a raw client and scopes by the tenantId passed in"),
+    tenantUser.tenantId,
+    params.ecoId
+  );
+  if (!release) throw notFound("No release for this ECO");
+  return release;
+});

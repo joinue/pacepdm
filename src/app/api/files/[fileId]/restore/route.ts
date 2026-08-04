@@ -26,7 +26,7 @@ export async function POST(
 
     const db = getServiceClient();
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -34,10 +34,16 @@ export async function POST(
     if (!access.ok) return access.response;
 
     if (file.isCheckedOut) {
-      return NextResponse.json({ error: "Cannot restore while file is checked out" }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot restore while file is checked out" },
+        { status: 409 }
+      );
     }
     if (file.isFrozen) {
-      return NextResponse.json({ error: "Cannot restore a frozen file. Use Change State first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot restore a frozen file. Use Change State first." },
+        { status: 409 }
+      );
     }
 
     const parsed = await parseBody(request, RestoreSchema);
@@ -45,7 +51,10 @@ export async function POST(
     const targetVersion = parsed.data.version;
 
     if (targetVersion >= file.currentVersion) {
-      return NextResponse.json({ error: "Cannot restore current or future version" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Cannot restore current or future version" },
+        { status: 400 }
+      );
     }
 
     // Fetch the version to restore
@@ -76,11 +85,14 @@ export async function POST(
       createdAt: now,
     });
 
-    await db.from("files").update({
-      currentVersion: newVersion,
-      updatedAt: now,
-      thumbnailKey: file.thumbnailKey, // keep current thumbnail
-    }).eq("id", fileId);
+    await db
+      .from("files")
+      .update({
+        currentVersion: newVersion,
+        updatedAt: now,
+        thumbnailKey: file.thumbnailKey, // keep current thumbnail
+      })
+      .eq("id", fileId);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

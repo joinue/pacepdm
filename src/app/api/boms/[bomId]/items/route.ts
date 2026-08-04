@@ -21,12 +21,16 @@ async function requireBomMutable(
   db: ReturnType<typeof getServiceClient>,
   bomId: string,
   tenantId: string
-): Promise<{ ok: true; bom: { id: string; status: string; fileId: string | null } } | { ok: false; status: number; error: string }> {
+): Promise<
+  | { ok: true; bom: { id: string; status: string; fileId: string | null } }
+  | { ok: false; status: number; error: string }
+> {
   const { data: bom } = await db
     .from("boms")
     .select("id, status, fileId, file:files!boms_fileId_fkey(isFrozen)")
     .eq("id", bomId)
     .eq("tenantId", tenantId)
+    .is("deletedAt", null)
     .single();
 
   if (!bom) {
@@ -42,7 +46,8 @@ async function requireBomMutable(
     return {
       ok: false,
       status: 409,
-      error: "Cannot modify items on a BOM whose parent file is frozen/released. Revise the file first.",
+      error:
+        "Cannot modify items on a BOM whose parent file is frozen/released. Revise the file first.",
     };
   }
   return { ok: true, bom: { id: bom.id, status: bom.status, fileId: bom.fileId } };
@@ -70,6 +75,7 @@ async function checkLinkedBomSafe(
     .select("id")
     .eq("id", targetBomId)
     .eq("tenantId", tenantId)
+    .is("deletedAt", null)
     .single();
   if (!target) {
     return { ok: false, error: "Linked BOM not found" };
@@ -95,6 +101,7 @@ async function checkLinkedBomSafe(
         .from("boms")
         .select("id, name, revision")
         .eq("tenantId", tenantId)
+        .is("deletedAt", null)
         .in("id", ids),
       db
         .from("bom_items")
@@ -169,7 +176,9 @@ const PostBodySchema = z.union([
   BomItemInputSchema,
   // Bulk insert (CSV import path)
   z.object({
-    items: z.array(BomItemInputSchema).max(1000, "Cannot insert more than 1000 items in a single batch"),
+    items: z
+      .array(BomItemInputSchema)
+      .max(1000, "Cannot insert more than 1000 items in a single batch"),
   }),
 ]);
 
@@ -197,6 +206,7 @@ export async function GET(
       .select("id")
       .eq("id", bomId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!bom) {
       return NextResponse.json({ error: "BOM not found" }, { status: 404 });
@@ -211,7 +221,9 @@ export async function GET(
       // for free-text items and for deleted parts, but when partId is
       // set the table reads partNumber/name/description/material/unit/
       // unitCost/revision/lifecycleState from the part itself.
-      .select("*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, description, category, revision, lifecycleState, material, unit, unitCost, thumbnailKey), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status)")
+      .select(
+        "*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, description, category, revision, lifecycleState, material, unit, unitCost, thumbnailKey), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status)"
+      )
       .eq("bomId", bomId)
       .order("sortOrder");
 
@@ -223,8 +235,8 @@ export async function GET(
       new Set(
         rows
           .map((r) => (r.part as { thumbnailKey: string | null } | null)?.thumbnailKey)
-          .filter((k): k is string => !!k),
-      ),
+          .filter((k): k is string => !!k)
+      )
     );
     const urlByKey = new Map<string, string>();
     if (keys.length > 0) {
@@ -232,7 +244,7 @@ export async function GET(
         keys.map(async (k) => {
           const { data } = await db.storage.from("vault").createSignedUrl(k, 300);
           if (data?.signedUrl) urlByKey.set(k, data.signedUrl);
-        }),
+        })
       );
     }
     const withThumbs = rows.map((r) => {
@@ -287,6 +299,7 @@ async function fetchPartSnapshots(
       .from("parts")
       .select("id, partNumber, name, description, material, unitCost, unit")
       .eq("tenantId", tenantId)
+      .is("deletedAt", null)
       .in("id", ids),
     db
       .from("part_vendors")
@@ -298,7 +311,11 @@ async function fetchPartSnapshots(
   // primaryLinks is keyed by partId — each part has at most one primary
   // vendor (enforced by the UI which clears others on insert).
   const primaryByPart = new Map<string, { unitCost: number | null; vendorName: string | null }>();
-  for (const row of (primaryLinks || []) as unknown as Array<{ partId: string; unitCost: number | null; vendor: { name: string } | null }>) {
+  for (const row of (primaryLinks || []) as unknown as Array<{
+    partId: string;
+    unitCost: number | null;
+    vendor: { name: string } | null;
+  }>) {
     primaryByPart.set(row.partId, {
       unitCost: row.unitCost,
       vendorName: row.vendor?.name ?? null,
@@ -306,7 +323,15 @@ async function fetchPartSnapshots(
   }
 
   const map = new Map<string, PartSnapshot>();
-  for (const row of (parts || []) as unknown as Array<{ id: string; partNumber: string | null; name: string | null; description: string | null; material: string | null; unitCost: number | null; unit: string | null }>) {
+  for (const row of (parts || []) as unknown as Array<{
+    id: string;
+    partNumber: string | null;
+    name: string | null;
+    description: string | null;
+    material: string | null;
+    unitCost: number | null;
+    unit: string | null;
+  }>) {
     const primary = primaryByPart.get(row.id);
     map.set(row.id, {
       partNumber: row.partNumber,
@@ -326,7 +351,15 @@ async function fetchPartSnapshots(
 
 // Fill missing fields on the input from the snapshot. "Missing" means
 // undefined OR null OR empty string — any explicit value wins.
-const SNAPSHOT_FIELDS = ["partNumber", "name", "description", "material", "unitCost", "unit", "vendor"] as const;
+const SNAPSHOT_FIELDS = [
+  "partNumber",
+  "name",
+  "description",
+  "material",
+  "unitCost",
+  "unit",
+  "vendor",
+] as const;
 
 function applyPartSnapshot(input: BomItemInput, snap: PartSnapshot | undefined): BomItemInput {
   if (!snap) return input;
@@ -418,8 +451,11 @@ export async function POST(
       if (error) throw error;
 
       await logAudit({
-        tenantId: tenantUser.tenantId, userId: tenantUser.id,
-        action: "bom.item.bulk_add", entityType: "bom", entityId: bomId,
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        action: "bom.item.bulk_add",
+        entityType: "bom",
+        entityId: bomId,
         details: { count: inserted?.length ?? 0 },
       });
 
@@ -445,8 +481,11 @@ export async function POST(
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "bom.item.add", entityType: "bom", entityId: bomId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "bom.item.add",
+      entityType: "bom",
+      entityId: bomId,
       details: { itemName: single.name || "", itemNumber: single.itemNumber || "" },
     });
 
@@ -491,8 +530,11 @@ export async function DELETE(
     await db.from("bom_items").delete().eq("id", itemId).eq("bomId", bomId);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "bom.item.delete", entityType: "bom", entityId: bomId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "bom.item.delete",
+      entityType: "bom",
+      entityId: bomId,
       details: { itemName: existing?.name || "", itemNumber: existing?.itemNumber || "" },
     });
 
@@ -549,7 +591,23 @@ export async function PUT(
       updatedAt: new Date().toISOString(),
     };
 
-    const fields = ["fileId", "partId", "linkedBomId", "itemNumber", "partNumber", "name", "description", "quantity", "unit", "level", "parentItemId", "material", "vendor", "unitCost", "sortOrder"] as const;
+    const fields = [
+      "fileId",
+      "partId",
+      "linkedBomId",
+      "itemNumber",
+      "partNumber",
+      "name",
+      "description",
+      "quantity",
+      "unit",
+      "level",
+      "parentItemId",
+      "material",
+      "vendor",
+      "unitCost",
+      "sortOrder",
+    ] as const;
     for (const field of fields) {
       if (effectiveBody[field] !== undefined) {
         updates[field] = effectiveBody[field];
@@ -567,8 +625,11 @@ export async function PUT(
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "bom.item.update", entityType: "bom", entityId: bomId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "bom.item.update",
+      entityType: "bom",
+      entityId: bomId,
       details: { itemName: item.name, itemNumber: item.itemNumber },
     });
 

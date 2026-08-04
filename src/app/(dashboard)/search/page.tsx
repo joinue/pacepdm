@@ -7,15 +7,40 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  Search, Lock, Download, SearchX, FileText, ClipboardList, Cpu, Package,
-  X, SlidersHorizontal, Bookmark, BookmarkPlus, ArrowUpDown, Clock,
-  SortAsc, Users, FolderOpen, Hash, Tag, ChevronRight,
+  Search,
+  Lock,
+  Download,
+  SearchX,
+  FileText,
+  ClipboardList,
+  Cpu,
+  Package,
+  X,
+  SlidersHorizontal,
+  Bookmark,
+  BookmarkPlus,
+  ArrowUpDown,
+  Clock,
+  SortAsc,
+  Users,
+  FolderOpen,
+  Hash,
+  Tag,
+  ChevronRight,
 } from "lucide-react";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { priorityVariants } from "@/app/(dashboard)/ecos/constants";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 // --- Types ---
 
@@ -82,28 +107,18 @@ interface SavedSearch {
   userId: string;
 }
 
-// --- Variants ---
-
-const lifecycleVariants: Record<string, "warning" | "info" | "success" | "error" | "muted"> = {
-  WIP: "warning", "In Review": "info", Released: "success", Obsolete: "error",
-};
-
-const ecoStatusVariants: Record<string, "muted" | "info" | "warning" | "success" | "error" | "purple"> = {
-  DRAFT: "muted", SUBMITTED: "info", IN_REVIEW: "warning", APPROVED: "success",
-  REJECTED: "error", IMPLEMENTED: "purple", CLOSED: "muted",
-};
-
-const priorityVariants: Record<string, "muted" | "info" | "orange" | "error"> = {
-  LOW: "muted", MEDIUM: "info", HIGH: "orange", CRITICAL: "error",
-};
-
-const bomStatusVariants: Record<string, "muted" | "info" | "warning" | "success" | "error"> = {
-  DRAFT: "muted", IN_REVIEW: "warning", APPROVED: "info", RELEASED: "success", OBSOLETE: "error",
-};
+// This page used to keep its own copies of the status→tone maps, and they had
+// already drifted: a BOM in OBSOLETE rendered "error" here and "purple" on the
+// BOMs page. Every status now renders through <StatusBadge>, so there is
+// nothing local left to drift.
 
 const categoryLabels: Record<string, string> = {
-  PART: "Part", ASSEMBLY: "Assembly", DRAWING: "Drawing",
-  DOCUMENT: "Document", PURCHASED: "Purchased", OTHER: "Other",
+  PART: "Part",
+  ASSEMBLY: "Assembly",
+  DRAWING: "Drawing",
+  DOCUMENT: "Document",
+  PURCHASED: "Purchased",
+  OTHER: "Other",
 };
 
 // --- Highlight helper ---
@@ -116,7 +131,9 @@ function HighlightText({ text, query }: { text: string; query: string }) {
     <>
       {parts.map((part, i) =>
         part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} className="bg-primary/20 text-foreground rounded-sm px-0.5">{part}</mark>
+          <mark key={i} className="bg-primary/20 text-foreground rounded-sm px-0.5">
+            {part}
+          </mark>
         ) : (
           <span key={i}>{part}</span>
         )
@@ -143,10 +160,9 @@ const sortIcons: Record<SortOption, typeof ArrowUpDown> = {
   name: SortAsc,
 };
 
-function sortResults<T extends { name?: string; title?: string; updatedAt?: string; createdAt?: string }>(
-  items: T[],
-  sort: SortOption,
-): T[] {
+function sortResults<
+  T extends { name?: string; title?: string; updatedAt?: string; createdAt?: string },
+>(items: T[], sort: SortOption): T[] {
   if (sort === "relevance") return items; // API default order
   const sorted = [...items];
   if (sort === "newest" || sort === "oldest") {
@@ -193,34 +209,43 @@ export default function SearchPage() {
   useEffect(() => {
     fetch("/api/saved-searches")
       .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setSavedSearches(data); })
+      .then((data) => {
+        if (Array.isArray(data)) setSavedSearches(data);
+      })
       .catch(() => {});
   }, []);
 
-  const executeSearch = useCallback(async (q: string, type: string, category?: string, state?: string) => {
-    if (!q.trim() && !category && !state) return;
-    setLoading(true);
-    setSearched(true);
+  const executeSearch = useCallback(
+    async (q: string, type: string, category?: string, state?: string) => {
+      if (!q.trim() && !category && !state) return;
+      setLoading(true);
+      setSearched(true);
 
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q);
-    if (type !== "all") params.set("type", type);
-    if (category) params.set("category", category);
-    if (state) params.set("state", state);
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q);
+      if (type !== "all") params.set("type", type);
+      if (category) params.set("category", category);
+      if (state) params.set("state", state);
 
-    try {
-      const res = await fetch(`/api/search?${params}`);
-      const data = await res.json();
-      setFiles(data.files || []);
-      setEcos(data.ecos || []);
-      setParts(data.parts || []);
-      setBoms(data.boms || []);
-      setFolders(data.folders || []);
-    } catch {
-      setFiles([]); setEcos([]); setParts([]); setBoms([]); setFolders([]);
-    }
-    setLoading(false);
-  }, []);
+      try {
+        const res = await fetch(`/api/search?${params}`);
+        const data = await res.json();
+        setFiles(data.files || []);
+        setEcos(data.ecos || []);
+        setParts(data.parts || []);
+        setBoms(data.boms || []);
+        setFolders(data.folders || []);
+      } catch {
+        setFiles([]);
+        setEcos([]);
+        setParts([]);
+        setBoms([]);
+        setFolders([]);
+      }
+      setLoading(false);
+    },
+    []
+  );
 
   // Auto-search on mount with URL params
   useEffect(() => {
@@ -237,7 +262,10 @@ export default function SearchPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       if (value.trim()) {
-        router.replace(`/search?q=${encodeURIComponent(value)}${searchType !== "all" ? `&type=${searchType}` : ""}`, { scroll: false });
+        router.replace(
+          `/search?q=${encodeURIComponent(value)}${searchType !== "all" ? `&type=${searchType}` : ""}`,
+          { scroll: false }
+        );
         executeSearch(value, searchType, categoryFilter, stateFilter);
       }
     }, 350);
@@ -247,7 +275,10 @@ export default function SearchPage() {
     e.preventDefault();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!query.trim() && !categoryFilter && !stateFilter) return;
-    router.replace(`/search?q=${encodeURIComponent(query)}${searchType !== "all" ? `&type=${searchType}` : ""}`, { scroll: false });
+    router.replace(
+      `/search?q=${encodeURIComponent(query)}${searchType !== "all" ? `&type=${searchType}` : ""}`,
+      { scroll: false }
+    );
     executeSearch(query, searchType, categoryFilter, stateFilter);
   }
 
@@ -268,7 +299,11 @@ export default function SearchPage() {
 
   function clearSearch() {
     setQuery("");
-    setFiles([]); setEcos([]); setParts([]); setBoms([]); setFolders([]);
+    setFiles([]);
+    setEcos([]);
+    setParts([]);
+    setBoms([]);
+    setFolders([]);
     setSearched(false);
     setCategoryFilter("");
     setStateFilter("");
@@ -337,27 +372,27 @@ export default function SearchPage() {
   const hasActiveFilters = categoryFilter || stateFilter;
 
   return (
-    <div className="space-y-5">
+    <PageContainer>
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Search</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Search across files, folders, ECOs, parts, and BOMs
-          </p>
-        </div>
-        {searched && query.trim() && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs"
-            onClick={() => setShowSaveDialog(true)}
-          >
-            <BookmarkPlus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Save search</span>
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Search"
+        description="Search across files, folders, ECOs, parts, and BOMs"
+        actions={
+          <>
+            {searched && query.trim() && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={() => setShowSaveDialog(true)}
+              >
+                <BookmarkPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Save search</span>
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Saved searches bar */}
       {savedSearches.length > 0 && (
@@ -416,7 +451,7 @@ export default function SearchPage() {
             <SlidersHorizontal className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Filters</span>
             {hasActiveFilters && (
-              <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-bold">
+              <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-foreground/20 text-3xs font-bold">
                 {(categoryFilter ? 1 : 0) + (stateFilter ? 1 : 0)}
               </span>
             )}
@@ -434,13 +469,19 @@ export default function SearchPage() {
               >
                 <SelectTrigger className="w-36 h-7 text-xs">
                   <SelectValue placeholder="Category">
-                    {(v) => v === "all" ? "All categories" : (categoryLabels[v as keyof typeof categoryLabels] ?? "Category")}
+                    {(v) =>
+                      v === "all"
+                        ? "All categories"
+                        : (categoryLabels[v as keyof typeof categoryLabels] ?? "Category")
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All categories</SelectItem>
                   {Object.entries(categoryLabels).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -449,11 +490,13 @@ export default function SearchPage() {
               <Hash className="w-3.5 h-3.5 text-muted-foreground" />
               <Select
                 value={stateFilter || "all"}
-                onValueChange={(v) => handleFilterChange(categoryFilter, !v || v === "all" ? "" : v)}
+                onValueChange={(v) =>
+                  handleFilterChange(categoryFilter, !v || v === "all" ? "" : v)
+                }
               >
                 <SelectTrigger className="w-36 h-7 text-xs">
                   <SelectValue placeholder="State">
-                    {(v) => v === "all" ? "All states" : (v as string)}
+                    {(v) => (v === "all" ? "All states" : (v as string))}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -491,12 +534,30 @@ export default function SearchPage() {
             onChange={(e) => setSaveName(e.target.value)}
             className="h-7 text-xs flex-1"
             autoFocus
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrentSearch(); } }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                saveCurrentSearch();
+              }
+            }}
           />
-          <Button size="sm" className="h-7 text-xs" onClick={saveCurrentSearch} disabled={saving || !saveName.trim()}>
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            onClick={saveCurrentSearch}
+            disabled={saving || !saveName.trim()}
+          >
             {saving ? "Saving..." : "Save"}
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setShowSaveDialog(false); setSaveName(""); }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              setShowSaveDialog(false);
+              setSaveName("");
+            }}
+          >
             Cancel
           </Button>
         </div>
@@ -507,16 +568,26 @@ export default function SearchPage() {
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             {totalResults} result{totalResults !== 1 ? "s" : ""}
-            {query.trim() && <> for <span className="font-medium text-foreground">&ldquo;{query}&rdquo;</span></>}
+            {query.trim() && (
+              <>
+                {" "}
+                for <span className="font-medium text-foreground">&ldquo;{query}&rdquo;</span>
+              </>
+            )}
           </p>
           <Select value={sortBy} onValueChange={(v) => v && setSortBy(v as SortOption)}>
             <SelectTrigger className="w-36 h-7 text-xs gap-1.5">
-              {(() => { const Icon = sortIcons[sortBy]; return <Icon className="w-3 h-3" />; })()}
+              {(() => {
+                const Icon = sortIcons[sortBy];
+                return <Icon className="w-3 h-3" />;
+              })()}
               <SelectValue>{(v) => sortLabels[v as keyof typeof sortLabels] ?? ""}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {Object.entries(sortLabels).map(([key, label]) => (
-                <SelectItem key={key} value={key}>{label}</SelectItem>
+                <SelectItem key={key} value={key}>
+                  {label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -540,16 +611,16 @@ export default function SearchPage() {
           </div>
           <p className="font-medium text-sm text-muted-foreground">Start searching</p>
           <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-            Search across files, folders, ECOs, parts, and BOMs by name, part number, or description.
-            Use filters to narrow your results.
+            Search across files, folders, ECOs, parts, and BOMs by name, part number, or
+            description. Use filters to narrow your results.
           </p>
           <div className="flex items-center justify-center gap-4 mt-4 text-xs text-muted-foreground/60">
             <span className="inline-flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 rounded border bg-muted text-[10px] font-mono">Ctrl+K</kbd>
+              <kbd className="px-1.5 py-0.5 rounded border bg-muted text-3xs font-mono">Ctrl+K</kbd>
               Quick search
             </span>
             <span className="inline-flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 rounded border bg-muted text-[10px] font-mono">/</kbd>
+              <kbd className="px-1.5 py-0.5 rounded border bg-muted text-3xs font-mono">/</kbd>
               Focus search
             </span>
           </div>
@@ -561,19 +632,23 @@ export default function SearchPage() {
         <EmptyState
           icon={SearchX}
           title="No results found"
-          description={hasActiveFilters
-            ? "Try removing some filters or broadening your search."
-            : "Try different keywords or use filters to narrow by category or state."}
-          action={hasActiveFilters && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs"
-              onClick={() => handleFilterChange("", "")}
-            >
-              Clear all filters
-            </Button>
-          )}
+          description={
+            hasActiveFilters
+              ? "Try removing some filters or broadening your search."
+              : "Try different keywords or use filters to narrow by category or state."
+          }
+          action={
+            hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() => handleFilterChange("", "")}
+              >
+                Clear all filters
+              </Button>
+            )
+          }
         />
       )}
 
@@ -583,73 +658,128 @@ export default function SearchPage() {
           <TabsList variant="line" className="w-full justify-start">
             <TabsTrigger value="all">
               All
-              <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">{totalResults}</Badge>
+              <Badge variant="secondary" className="ml-1.5 text-3xs px-1.5 py-0">
+                {totalResults}
+              </Badge>
             </TabsTrigger>
             <TabsTrigger value="files" disabled={files.length === 0 && searchType !== "files"}>
               <FileText className="w-3.5 h-3.5" />
               Files
-              {files.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{files.length}</Badge>}
+              {files.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-3xs px-1.5 py-0">
+                  {files.length}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="ecos" disabled={ecos.length === 0 && searchType !== "ecos"}>
               <ClipboardList className="w-3.5 h-3.5" />
               ECOs
-              {ecos.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{ecos.length}</Badge>}
+              {ecos.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-3xs px-1.5 py-0">
+                  {ecos.length}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="parts" disabled={parts.length === 0 && searchType !== "parts"}>
               <Cpu className="w-3.5 h-3.5" />
               Parts
-              {parts.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{parts.length}</Badge>}
+              {parts.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-3xs px-1.5 py-0">
+                  {parts.length}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="boms" disabled={boms.length === 0 && searchType !== "boms"}>
               <Package className="w-3.5 h-3.5" />
               BOMs
-              {boms.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{boms.length}</Badge>}
+              {boms.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-3xs px-1.5 py-0">
+                  {boms.length}
+                </Badge>
+              )}
             </TabsTrigger>
-            <TabsTrigger value="folders" disabled={folders.length === 0 && searchType !== "folders"}>
+            <TabsTrigger
+              value="folders"
+              disabled={folders.length === 0 && searchType !== "folders"}
+            >
               <FolderOpen className="w-3.5 h-3.5" />
               Folders
-              {folders.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">{folders.length}</Badge>}
+              {folders.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-3xs px-1.5 py-0">
+                  {folders.length}
+                </Badge>
+              )}
             </TabsTrigger>
           </TabsList>
 
           {/* All tab */}
           <TabsContent value="all" className="space-y-5 mt-4">
-            {files.length > 0 && <FileResults files={sortedFiles} query={query} onNavigate={router.push} onDownload={handleDownload} />}
-            {ecos.length > 0 && <ECOResults ecos={sortedEcos} query={query} onNavigate={router.push} />}
-            {parts.length > 0 && <PartResults parts={sortedParts} query={query} onNavigate={router.push} />}
-            {boms.length > 0 && <BOMResults boms={sortedBoms} query={query} onNavigate={router.push} />}
-            {folders.length > 0 && <FolderResults folders={sortedFolders} query={query} onNavigate={router.push} />}
+            {files.length > 0 && (
+              <FileResults
+                files={sortedFiles}
+                query={query}
+                onNavigate={router.push}
+                onDownload={handleDownload}
+              />
+            )}
+            {ecos.length > 0 && (
+              <ECOResults ecos={sortedEcos} query={query} onNavigate={router.push} />
+            )}
+            {parts.length > 0 && (
+              <PartResults parts={sortedParts} query={query} onNavigate={router.push} />
+            )}
+            {boms.length > 0 && (
+              <BOMResults boms={sortedBoms} query={query} onNavigate={router.push} />
+            )}
+            {folders.length > 0 && (
+              <FolderResults folders={sortedFolders} query={query} onNavigate={router.push} />
+            )}
           </TabsContent>
 
           {/* Individual tabs */}
           <TabsContent value="files" className="mt-4">
-            {files.length > 0
-              ? <FileResults files={sortedFiles} query={query} onNavigate={router.push} onDownload={handleDownload} />
-              : <EmptyTab type="files" />}
+            {files.length > 0 ? (
+              <FileResults
+                files={sortedFiles}
+                query={query}
+                onNavigate={router.push}
+                onDownload={handleDownload}
+              />
+            ) : (
+              <EmptyTab type="files" />
+            )}
           </TabsContent>
           <TabsContent value="ecos" className="mt-4">
-            {ecos.length > 0
-              ? <ECOResults ecos={sortedEcos} query={query} onNavigate={router.push} />
-              : <EmptyTab type="ECOs" />}
+            {ecos.length > 0 ? (
+              <ECOResults ecos={sortedEcos} query={query} onNavigate={router.push} />
+            ) : (
+              <EmptyTab type="ECOs" />
+            )}
           </TabsContent>
           <TabsContent value="parts" className="mt-4">
-            {parts.length > 0
-              ? <PartResults parts={sortedParts} query={query} onNavigate={router.push} />
-              : <EmptyTab type="parts" />}
+            {parts.length > 0 ? (
+              <PartResults parts={sortedParts} query={query} onNavigate={router.push} />
+            ) : (
+              <EmptyTab type="parts" />
+            )}
           </TabsContent>
           <TabsContent value="boms" className="mt-4">
-            {boms.length > 0
-              ? <BOMResults boms={sortedBoms} query={query} onNavigate={router.push} />
-              : <EmptyTab type="BOMs" />}
+            {boms.length > 0 ? (
+              <BOMResults boms={sortedBoms} query={query} onNavigate={router.push} />
+            ) : (
+              <EmptyTab type="BOMs" />
+            )}
           </TabsContent>
           <TabsContent value="folders" className="mt-4">
-            {folders.length > 0
-              ? <FolderResults folders={sortedFolders} query={query} onNavigate={router.push} />
-              : <EmptyTab type="folders" />}
+            {folders.length > 0 ? (
+              <FolderResults folders={sortedFolders} query={query} onNavigate={router.push} />
+            ) : (
+              <EmptyTab type="folders" />
+            )}
           </TabsContent>
         </Tabs>
       )}
-    </div>
+    </PageContainer>
   );
 }
 
@@ -682,11 +812,11 @@ function ResultSection({
       <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         {icon}
         <span>{title}</span>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{count}</Badge>
+        <Badge variant="secondary" className="text-3xs px-1.5 py-0">
+          {count}
+        </Badge>
       </div>
-      <div className="border rounded-lg bg-background divide-y divide-border/50">
-        {children}
-      </div>
+      <div className="border rounded-lg bg-background divide-y divide-border/50">{children}</div>
     </div>
   );
 }
@@ -694,7 +824,10 @@ function ResultSection({
 // --- File Results ---
 
 function FileResults({
-  files, query, onNavigate, onDownload,
+  files,
+  query,
+  onNavigate,
+  onDownload,
 }: {
   files: FileResult[];
   query: string;
@@ -715,12 +848,12 @@ function FileResults({
                 <HighlightText text={file.name} query={query} />
               </span>
               {file.isCheckedOut && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-red-500 shrink-0">
+                <span className="inline-flex items-center gap-1 text-3xs text-destructive shrink-0">
                   <Lock className="w-3 h-3" />
                   {file.checkedOutBy?.fullName}
                 </span>
               )}
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+              <Badge variant="secondary" className="text-3xs px-1.5 py-0 shrink-0">
                 v{file.currentVersion}
               </Badge>
             </div>
@@ -733,9 +866,11 @@ function FileResults({
               {file.partNumber && <span className="text-border">&middot;</span>}
               <span>{categoryLabels[file.category] || file.category}</span>
               <span className="text-border">&middot;</span>
-              <Badge variant={lifecycleVariants[file.lifecycleState] || "muted"} className="text-[10px] px-1.5 py-0">
-                {file.lifecycleState}
-              </Badge>
+              <StatusBadge
+                status={file.lifecycleState}
+                kind="lifecycle"
+                className="text-3xs px-1.5 py-0"
+              />
               <span className="text-border">&middot;</span>
               <span className="inline-flex items-center gap-1 truncate">
                 <FolderOpen className="w-3 h-3 shrink-0" />
@@ -753,7 +888,10 @@ function FileResults({
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => { e.stopPropagation(); onDownload(file.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload(file.id);
+              }}
             >
               <Download className="w-3.5 h-3.5" />
             </Button>
@@ -768,14 +906,20 @@ function FileResults({
 // --- ECO Results ---
 
 function ECOResults({
-  ecos, query, onNavigate,
+  ecos,
+  query,
+  onNavigate,
 }: {
   ecos: ECOResult[];
   query: string;
   onNavigate: (url: string) => void;
 }) {
   return (
-    <ResultSection icon={<ClipboardList className="w-4 h-4" />} title="Engineering Change Orders" count={ecos.length}>
+    <ResultSection
+      icon={<ClipboardList className="w-4 h-4" />}
+      title="Engineering Change Orders"
+      count={ecos.length}
+    >
       {ecos.map((eco) => (
         <div
           key={eco.id}
@@ -792,10 +936,11 @@ function ECOResults({
               </span>
             </div>
             <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-              <Badge variant={ecoStatusVariants[eco.status] || "muted"} className="text-[10px] px-1.5 py-0">
-                {eco.status.replace("_", " ")}
-              </Badge>
-              <Badge variant={priorityVariants[eco.priority] || "muted"} className="text-[10px] px-1.5 py-0">
+              <StatusBadge status={eco.status} kind="eco" className="text-3xs px-1.5 py-0" />
+              <Badge
+                variant={priorityVariants[eco.priority] || "muted"}
+                className="text-3xs px-1.5 py-0"
+              >
                 {eco.priority}
               </Badge>
               {eco.createdBy && (
@@ -823,7 +968,9 @@ function ECOResults({
 // --- Part Results ---
 
 function PartResults({
-  parts, query, onNavigate,
+  parts,
+  query,
+  onNavigate,
 }: {
   parts: PartResult[];
   query: string;
@@ -849,9 +996,11 @@ function PartResults({
             <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
               <span>{categoryLabels[part.category] || part.category.replace("_", " ")}</span>
               <span className="text-border">&middot;</span>
-              <Badge variant={lifecycleVariants[part.lifecycle] || "muted"} className="text-[10px] px-1.5 py-0">
-                {part.lifecycle}
-              </Badge>
+              <StatusBadge
+                status={part.lifecycle}
+                kind="lifecycle"
+                className="text-3xs px-1.5 py-0"
+              />
               {part.unitCost !== null && (
                 <>
                   <span className="text-border">&middot;</span>
@@ -877,14 +1026,20 @@ function PartResults({
 // --- BOM Results ---
 
 function BOMResults({
-  boms, query, onNavigate,
+  boms,
+  query,
+  onNavigate,
 }: {
   boms: BOMResult[];
   query: string;
   onNavigate: (url: string) => void;
 }) {
   return (
-    <ResultSection icon={<Package className="w-4 h-4" />} title="Bills of Materials" count={boms.length}>
+    <ResultSection
+      icon={<Package className="w-4 h-4" />}
+      title="Bills of Materials"
+      count={boms.length}
+    >
       {boms.map((bom) => (
         <div
           key={bom.id}
@@ -899,9 +1054,7 @@ function BOMResults({
               <span className="text-xs font-mono text-muted-foreground">Rev {bom.revision}</span>
             </div>
             <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-              <Badge variant={bomStatusVariants[bom.status] || "muted"} className="text-[10px] px-1.5 py-0">
-                {bom.status}
-              </Badge>
+              <StatusBadge status={bom.status} kind="bom" className="text-3xs px-1.5 py-0" />
               <span className="text-border">&middot;</span>
               <FormattedDate date={bom.updatedAt} variant="date" />
             </div>
@@ -921,7 +1074,9 @@ function BOMResults({
 // --- Folder Results ---
 
 function FolderResults({
-  folders, query, onNavigate,
+  folders,
+  query,
+  onNavigate,
 }: {
   folders: FolderResult[];
   query: string;

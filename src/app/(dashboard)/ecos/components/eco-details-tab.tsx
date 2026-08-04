@@ -6,18 +6,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Pencil } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import {
-  statusVariants, priorityVariants, reasonLabels, changeTypeLabelsEco,
-  costImpactLabels, dispositionLabels,
+  reasonLabels,
+  changeTypeLabelsEco,
+  costImpactLabels,
+  dispositionLabels,
 } from "../constants";
 import type { ECO } from "../types";
 
@@ -106,7 +112,18 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
               <Label>Priority</Label>
               <Select value={priority} onValueChange={(v) => setPriority(v ?? priority)}>
                 <SelectTrigger>
-                  <SelectValue>{(v) => ({ LOW: "Low", MEDIUM: "Medium", HIGH: "High", CRITICAL: "Critical" } as Record<string, string>)[v as string] ?? ""}</SelectValue>
+                  <SelectValue>
+                    {(v) =>
+                      (
+                        ({
+                          LOW: "Low",
+                          MEDIUM: "Medium",
+                          HIGH: "High",
+                          CRITICAL: "Critical",
+                        }) as Record<string, string>
+                      )[v as string] ?? ""
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="LOW">Low</SelectItem>
@@ -126,7 +143,9 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(reasonLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -138,12 +157,16 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
               <Select value={changeType} onValueChange={(v) => setChangeType(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select type...">
-                    {(v) => changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ?? "Select type..."}
+                    {(v) =>
+                      changeTypeLabelsEco[v as keyof typeof changeTypeLabelsEco] ?? "Select type..."
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(changeTypeLabelsEco).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -153,12 +176,16 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
               <Select value={costImpact} onValueChange={(v) => setCostImpact(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select impact...">
-                    {(v) => costImpactLabels[v as keyof typeof costImpactLabels] ?? "Select impact..."}
+                    {(v) =>
+                      costImpactLabels[v as keyof typeof costImpactLabels] ?? "Select impact..."
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(costImpactLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -170,12 +197,17 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
               <Select value={disposition} onValueChange={(v) => setDisposition(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select disposition...">
-                    {(v) => dispositionLabels[v as keyof typeof dispositionLabels] ?? "Select disposition..."}
+                    {(v) =>
+                      dispositionLabels[v as keyof typeof dispositionLabels] ??
+                      "Select disposition..."
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(dispositionLabels).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                    <SelectItem key={k} value={k}>
+                      {v}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -193,13 +225,17 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             <Button size="sm" onClick={handleSave} disabled={saving || !title.trim()}>
               {saving ? "Saving..." : "Save Changes"}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
           </div>
         </div>
       ) : (
         <div className="space-y-5 pr-1">
           <div>
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Description</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+              Description
+            </p>
             {eco.description ? (
               <p className="text-sm leading-relaxed whitespace-pre-wrap">{eco.description}</p>
             ) : (
@@ -211,47 +247,67 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-4">
             <MetadataField label="Priority">
-              <Badge variant={priorityVariants[eco.priority] || "muted"}>{eco.priority}</Badge>
+              <StatusBadge status={eco.priority} kind="priority" />
             </MetadataField>
             <MetadataField label="Status">
-              <Badge variant={statusVariants[eco.status] || "muted"}>
-                {eco.status.replace("_", " ")}
-              </Badge>
+              <StatusBadge status={eco.status} kind="eco" />
             </MetadataField>
             <MetadataField label="Reason for Change">
-              {eco.reason
-                ? <span className="text-sm">{reasonLabels[eco.reason] || eco.reason}</span>
-                : <span className="text-sm text-muted-foreground/60 italic">Not set</span>}
+              {eco.reason ? (
+                <span className="text-sm">{reasonLabels[eco.reason] || eco.reason}</span>
+              ) : (
+                <span className="text-sm text-muted-foreground/60 italic">Not set</span>
+              )}
             </MetadataField>
             <MetadataField label="Change Type">
-              {eco.changeType
-                ? <span className="text-sm">{changeTypeLabelsEco[eco.changeType] || eco.changeType}</span>
-                : <span className="text-sm text-muted-foreground/60 italic">Not set</span>}
+              {eco.changeType ? (
+                <span className="text-sm">
+                  {changeTypeLabelsEco[eco.changeType] || eco.changeType}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground/60 italic">Not set</span>
+              )}
             </MetadataField>
             <MetadataField label="Cost Impact">
-              {eco.costImpact
-                ? <span className="text-sm">{costImpactLabels[eco.costImpact] || eco.costImpact}</span>
-                : <span className="text-sm text-muted-foreground/60 italic">Not set</span>}
+              {eco.costImpact ? (
+                <span className="text-sm">
+                  {costImpactLabels[eco.costImpact] || eco.costImpact}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground/60 italic">Not set</span>
+              )}
             </MetadataField>
             <MetadataField label="Disposition">
-              {eco.disposition
-                ? <span className="text-sm">{dispositionLabels[eco.disposition] || eco.disposition}</span>
-                : <span className="text-sm text-muted-foreground/60 italic">Not set</span>}
+              {eco.disposition ? (
+                <span className="text-sm">
+                  {dispositionLabels[eco.disposition] || eco.disposition}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground/60 italic">Not set</span>
+              )}
             </MetadataField>
             <MetadataField label="Effectivity">
-              {eco.effectivity
-                ? <span className="text-sm">{eco.effectivity}</span>
-                : <span className="text-sm text-muted-foreground/60 italic">Not set</span>}
+              {eco.effectivity ? (
+                <span className="text-sm">{eco.effectivity}</span>
+              ) : (
+                <span className="text-sm text-muted-foreground/60 italic">Not set</span>
+              )}
             </MetadataField>
             <MetadataField label="Created">
-              <span className="text-sm"><FormattedDate date={eco.createdAt} /></span>
+              <span className="text-sm">
+                <FormattedDate date={eco.createdAt} />
+              </span>
             </MetadataField>
             <MetadataField label="Last Updated">
-              <span className="text-sm"><FormattedDate date={eco.updatedAt} /></span>
+              <span className="text-sm">
+                <FormattedDate date={eco.updatedAt} />
+              </span>
             </MetadataField>
             {eco.createdBy && (
               <div className="col-span-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Created By</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                  Created By
+                </p>
                 <p className="text-sm">
                   {eco.createdBy.fullName}{" "}
                   <span className="text-muted-foreground">({eco.createdBy.email})</span>
@@ -278,7 +334,9 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
 function MetadataField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+        {label}
+      </p>
       {children}
     </div>
   );

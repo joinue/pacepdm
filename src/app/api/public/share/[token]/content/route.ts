@@ -98,6 +98,7 @@ export async function GET(
         .select("*")
         .eq("id", row.resourceId)
         .eq("tenantId", row.tenantId)
+        .is("deletedAt", null)
         .single();
       if (!file) {
         return NextResponse.json(
@@ -316,6 +317,7 @@ export async function GET(
       .select("id, name, revision, status")
       .eq("id", row.resourceId)
       .eq("tenantId", row.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!bom) {
       return NextResponse.json(

@@ -25,23 +25,34 @@ export async function GET(request: NextRequest) {
     // is bounded by the query's `.limit(50)` ceiling. If this becomes the
     // bottleneck, switch to an RPC that joins inside the DB.
     const scope = await getFolderAccessScope(tenantUser);
-    const results: { files?: unknown[]; ecos?: unknown[]; parts?: unknown[]; boms?: unknown[]; folders?: unknown[] } = {};
+    const results: {
+      files?: unknown[];
+      ecos?: unknown[];
+      parts?: unknown[];
+      boms?: unknown[];
+      folders?: unknown[];
+    } = {};
 
     // Files search
     if (type === "all" || type === "files") {
       let fileQuery = db
         .from("files")
-        .select(`
+        .select(
+          `
           *,
           folder:folders!files_folderId_fkey(path),
           checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
-        `)
+        `
+        )
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .order("updatedAt", { ascending: false })
         .limit(50);
 
       if (query) {
-        fileQuery = fileQuery.or(`name.ilike.%${query}%,partNumber.ilike.%${query}%,description.ilike.%${query}%`);
+        fileQuery = fileQuery.or(
+          `name.ilike.%${query}%,partNumber.ilike.%${query}%,description.ilike.%${query}%`
+        );
       }
       if (category) {
         fileQuery = fileQuery.eq("category", category);
@@ -63,11 +74,14 @@ export async function GET(request: NextRequest) {
         .from("ecos")
         .select("*, createdBy:tenant_users!ecos_createdById_fkey(fullName)")
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .order("createdAt", { ascending: false })
         .limit(50);
 
       if (query) {
-        ecoQuery = ecoQuery.or(`title.ilike.%${query}%,ecoNumber.ilike.%${query}%,description.ilike.%${query}%`);
+        ecoQuery = ecoQuery.or(
+          `title.ilike.%${query}%,ecoNumber.ilike.%${query}%,description.ilike.%${query}%`
+        );
       }
       if (state) {
         ecoQuery = ecoQuery.eq("status", state);
@@ -83,11 +97,14 @@ export async function GET(request: NextRequest) {
         .from("parts")
         .select("*")
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .order("updatedAt", { ascending: false })
         .limit(50);
 
       if (query) {
-        partQuery = partQuery.or(`partNumber.ilike.%${query}%,name.ilike.%${query}%,description.ilike.%${query}%`);
+        partQuery = partQuery.or(
+          `partNumber.ilike.%${query}%,name.ilike.%${query}%,description.ilike.%${query}%`
+        );
       }
       if (category) {
         partQuery = partQuery.eq("category", category);
@@ -103,6 +120,7 @@ export async function GET(request: NextRequest) {
         .from("boms")
         .select("*")
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .order("updatedAt", { ascending: false })
         .limit(50);
 

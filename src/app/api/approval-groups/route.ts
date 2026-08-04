@@ -37,10 +37,12 @@ export async function GET(request: NextRequest) {
     const enriched = await Promise.all(
       (groups || []).map(async (group) => {
         const [{ data: members }, { count: usageCount }] = await Promise.all([
-          db.from("approval_group_members")
+          db
+            .from("approval_group_members")
             .select("*, user:tenant_users!approval_group_members_userId_fkey(id, fullName, email)")
             .eq("groupId", group.id),
-          db.from("approval_workflow_steps")
+          db
+            .from("approval_workflow_steps")
             .select("*", { count: "exact", head: true })
             .eq("groupId", group.id),
         ]);
@@ -87,15 +89,21 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A group with this name already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A group with this name already exists" },
+          { status: 409 }
+        );
       }
       throw error;
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "approval_group.create", entityType: "approval_group",
-      entityId: group.id, details: { name },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "approval_group.create",
+      entityType: "approval_group",
+      entityId: group.id,
+      details: { name },
     });
 
     return NextResponse.json({ ...group, members: [] });

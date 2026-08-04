@@ -4,14 +4,15 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, optionalString } from "@/lib/validation";
 
-const UpdateWorkflowSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  description: optionalString,
-  isActive: z.boolean().optional(),
-}).refine(
-  (v) => v.name !== undefined || v.description !== undefined || v.isActive !== undefined,
-  { message: "At least one field is required" }
-);
+const UpdateWorkflowSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    description: optionalString,
+    isActive: z.boolean().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.description !== undefined || v.isActive !== undefined, {
+    message: "At least one field is required",
+  });
 
 export async function PUT(
   request: NextRequest,
@@ -37,19 +38,28 @@ export async function PUT(
     if (body.description !== undefined) updates.description = body.description;
     if (body.isActive !== undefined) updates.isActive = body.isActive;
 
-    const { data, error } = await db.from("approval_workflows").update(updates)
-      .eq("id", workflowId).eq("tenantId", tenantUser.tenantId).select().single();
+    const { data, error } = await db
+      .from("approval_workflows")
+      .update(updates)
+      .eq("id", workflowId)
+      .eq("tenantId", tenantUser.tenantId)
+      .select()
+      .single();
 
     if (error) {
-      if (error.code === "23505") return NextResponse.json({ error: "Name already exists" }, { status: 409 });
+      if (error.code === "23505")
+        return NextResponse.json({ error: "Name already exists" }, { status: 409 });
       throw error;
     }
     if (!data) return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "workflow.update", entityType: "workflow",
-      entityId: workflowId, details: { name: data.name },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow.update",
+      entityType: "workflow",
+      entityId: workflowId,
+      details: { name: data.name },
     });
 
     return NextResponse.json(data);
@@ -109,7 +119,8 @@ export async function DELETE(
       .eq("workflowId", workflowId);
 
     if (historyCount && historyCount > 0) {
-      await db.from("approval_workflows")
+      await db
+        .from("approval_workflows")
         .update({ isActive: false, updatedAt: new Date().toISOString() })
         .eq("id", workflowId);
 
@@ -133,7 +144,11 @@ export async function DELETE(
       });
     }
 
-    await db.from("approval_workflows").delete().eq("id", workflowId).eq("tenantId", tenantUser.tenantId);
+    await db
+      .from("approval_workflows")
+      .delete()
+      .eq("id", workflowId)
+      .eq("tenantId", tenantUser.tenantId);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

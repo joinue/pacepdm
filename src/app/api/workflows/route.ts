@@ -18,7 +18,9 @@ export async function GET() {
 
     const { data: workflows } = await db
       .from("approval_workflows")
-      .select("*, steps:approval_workflow_steps(*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)), assignments:approval_workflow_assignments(*)")
+      .select(
+        "*, steps:approval_workflow_steps(*, group:approval_groups!approval_workflow_steps_groupId_fkey(id, name)), assignments:approval_workflow_assignments(*)"
+      )
       .eq("tenantId", tenantUser.tenantId)
       .order("name");
 
@@ -52,25 +54,36 @@ export async function POST(request: NextRequest) {
     const db = getServiceClient();
     const now = new Date().toISOString();
 
-    const { data: workflow, error } = await db.from("approval_workflows").insert({
-      id: uuid(),
-      tenantId: tenantUser.tenantId,
-      name,
-      description: description ?? null,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    }).select().single();
+    const { data: workflow, error } = await db
+      .from("approval_workflows")
+      .insert({
+        id: uuid(),
+        tenantId: tenantUser.tenantId,
+        name,
+        description: description ?? null,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single();
 
     if (error) {
-      if (error.code === "23505") return NextResponse.json({ error: "A workflow with this name already exists" }, { status: 409 });
+      if (error.code === "23505")
+        return NextResponse.json(
+          { error: "A workflow with this name already exists" },
+          { status: 409 }
+        );
       throw error;
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "workflow.create", entityType: "workflow",
-      entityId: workflow.id, details: { name },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "workflow.create",
+      entityType: "workflow",
+      entityId: workflow.id,
+      details: { name },
     });
 
     return NextResponse.json(workflow);

@@ -6,6 +6,8 @@ import {
   type FolderAccessScope,
   type TenantUserForAccess,
 } from "./folder-access";
+import { forbidden, notFound } from "./api-route";
+import type { ScopedDb } from "./tenant-db";
 
 /**
  * Route-layer guards for folder ACLs. The pure predicates live in
@@ -26,9 +28,7 @@ import {
  * source and destination folder from the same scope).
  */
 
-type GuardResult =
-  | { ok: true; scope: FolderAccessScope }
-  | { ok: false; response: NextResponse };
+type GuardResult = { ok: true; scope: FolderAccessScope } | { ok: false; response: NextResponse };
 
 export async function requireFolderAccess(
   tenantUser: TenantUserForAccess,
@@ -50,6 +50,47 @@ export async function requireFileAccess(
 ): Promise<GuardResult> {
   const scope = await getFolderAccessScope(tenantUser);
   return gate(scope, file.folderId, level, "File not found");
+}
+
+/**
+ * Load a file by id, tenant-scoped, and gate it by folder ACL in one call.
+ *
+ * Nineteen file routes opened with the same ten lines: fetch by id, compare
+ * `tenantId` in JavaScript, check `deletedAt`, then `requireFileAccess`. That
+ * shape is why the tenant comparison was easy to forget, and why three routes
+ * had drifted into checking it differently.
+ *
+ * Two gates apply and both are necessary: role permission (declared on the
+ * route via `withTenant`) says what a user may do at all, and the folder ACL
+ * says where they may do it. This helper covers the second.
+ *
+ * Throws instead of returning a response, so a handler reads:
+ *
+ *   const file = await loadFile(db, tenantUser, params.fileId, "edit");
+ *
+ * Pass `select` when the route needs joined columns.
+ */
+export async function loadFile(
+  db: ScopedDb,
+  tenantUser: TenantUserForAccess,
+  fileId: string,
+  level: "view" | "edit",
+  select = "*"
+) {
+  const { data: file } = await db
+    .from("files")
+    .select(select)
+    .eq("id", fileId)
+    .is("deletedAt", null)
+    .maybeSingle();
+
+  if (!file) throw notFound("File not found");
+
+  const scope = await getFolderAccessScope(tenantUser);
+  if (!canViewFolder(scope, file.folderId)) throw notFound("File not found");
+  if (level === "edit" && !canEditFolder(scope, file.folderId)) throw forbidden();
+
+  return file;
 }
 
 function gate(

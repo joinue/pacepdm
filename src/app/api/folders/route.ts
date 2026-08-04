@@ -4,7 +4,13 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
-import { getFolderAccessScope, canViewFolder, canEditFolder, filterViewable, isRestrictedFolder } from "@/lib/folder-access";
+import {
+  getFolderAccessScope,
+  canViewFolder,
+  canEditFolder,
+  filterViewable,
+  isRestrictedFolder,
+} from "@/lib/folder-access";
 
 const CreateFolderSchema = z.object({
   name: nonEmptyString,
@@ -20,11 +26,7 @@ export async function GET(request: NextRequest) {
 
     const db = getServiceClient();
 
-    let query = db
-      .from("folders")
-      .select("*")
-      .eq("tenantId", tenantUser.tenantId)
-      .order("name");
+    let query = db.from("folders").select("*").eq("tenantId", tenantUser.tenantId).order("name");
 
     if (parentId) {
       query = query.eq("parentId", parentId);
@@ -47,7 +49,11 @@ export async function GET(request: NextRequest) {
       visibleFolders.map(async (folder) => {
         const [{ count: childCount }, { count: fileCount }] = await Promise.all([
           db.from("folders").select("*", { count: "exact", head: true }).eq("parentId", folder.id),
-          db.from("files").select("*", { count: "exact", head: true }).eq("folderId", folder.id),
+          db
+            .from("files")
+            .select("*", { count: "exact", head: true })
+            .eq("folderId", folder.id)
+            .is("deletedAt", null),
         ]);
         return {
           ...folder,
@@ -123,7 +129,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A folder with this name already exists here" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A folder with this name already exists here" },
+          { status: 409 }
+        );
       }
       throw error;
     }

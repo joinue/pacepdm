@@ -116,13 +116,14 @@ For partial-update PUT routes, use `.refine()` to require at least one
 field:
 
 ```ts
-const UpdateSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  status: z.string().optional(),
-}).refine(
-  (v) => v.name !== undefined || v.status !== undefined,
-  { message: "At least one field is required" }
-);
+const UpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    status: z.string().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.status !== undefined, {
+    message: "At least one field is required",
+  });
 ```
 
 ### Catch blocks
@@ -151,7 +152,9 @@ For UI gating (hiding buttons the user can't use), use the
 
 ```tsx
 const { can } = usePermissions();
-{can(PERMISSIONS.FILE_DELETE) && <DeleteButton />}
+{
+  can(PERMISSIONS.FILE_DELETE) && <DeleteButton />;
+}
 ```
 
 Hidden buttons are a UX optimization, not a security boundary. The
@@ -166,7 +169,7 @@ new copy of `BOM_STATUS_FLOW` or `ECO_STATUS_FLOW`.
 ## Side effects
 
 Notifications, mention processing, and other non-critical async work
-that runs *after* a mutation completes should be wrapped in
+that runs _after_ a mutation completes should be wrapped in
 [`sideEffect`](notifications.ts) so failures are logged with context
 instead of swallowed:
 

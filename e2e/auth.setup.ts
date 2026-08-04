@@ -17,7 +17,7 @@ setup("authenticate", async ({ page }) => {
   if (!email || !password) {
     throw new Error(
       "E2E_EMAIL and E2E_PASSWORD env vars are required. " +
-      "Create a test account in your Supabase project and set them."
+        "Create a test account in your Supabase project and set them."
     );
   }
 

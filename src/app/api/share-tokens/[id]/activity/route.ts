@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { z, parseSearchParams } from "@/lib/validation";
-import {
-  getShareTokenById,
-  listShareTokenAccess,
-} from "@/lib/share-tokens";
+import { getShareTokenById, listShareTokenAccess } from "@/lib/share-tokens";
 
 // Cap on a single page of activity rows. The recursive resolve+view+download
 // triple per visit means a busy link can rack up rows fast; a 100-row cap
@@ -24,10 +21,7 @@ const QuerySchema = z.object({
     .transform((v) => v ?? null),
 });
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) {
@@ -61,14 +55,12 @@ export async function GET(
 
     // Cursor for the next page: only return one when we filled the page.
     // A short page means we hit the end and there's nothing more to fetch.
-    const nextBefore =
-      rows.length === parsed.data.limit ? rows[rows.length - 1].createdAt : null;
+    const nextBefore = rows.length === parsed.data.limit ? rows[rows.length - 1].createdAt : null;
 
     return NextResponse.json({ rows, nextBefore });
   } catch (err) {
     console.error("Failed to load share activity:", err);
-    const message =
-      err instanceof Error ? err.message : "Failed to load share activity";
+    const message = err instanceof Error ? err.message : "Failed to load share activity";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

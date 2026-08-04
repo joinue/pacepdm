@@ -3,11 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getFolderAccessScope } from "@/lib/folder-access";
-import {
-  resolveFolderToEntries,
-  signDownloadToken,
-  MAX_DOWNLOAD_BYTES,
-} from "@/lib/vault-zip";
+import { resolveFolderToEntries, signDownloadToken, MAX_DOWNLOAD_BYTES } from "@/lib/vault-zip";
 
 export async function POST(
   _request: NextRequest,

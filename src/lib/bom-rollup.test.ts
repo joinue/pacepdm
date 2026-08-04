@@ -115,12 +115,8 @@ describe("computeBomRollup — sub-assemblies", () => {
 
   it("handles three-level nesting with quantity multiplication", () => {
     const screw = bom("screw", "Screw kit", [leaf("s", "001", "Screw", 4, 0.25)]);
-    const wheel = bom("wheel", "Wheel", [
-      sub("sk", "001", "Screws", 2, "screw"),
-    ]);
-    const bike = bom("bike", "Bike", [
-      sub("w", "001", "Wheels", 2, "wheel"),
-    ]);
+    const wheel = bom("wheel", "Wheel", [sub("sk", "001", "Screws", 2, "screw")]);
+    const bike = bom("bike", "Bike", [sub("w", "001", "Wheels", 2, "wheel")]);
 
     const result = computeBomRollup("bike", mapOf(bike, wheel, screw));
 
@@ -132,9 +128,7 @@ describe("computeBomRollup — sub-assemblies", () => {
   });
 
   it("emits a placeholder line when a sub-BOM is missing", () => {
-    const root = bom("root", "Root", [
-      sub("a", "001", "Ghost", 1, "nonexistent"),
-    ]);
+    const root = bom("root", "Root", [sub("a", "001", "Ghost", 1, "nonexistent")]);
     const result = computeBomRollup("root", mapOf(root));
 
     expect(result.lines.length).toBe(1);

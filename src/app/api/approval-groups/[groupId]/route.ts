@@ -4,14 +4,15 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, optionalString } from "@/lib/validation";
 
-const UpdateGroupSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  description: optionalString,
-  isActive: z.boolean().optional(),
-}).refine(
-  (v) => v.name !== undefined || v.description !== undefined || v.isActive !== undefined,
-  { message: "At least one field is required" }
-);
+const UpdateGroupSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    description: optionalString,
+    isActive: z.boolean().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.description !== undefined || v.isActive !== undefined, {
+    message: "At least one field is required",
+  });
 
 /**
  * Soft vs. hard delete: a group is an audit-trail anchor. If anything
@@ -44,10 +45,12 @@ export async function DELETE(
     }
 
     const [{ count: stepRefs }, { count: decisionRefs }] = await Promise.all([
-      db.from("approval_workflow_steps")
+      db
+        .from("approval_workflow_steps")
         .select("*", { count: "exact", head: true })
         .eq("groupId", groupId),
-      db.from("approval_decisions")
+      db
+        .from("approval_decisions")
         .select("*", { count: "exact", head: true })
         .eq("groupId", groupId),
     ]);
@@ -56,7 +59,8 @@ export async function DELETE(
 
     if (inUse) {
       // Archive — preserves audit trail, removes from group pickers.
-      await db.from("approval_groups")
+      await db
+        .from("approval_groups")
         .update({ isActive: false, updatedAt: new Date().toISOString() })
         .eq("id", groupId);
 
@@ -132,7 +136,10 @@ export async function PATCH(
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A group with this name already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A group with this name already exists" },
+          { status: 409 }
+        );
       }
       throw error;
     }

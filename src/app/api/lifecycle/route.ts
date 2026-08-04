@@ -25,11 +25,7 @@ export async function GET() {
     const enriched = await Promise.all(
       (lifecycles || []).map(async (lc) => {
         const [{ data: states }, { data: transitions }] = await Promise.all([
-          db
-            .from("lifecycle_states")
-            .select("*")
-            .eq("lifecycleId", lc.id)
-            .order("sortOrder"),
+          db.from("lifecycle_states").select("*").eq("lifecycleId", lc.id).order("sortOrder"),
           db
             .from("lifecycle_transitions")
             .select(
@@ -95,9 +91,12 @@ export async function POST(request: NextRequest) {
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "lifecycle.create", entityType: "lifecycle",
-      entityId: lifecycle.id, details: { name, isDefault: !!isDefault },
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "lifecycle.create",
+      entityType: "lifecycle",
+      entityId: lifecycle.id,
+      details: { name, isDefault: !!isDefault },
     });
 
     return NextResponse.json(lifecycle);

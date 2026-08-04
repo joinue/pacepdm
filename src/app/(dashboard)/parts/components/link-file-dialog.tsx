@@ -4,10 +4,18 @@ import React, { useState, useCallback, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Search, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,10 +23,13 @@ import { FILE_ROLE_LABELS } from "../parts-types";
 
 function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback((...args: Parameters<T>) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => fn(...args), delay);
-  }, [fn, delay]) as T;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => fn(...args), delay);
+    },
+    [fn, delay]
+  ) as T;
 }
 
 interface LinkFileDialogProps {
@@ -29,21 +40,35 @@ interface LinkFileDialogProps {
   onLinked: () => void;
 }
 
-export function LinkFileDialog({ open, onOpenChange, partId, hasExistingFiles, onLinked }: LinkFileDialogProps) {
+export function LinkFileDialog({
+  open,
+  onOpenChange,
+  partId,
+  hasExistingFiles,
+  onLinked,
+}: LinkFileDialogProps) {
   const [fileSearch, setFileSearch] = useState("");
-  const [fileResults, setFileResults] = useState<{ id: string; name: string; partNumber: string | null; lifecycleState: string }[]>([]);
+  const [fileResults, setFileResults] = useState<
+    { id: string; name: string; partNumber: string | null; lifecycleState: string }[]
+  >([]);
   const [fileSearching, setFileSearching] = useState(false);
   const [fileRole, setFileRole] = useState("DRAWING");
 
   const doFileSearch = useCallback(async (q: string) => {
-    if (q.length < 2) { setFileResults([]); setFileSearching(false); return; }
+    if (q.length < 2) {
+      setFileResults([]);
+      setFileSearching(false);
+      return;
+    }
     setFileSearching(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       const files = Array.isArray(data) ? data : (data.files ?? []);
       setFileResults(files.slice(0, 8));
-    } catch { setFileResults([]); }
+    } catch {
+      setFileResults([]);
+    }
     setFileSearching(false);
   }, []);
 
@@ -55,7 +80,11 @@ export function LinkFileDialog({ open, onOpenChange, partId, hasExistingFiles, o
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId, role: fileRole, isPrimary: !hasExistingFiles }),
     });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("File linked");
     onOpenChange(false);
     setFileSearch("");
@@ -64,7 +93,16 @@ export function LinkFileDialog({ open, onOpenChange, partId, hasExistingFiles, o
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { onOpenChange(false); setFileSearch(""); setFileResults([]); } }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          onOpenChange(false);
+          setFileSearch("");
+          setFileResults([]);
+        }
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Link File</DialogTitle>
@@ -92,7 +130,10 @@ export function LinkFileDialog({ open, onOpenChange, partId, hasExistingFiles, o
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 value={fileSearch}
-                onChange={(e) => { setFileSearch(e.target.value); debouncedFileSearch(e.target.value); }}
+                onChange={(e) => {
+                  setFileSearch(e.target.value);
+                  debouncedFileSearch(e.target.value);
+                }}
                 placeholder="Search vault files..."
                 className="pl-8 h-8 text-sm"
               />
@@ -112,7 +153,9 @@ export function LinkFileDialog({ open, onOpenChange, partId, hasExistingFiles, o
                   >
                     <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span className="truncate">{f.name}</span>
-                    {f.partNumber && <span className="text-xs text-muted-foreground shrink-0">{f.partNumber}</span>}
+                    {f.partNumber && (
+                      <span className="text-xs text-muted-foreground shrink-0">{f.partNumber}</span>
+                    )}
                   </button>
                 ))}
               </div>

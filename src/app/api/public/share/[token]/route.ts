@@ -87,6 +87,7 @@ export async function GET(
         .select("name")
         .eq("id", row.resourceId)
         .eq("tenantId", row.tenantId)
+        .is("deletedAt", null)
         .single();
       resourceName = (data?.name as string | undefined) ?? null;
     } else if (row.resourceType === "bom") {
@@ -95,6 +96,7 @@ export async function GET(
         .select("name")
         .eq("id", row.resourceId)
         .eq("tenantId", row.tenantId)
+        .is("deletedAt", null)
         .single();
       resourceName = (data?.name as string | undefined) ?? null;
     } else {

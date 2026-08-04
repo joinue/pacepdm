@@ -54,10 +54,7 @@ export async function processMentions(ctx: MentionContext): Promise<void> {
     tenantId: ctx.tenantId,
     userIds: mentionedUsers.map((u) => u.id),
     title: `${ctx.mentionedByName} mentioned you in a comment`,
-    message:
-      ctx.comment.length > 120
-        ? ctx.comment.substring(0, 117) + "..."
-        : ctx.comment,
+    message: ctx.comment.length > 120 ? ctx.comment.substring(0, 117) + "..." : ctx.comment,
     type: "system",
     link: ctx.link,
     refId: ctx.entityId,

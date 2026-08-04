@@ -27,6 +27,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-neutral: var(--neutral);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -39,6 +43,13 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  /* Type scale below Tailwind's `text-xs` (12px). A data-dense PDM UI needs
+     these for table meta text and badges, and without named steps every call
+     site invented its own `text-[10px]` — 140 of them, in four sizes. Named
+     steps continue the xs → 2xl pattern: a bigger number is further from base. */
+  --text-2xs: 0.6875rem; /* 11px — secondary meta text in dense rows */
+  --text-3xs: 0.625rem; /* 10px — badge text, table sub-labels */
+  --text-4xs: 0.5625rem; /* 9px  — the smallest legible step; use sparingly */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -65,6 +76,14 @@
   --accent: oklch(0.94 0.015 250);
   --accent-foreground: oklch(0.2 0.01 250);
   --destructive: oklch(0.55 0.22 25);
+  /* Status tokens. Every state colour in the product resolves to one of these
+     four, so "what does Released look like" has exactly one answer and dark
+     mode is handled here rather than at 200 call sites.
+     See docs/decisions/design-tokens.md. */
+  --success: oklch(0.52 0.15 150);
+  --warning: oklch(0.62 0.15 75);
+  --info: oklch(0.5 0.17 245);
+  --neutral: oklch(0.5 0.01 250);
   --border: oklch(0.91 0.005 250);
   --input: oklch(0.91 0.005 250);
   --ring: oklch(0.45 0.18 260);
@@ -101,6 +120,11 @@
   --accent: oklch(0.27 0.015 260);
   --accent-foreground: oklch(0.93 0.005 250);
   --destructive: oklch(0.65 0.2 25);
+  /* Lifted for contrast against the dark surface. */
+  --success: oklch(0.72 0.16 150);
+  --warning: oklch(0.79 0.15 78);
+  --info: oklch(0.7 0.16 245);
+  --neutral: oklch(0.65 0.01 250);
   --border: oklch(0.28 0.012 260);
   --input: oklch(0.28 0.012 260);
   --ring: oklch(0.68 0.18 260);
@@ -129,7 +153,9 @@
   html {
     @apply font-sans;
   }
-  a, button, [role="button"] {
+  a,
+  button,
+  [role="button"] {
     cursor: pointer;
   }
   /* Show red asterisk on labels followed by required inputs */

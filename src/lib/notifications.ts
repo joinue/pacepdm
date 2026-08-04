@@ -9,10 +9,7 @@ import { sendNotificationEmail } from "@/lib/email/send";
  * Use instead of `.catch(() => {})`:
  *   await sideEffect(notify({...}), "notify ECO submitter");
  */
-export async function sideEffect<T>(
-  promise: Promise<T>,
-  context: string
-): Promise<T | undefined> {
+export async function sideEffect<T>(promise: Promise<T>, context: string): Promise<T | undefined> {
   try {
     return await promise;
   } catch (err) {
@@ -50,9 +47,7 @@ export async function notify({
 
   // Don't notify the actor about their own action — saves every caller
   // from having to filter themselves out.
-  const recipients = actorId
-    ? userIds.filter((id) => id !== actorId)
-    : userIds;
+  const recipients = actorId ? userIds.filter((id) => id !== actorId) : userIds;
 
   const notifications = recipients.map((userId) => ({
     id: uuid(),

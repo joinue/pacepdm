@@ -1,91 +1,55 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant, badRequest, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
 import { captureBomSnapshot } from "@/lib/bom-snapshot";
-import { z, parseBody } from "@/lib/validation";
+import { z, uuid } from "@/lib/validation";
 
 // Partial-update shape: any of name/status/revision can be supplied. The
 // state-transition rule (only valid next-states allowed) is enforced after
 // parse against the shared BOM_STATUS_FLOW map.
-const UpdateBomSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  status: z.string().optional(),
-  revision: z.string().optional(),
-}).refine(
-  (v) => v.name !== undefined || v.status !== undefined || v.revision !== undefined,
-  { message: "At least one field is required" }
-);
+const UpdateBomSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    status: z.string().optional(),
+    revision: z.string().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.status !== undefined || v.revision !== undefined, {
+    message: "At least one field is required",
+  });
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ bomId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { bomId } = await params;
-    const db = getServiceClient();
+const ParamsSchema = z.object({ bomId: uuid });
 
-    const { data: bom } = await db
-      .from("boms")
-      .select("*")
-      .eq("id", bomId)
-      .eq("tenantId", tenantUser.tenantId)
-      .is("deletedAt", null)
-      .single();
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) => {
+  const { data: bom } = await db
+    .from("boms")
+    .select("*")
+    .eq("id", params.bomId)
+    .is("deletedAt", null)
+    .maybeSingle();
 
-    if (!bom) {
-      return NextResponse.json({ error: "BOM not found" }, { status: 404 });
-    }
+  if (!bom) throw notFound("BOM not found");
+  return bom;
+});
 
-    return NextResponse.json(bom);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch BOM";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+export const PUT = withTenant(
+  { permission: PERMISSIONS.FILE_EDIT, body: UpdateBomSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body }) => {
+    const { bomId } = params;
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ bomId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.FILE_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const parsed = await parseBody(request, UpdateBomSchema);
-    if (!parsed.ok) return parsed.response;
-    const body = parsed.data;
-
-    const { bomId } = await params;
-    const db = getServiceClient();
-
-    // Verify ownership
     const { data: existing } = await db
       .from("boms")
       .select("status, name, createdById")
       .eq("id", bomId)
-      .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
-      .single();
+      .maybeSingle();
 
-    if (!existing) {
-      return NextResponse.json({ error: "BOM not found" }, { status: 404 });
-    }
+    if (!existing) throw notFound("BOM not found");
 
-    const updates: Record<string, unknown> = {
-      updatedAt: new Date().toISOString(),
-    };
+    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     const changes: Record<string, string | null> = {};
 
-    // Name update
     if (body.name !== undefined && body.name !== existing.name) {
       updates.name = body.name;
       changes.name = body.name;
@@ -95,16 +59,14 @@ export async function PUT(
     if (body.status && body.status !== existing.status) {
       const allowed = BOM_STATUS_FLOW[existing.status] || [];
       if (!allowed.includes(body.status)) {
-        return NextResponse.json(
-          { error: `Cannot change status from ${existing.status} to ${body.status}. Allowed: ${allowed.join(", ") || "none"}` },
-          { status: 400 }
+        throw badRequest(
+          `Cannot change status from ${existing.status} to ${body.status}. Allowed: ${allowed.join(", ") || "none"}`
         );
       }
       updates.status = body.status;
       changes.status = `${existing.status} → ${body.status}`;
     }
 
-    // Revision update
     if (body.revision !== undefined) {
       updates.revision = body.revision;
       changes.revision = body.revision;
@@ -117,7 +79,7 @@ export async function PUT(
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     // Auto-capture a baseline when the BOM transitions to RELEASED.
     // This is the "immutable record of what we shipped" that the ECO
@@ -129,7 +91,9 @@ export async function PUT(
     if (updates.status === "RELEASED") {
       try {
         const result = await captureBomSnapshot({
-          db,
+          // Takes a raw SupabaseClient and scopes every query by the tenantId
+          // it is handed, which is the caller's own — see lib/bom-snapshot.ts.
+          db: db.unscoped("bom-snapshot takes a raw client and scopes by the tenantId passed in"),
           tenantId: tenantUser.tenantId,
           bomId,
           userId: tenantUser.id,
@@ -173,46 +137,26 @@ export async function PUT(
       );
     }
 
-    return NextResponse.json(bom);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update BOM";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return bom;
   }
-}
+);
 
-export async function DELETE(
-  _request: NextRequest,
-  { params }: { params: Promise<{ bomId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.FILE_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.FILE_EDIT, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
+    const { bomId } = params;
 
-    const { bomId } = await params;
-    const db = getServiceClient();
-
-    // Verify ownership and get name for audit
     const { data: existing } = await db
       .from("boms")
       .select("name, status")
       .eq("id", bomId)
-      .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
-      .single();
+      .maybeSingle();
 
-    if (!existing) {
-      return NextResponse.json({ error: "BOM not found" }, { status: 404 });
-    }
+    if (!existing) throw notFound("BOM not found");
 
     if (existing.status === "RELEASED") {
-      return NextResponse.json(
-        { error: "Cannot delete a released BOM. Obsolete it first." },
-        { status: 400 }
-      );
+      throw badRequest("Cannot delete a released BOM. Obsolete it first.");
     }
 
     // Soft-delete: mark as deleted instead of removing the row.
@@ -221,7 +165,7 @@ export async function DELETE(
       .from("boms")
       .update({ deletedAt: new Date().toISOString() })
       .eq("id", bomId);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     await logAudit({
       tenantId: tenantUser.tenantId,
@@ -232,9 +176,6 @@ export async function DELETE(
       details: { name: existing.name },
     });
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to delete BOM";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { success: true };
   }
-}
+);

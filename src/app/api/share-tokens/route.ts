@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
         .select("*")
         .eq("id", body.resourceId)
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .single();
       if (!file) {
         return NextResponse.json({ error: "File not found" }, { status: 404 });
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
         .select("id")
         .eq("id", body.resourceId)
         .eq("tenantId", tenantUser.tenantId)
+        .is("deletedAt", null)
         .single();
       if (!bom) {
         return NextResponse.json({ error: "BOM not found" }, { status: 404 });

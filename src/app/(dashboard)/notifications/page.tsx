@@ -13,6 +13,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 function initialsOf(name: string): string {
   return name
@@ -61,7 +63,10 @@ const FILTER_LABELS: Record<FilterKey, string> = {
   system: "Mentions",
 };
 
-const typeBadgeVariant: Record<NotificationType, "info" | "purple" | "orange" | "warning" | "muted"> = {
+const typeBadgeVariant: Record<
+  NotificationType,
+  "info" | "purple" | "orange" | "warning" | "muted"
+> = {
   approval: "purple",
   transition: "info",
   eco: "orange",
@@ -213,27 +218,29 @@ export default function NotificationsPage() {
   const filteredTotal = grouped.reduce((sum, [, arr]) => sum + arr.length, 0);
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-2xl font-bold">Notifications</h2>
-          <p className="text-sm text-muted-foreground mt-1">{unread} unread</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {readCount > 0 && (
-            <Button variant="outline" size="sm" onClick={clearRead}>
-              <Trash2 className="w-4 h-4 mr-2" />
-              Clear read
-            </Button>
-          )}
-          {unread > 0 && (
-            <Button variant="outline" size="sm" onClick={markAllRead}>
-              <CheckCheck className="w-4 h-4 mr-2" />
-              Mark all read
-            </Button>
-          )}
-        </div>
-      </div>
+    <PageContainer width="narrow">
+      <PageHeader
+        title="Notifications"
+        description={<>{unread} unread</>}
+        actions={
+          <>
+            <div className="flex items-center gap-2">
+              {readCount > 0 && (
+                <Button variant="outline" size="sm" onClick={clearRead}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Clear read
+                </Button>
+              )}
+              {unread > 0 && (
+                <Button variant="outline" size="sm" onClick={markAllRead}>
+                  <CheckCheck className="w-4 h-4 mr-2" />
+                  Mark all read
+                </Button>
+              )}
+            </div>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="space-y-2">
@@ -260,7 +267,7 @@ export default function NotificationsPage() {
                 <TabsTrigger key={key} value={key}>
                   {FILTER_LABELS[key]}
                   {n > 0 && (
-                    <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0">
+                    <Badge variant="secondary" className="ml-1.5 text-3xs px-1.5 py-0">
                       {n}
                     </Badge>
                   )}
@@ -285,7 +292,7 @@ export default function NotificationsPage() {
                 <section key={bucket} aria-labelledby={`bucket-${bucket}`}>
                   <h3
                     id={`bucket-${bucket}`}
-                    className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-[0.15em] mb-2 px-1"
+                    className="text-3xs font-semibold text-muted-foreground/60 uppercase tracking-[0.15em] mb-2 px-1"
                   >
                     {bucket}
                     <span className="ml-2 text-muted-foreground/40 font-normal normal-case tracking-normal">
@@ -315,18 +322,27 @@ export default function NotificationsPage() {
                               className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${!notif.isRead ? "bg-primary" : "bg-transparent"}`}
                             />
                             <Avatar className="w-8 h-8 shrink-0">
-                              <AvatarFallback className="text-[11px] bg-foreground/8 text-foreground font-medium">
-                                {notif.actor ? initialsOf(notif.actor.fullName) : <Bell className="w-4 h-4" />}
+                              <AvatarFallback className="text-2xs bg-foreground/8 text-foreground font-medium">
+                                {notif.actor ? (
+                                  initialsOf(notif.actor.fullName)
+                                ) : (
+                                  <Bell className="w-4 h-4" />
+                                )}
                               </AvatarFallback>
                             </Avatar>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium">{notif.title}</span>
-                                <Badge variant={typeBadgeVariant[notif.type] || "muted"} className="text-[10px] px-1.5">
+                                <Badge
+                                  variant={typeBadgeVariant[notif.type] || "muted"}
+                                  className="text-3xs px-1.5"
+                                >
                                   {notif.type}
                                 </Badge>
                               </div>
-                              <p className="text-sm text-muted-foreground mt-0.5">{notif.message}</p>
+                              <p className="text-sm text-muted-foreground mt-0.5">
+                                {notif.message}
+                              </p>
                               <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground/60">
                                 <Clock className="w-3 h-3" />
                                 <FormattedDate date={notif.createdAt} />
@@ -355,6 +371,6 @@ export default function NotificationsPage() {
           </TabsContent>
         </Tabs>
       )}
-    </div>
+    </PageContainer>
   );
 }

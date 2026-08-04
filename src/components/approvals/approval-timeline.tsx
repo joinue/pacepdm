@@ -3,8 +3,17 @@
 import { Badge } from "@/components/ui/badge";
 import { FormattedDate } from "@/components/ui/formatted-date";
 import {
-  Clock, CheckCircle, CheckCircle2, XCircle, Play, ArrowRight,
-  Undo2, RotateCcw, Send, AlertTriangle, History,
+  Clock,
+  CheckCircle,
+  CheckCircle2,
+  XCircle,
+  Play,
+  ArrowRight,
+  Undo2,
+  RotateCcw,
+  Send,
+  AlertTriangle,
+  History,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -95,9 +104,7 @@ function TimelineEventRow({ event, elapsedMs, isFirst, isLast }: TimelineEventRo
     <li className="relative pl-8 pb-4 last:pb-0">
       {/* Vertical connector line — hidden on the last row so the timeline
           ends at its icon instead of trailing into empty space. */}
-      {!isLast && (
-        <span className="absolute left-3 top-6 bottom-0 w-px bg-border" aria-hidden />
-      )}
+      {!isLast && <span className="absolute left-3 top-6 bottom-0 w-px bg-border" aria-hidden />}
       {/* Icon disc */}
       <span
         className={`absolute left-0 top-0.5 flex items-center justify-center w-6 h-6 rounded-full ${style.bg}`}
@@ -107,21 +114,17 @@ function TimelineEventRow({ event, elapsedMs, isFirst, isLast }: TimelineEventRo
 
       <div className="flex items-baseline gap-2 flex-wrap">
         <span className={`text-xs font-semibold ${style.label}`}>{style.title}</span>
-        {event.user && (
-          <span className="text-xs text-foreground">{event.user.fullName}</span>
-        )}
-        <span className="text-[10px] text-muted-foreground/60">
+        {event.user && <span className="text-xs text-foreground">{event.user.fullName}</span>}
+        <span className="text-3xs text-muted-foreground/60">
           <FormattedDate date={event.createdAt} />
         </span>
         {!isFirst && elapsedMs > 0 && (
-          <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-normal">
+          <Badge variant="secondary" className="text-4xs px-1.5 py-0 font-normal">
             +{formatDuration(elapsedMs)}
           </Badge>
         )}
       </div>
-      {details && (
-        <p className="text-xs text-muted-foreground mt-0.5">{details}</p>
-      )}
+      {details && <p className="text-xs text-muted-foreground mt-0.5">{details}</p>}
     </li>
   );
 }
@@ -131,71 +134,69 @@ function TimelineEventRow({ event, elapsedMs, isFirst, isLast }: TimelineEventRo
  * row, and the colors for the icon disc and label text. `DEFAULT` catches
  * any event type the engine adds later that we haven't styled yet.
  */
-const eventStyles: Record<
-  string,
-  { icon: LucideIcon; title: string; bg: string; label: string }
-> = {
-  CREATED: {
-    icon: Play,
-    title: "Created",
-    bg: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
-    label: "text-blue-700 dark:text-blue-300",
-  },
-  STEP_ACTIVATED: {
-    icon: ArrowRight,
-    title: "Step activated",
-    bg: "bg-slate-100 text-slate-700 dark:bg-slate-900/50 dark:text-slate-300",
-    label: "text-slate-700 dark:text-slate-300",
-  },
-  APPROVED: {
-    icon: CheckCircle,
-    title: "Approved",
-    bg: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300",
-    label: "text-green-700 dark:text-green-300",
-  },
-  REJECTED: {
-    icon: XCircle,
-    title: "Rejected",
-    bg: "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300",
-    label: "text-red-700 dark:text-red-300",
-  },
-  RECALLED: {
-    icon: Undo2,
-    title: "Recalled",
-    bg: "bg-gray-100 text-gray-700 dark:bg-gray-900/50 dark:text-gray-300",
-    label: "text-gray-700 dark:text-gray-300",
-  },
-  REWORK_REQUESTED: {
-    icon: RotateCcw,
-    title: "Rework requested",
-    bg: "bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300",
-    label: "text-purple-700 dark:text-purple-300",
-  },
-  RESUBMITTED: {
-    icon: Send,
-    title: "Resubmitted",
-    bg: "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300",
-    label: "text-blue-700 dark:text-blue-300",
-  },
-  COMPLETED: {
-    icon: CheckCircle2,
-    title: "Completed",
-    bg: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300",
-    label: "text-green-700 dark:text-green-300",
-  },
-  DEADLINE_WARNING: {
-    icon: AlertTriangle,
-    title: "Deadline warning",
-    bg: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
-    label: "text-amber-700 dark:text-amber-300",
-  },
-  DEFAULT: {
-    icon: Clock,
-    title: "Event",
-    bg: "bg-muted text-muted-foreground",
-    label: "text-foreground",
-  },
-};
+const eventStyles: Record<string, { icon: LucideIcon; title: string; bg: string; label: string }> =
+  {
+    CREATED: {
+      icon: Play,
+      title: "Created",
+      bg: "bg-info/10 text-info /50 ",
+      label: "text-info",
+    },
+    STEP_ACTIVATED: {
+      icon: ArrowRight,
+      title: "Step activated",
+      bg: "bg-muted text-muted-foreground /50 ",
+      label: "text-muted-foreground",
+    },
+    APPROVED: {
+      icon: CheckCircle,
+      title: "Approved",
+      bg: "bg-success/10 text-success /50 ",
+      label: "text-success",
+    },
+    REJECTED: {
+      icon: XCircle,
+      title: "Rejected",
+      bg: "bg-destructive/10 text-destructive /50 ",
+      label: "text-destructive",
+    },
+    RECALLED: {
+      icon: Undo2,
+      title: "Recalled",
+      bg: "bg-muted text-muted-foreground /50 ",
+      label: "text-muted-foreground",
+    },
+    REWORK_REQUESTED: {
+      icon: RotateCcw,
+      title: "Rework requested",
+      bg: "bg-chart-4/10 text-chart-4 /50 ",
+      label: "text-chart-4",
+    },
+    RESUBMITTED: {
+      icon: Send,
+      title: "Resubmitted",
+      bg: "bg-info/10 text-info /50 ",
+      label: "text-info",
+    },
+    COMPLETED: {
+      icon: CheckCircle2,
+      title: "Completed",
+      bg: "bg-success/10 text-success /50 ",
+      label: "text-success",
+    },
+    DEADLINE_WARNING: {
+      icon: AlertTriangle,
+      title: "Deadline warning",
+      bg: "bg-warning/10 text-warning /50 ",
+      label: "text-warning",
+    },
+    DEFAULT: {
+      icon: Clock,
+      title: "Event",
+      bg: "bg-muted text-muted-foreground",
+      label: "text-foreground",
+    },
+  };
 
 /**
  * Strip a leading "Actor Name:" or "Actor Name " prefix from a details

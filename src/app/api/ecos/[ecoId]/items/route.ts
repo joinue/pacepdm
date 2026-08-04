@@ -83,10 +83,16 @@ async function hydrateItems(
 
   const [partsRes, filesRes] = await Promise.all([
     partIds.length
-      ? db.from("parts").select("id, partNumber, name, revision, lifecycleState, category").in("id", partIds)
+      ? db
+          .from("parts")
+          .select("id, partNumber, name, revision, lifecycleState, category")
+          .in("id", partIds)
       : Promise.resolve({ data: [] as HydratedItem["part"][], error: null }),
     fileIds.length
-      ? db.from("files").select("id, name, partNumber, lifecycleState, currentVersion").in("id", fileIds)
+      ? db
+          .from("files")
+          .select("id, name, partNumber, lifecycleState, currentVersion")
+          .in("id", fileIds)
       : Promise.resolve({ data: [] as HydratedItem["file"][], error: null }),
   ]);
 
@@ -98,8 +104,8 @@ async function hydrateItems(
 
   return rows.map((r) => ({
     ...r,
-    part: r.partId ? partById.get(r.partId) ?? null : null,
-    file: r.fileId ? fileById.get(r.fileId) ?? null : null,
+    part: r.partId ? (partById.get(r.partId) ?? null) : null,
+    file: r.fileId ? (fileById.get(r.fileId) ?? null) : null,
   }));
 }
 
@@ -114,7 +120,13 @@ export async function GET(
     const db = getServiceClient();
 
     // Verify ECO belongs to tenant
-    const { data: eco } = await db.from("ecos").select("id").eq("id", ecoId).eq("tenantId", tenantUser.tenantId).maybeSingle();
+    const { data: eco } = await db
+      .from("ecos")
+      .select("id")
+      .eq("id", ecoId)
+      .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
+      .maybeSingle();
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
 
     const { data: rawItems, error } = await db
@@ -125,10 +137,7 @@ export async function GET(
 
     if (error) {
       console.error(`[ecos/${ecoId}/items] GET failed:`, error);
-      return NextResponse.json(
-        { error: `Query failed: ${error.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: `Query failed: ${error.message}` }, { status: 500 });
     }
 
     const hydrated = await hydrateItems(db, (rawItems ?? []) as RawItem[]);
@@ -160,10 +169,12 @@ export async function POST(
     const db = getServiceClient();
 
     // Verify ECO is in DRAFT and belongs to tenant
-    const { data: eco } = await db.from("ecos")
+    const { data: eco } = await db
+      .from("ecos")
       .select("id, status, ecoNumber")
       .eq("id", ecoId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
     if (eco.status !== "DRAFT") {
@@ -178,15 +189,16 @@ export async function POST(
     if (partId) {
       const { data: part } = await db
         .from("parts")
-        .select("id, tenantId, revision")
+        .select("id, tenantId, revision, deletedAt")
         .eq("id", partId)
         .single();
-      if (!part || part.tenantId !== tenantUser.tenantId) {
+      if (!part || part.tenantId !== tenantUser.tenantId || part.deletedAt) {
         return NextResponse.json({ error: "Part not found" }, { status: 404 });
       }
       if (!seededFromRevision) seededFromRevision = part.revision;
 
-      const { data: existing } = await db.from("eco_items")
+      const { data: existing } = await db
+        .from("eco_items")
         .select("id")
         .eq("ecoId", ecoId)
         .eq("partId", partId)
@@ -197,14 +209,15 @@ export async function POST(
     } else if (fileId) {
       const { data: file } = await db
         .from("files")
-        .select("id, tenantId")
+        .select("id, tenantId, deletedAt")
         .eq("id", fileId)
         .single();
-      if (!file || file.tenantId !== tenantUser.tenantId) {
+      if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
         return NextResponse.json({ error: "File not found" }, { status: 404 });
       }
 
-      const { data: existing } = await db.from("eco_items")
+      const { data: existing } = await db
+        .from("eco_items")
         .select("id")
         .eq("ecoId", ecoId)
         .eq("fileId", fileId)
@@ -214,16 +227,20 @@ export async function POST(
       }
     }
 
-    const { data: rawItem, error } = await db.from("eco_items").insert({
-      id: uuid(),
-      ecoId,
-      partId: partId ?? null,
-      fileId: fileId ?? null,
-      changeType,
-      reason: reason ?? null,
-      fromRevision: seededFromRevision,
-      toRevision: toRevision ?? null,
-    }).select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision").single();
+    const { data: rawItem, error } = await db
+      .from("eco_items")
+      .insert({
+        id: uuid(),
+        ecoId,
+        partId: partId ?? null,
+        fileId: fileId ?? null,
+        changeType,
+        reason: reason ?? null,
+        fromRevision: seededFromRevision,
+        toRevision: toRevision ?? null,
+      })
+      .select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision")
+      .single();
 
     if (error) throw error;
 
@@ -271,10 +288,12 @@ export async function DELETE(
     const { ecoId } = await params;
     const db = getServiceClient();
 
-    const { data: eco } = await db.from("ecos")
+    const { data: eco } = await db
+      .from("ecos")
       .select("id, status, ecoNumber")
       .eq("id", ecoId)
       .eq("tenantId", tenantUser.tenantId)
+      .is("deletedAt", null)
       .single();
     if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
     if (eco.status !== "DRAFT") {

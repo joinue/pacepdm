@@ -1,43 +1,34 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant, notFound } from "@/lib/api-route";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { z, uuid } from "@/lib/validation";
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ fileId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { fileId } = await params;
-    const db = getServiceClient();
+const ParamsSchema = z.object({ fileId: uuid });
 
-    const { data: file } = await db
-      .from("files")
-      .select("id, tenantId, folderId")
-      .eq("id", fileId)
-      .single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
-    const access = await requireFileAccess(tenantUser, file, "view");
-    if (!access.ok) return access.response;
+/** ECOs that have touched this file, via eco_items. */
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
+  const { data: file } = await db
+    .from("files")
+    .select("id, tenantId, folderId, deletedAt")
+    .eq("id", params.fileId)
+    .is("deletedAt", null)
+    .maybeSingle();
+  if (!file) throw notFound("File not found");
 
-    const { data: ecoItems } = await db
-      .from("eco_items")
-      .select("id, changeType, reason, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, priority)")
-      .eq("fileId", fileId);
+  // Folder ACLs are a second gate, independent of role permissions.
+  const access = await requireFileAccess(tenantUser, file, "view");
+  if (!access.ok) return access.response;
 
-    // Filter to only ECOs belonging to this tenant
-    const items = (ecoItems || []).filter((item) => {
-      const eco = item.eco as unknown as { id: string; ecoNumber: string; title: string; status: string; priority: string } | null;
-      return eco !== null;
-    });
+  // lint-conventions-allow: child-table-direct-query — keyed on the file
+  // resolved through the scoped client above, so it cannot reach another
+  // tenant's eco_items.
+  const { data: ecoItems } = await db
+    .from("eco_items")
+    .select(
+      "id, changeType, reason, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, priority)"
+    )
+    .eq("fileId", params.fileId);
 
-    return NextResponse.json(items);
-  } catch (err) {
-    console.error("GET /api/files/[fileId]/ecos failed:", err);
-    return NextResponse.json({ error: "Failed to fetch ECO linkage" }, { status: 500 });
-  }
-}
+  // A null `eco` means the joined row resolved to nothing — drop those rather
+  // than rendering an empty linkage.
+  return (ecoItems || []).filter((item: { eco: unknown }) => item.eco !== null);
+});

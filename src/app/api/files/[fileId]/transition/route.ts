@@ -30,7 +30,7 @@ export async function POST(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -43,12 +43,14 @@ export async function POST(
 
     const { data: transition } = await db
       .from("lifecycle_transitions")
-      .select(`
+      .select(
+        `
         *,
         fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name),
         toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name),
         lifecycle:lifecycles!lifecycle_transitions_lifecycleId_fkey(tenantId)
-      `)
+      `
+      )
       .eq("id", transitionId)
       .single();
 
@@ -72,11 +74,17 @@ export async function POST(
     // lifecycle) lets a user mix transitions across lifecycles to dodge
     // the approval requirement on the file's actual lifecycle.
     if (file.lifecycleId && transition.lifecycleId !== file.lifecycleId) {
-      return NextResponse.json({ error: "Transition does not belong to this file's lifecycle" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Transition does not belong to this file's lifecycle" },
+        { status: 400 }
+      );
     }
 
     if (transition.fromState.name !== file.lifecycleState) {
-      return NextResponse.json({ error: "Transition not valid from current state" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Transition not valid from current state" },
+        { status: 400 }
+      );
     }
 
     // Workflow gate: if a workflow is assigned to this transition, route
@@ -135,10 +143,17 @@ export async function POST(
     await db.from("files").update(updateData).eq("id", fileId);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
       action: "file.transition",
-      entityType: "file", entityId: fileId,
-      details: { name: file.name, from: transition.fromState.name, to: transition.toState.name, transition: transition.name },
+      entityType: "file",
+      entityId: fileId,
+      details: {
+        name: file.name,
+        from: transition.fromState.name,
+        to: transition.toState.name,
+        transition: transition.name,
+      },
     });
 
     await sideEffect(

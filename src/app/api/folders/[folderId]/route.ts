@@ -91,20 +91,27 @@ export async function PUT(
     const parentPath = folder.path.substring(0, folder.path.lastIndexOf(folder.name));
     const newPath = parentPath + name;
 
-    const { error } = await db.from("folders")
+    const { error } = await db
+      .from("folders")
       .update({ name, path: newPath, updatedAt: new Date().toISOString() })
       .eq("id", folderId);
 
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A folder with this name already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A folder with this name already exists" },
+          { status: 409 }
+        );
       }
       throw error;
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "folder.rename", entityType: "folder", entityId: folderId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "folder.rename",
+      entityType: "folder",
+      entityId: folderId,
       details: { oldName: folder.name, newName: name },
     });
 
@@ -146,18 +153,31 @@ export async function DELETE(
     }
 
     // Check for contents
-    const { count: fileCount } = await db.from("files").select("*", { count: "exact", head: true }).eq("folderId", folderId);
-    const { count: childCount } = await db.from("folders").select("*", { count: "exact", head: true }).eq("parentId", folderId);
+    const { count: fileCount } = await db
+      .from("files")
+      .select("*", { count: "exact", head: true })
+      .eq("folderId", folderId)
+      .is("deletedAt", null);
+    const { count: childCount } = await db
+      .from("folders")
+      .select("*", { count: "exact", head: true })
+      .eq("parentId", folderId);
 
     if ((fileCount && fileCount > 0) || (childCount && childCount > 0)) {
-      return NextResponse.json({ error: "Folder is not empty. Move or delete contents first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Folder is not empty. Move or delete contents first." },
+        { status: 409 }
+      );
     }
 
     await db.from("folders").delete().eq("id", folderId);
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "folder.delete", entityType: "folder", entityId: folderId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "folder.delete",
+      entityType: "folder",
+      entityId: folderId,
       details: { name: folder.name, path: folder.path },
     });
 

@@ -1,49 +1,45 @@
-import { NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant } from "@/lib/api-route";
 
-// Get pending approvals for the current user
-export async function GET() {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const db = getServiceClient();
+/**
+ * Pending approvals assigned to the current user.
+ *
+ * Scoping here runs through group membership rather than a tenantId column:
+ * a user only belongs to groups in their own tenant, so the `groupIds` derived
+ * below cannot reach another tenant's decisions. Both tables are child tables
+ * with no tenantId of their own.
+ */
+export const GET = withTenant({}, async ({ db, tenantUser }) => {
+  // lint-conventions-allow: child-table-direct-query — filtered by the caller's
+  // own tenant_users.id, which the wrapper resolved from the session.
+  const { data: memberships } = await db
+    .from("approval_group_members")
+    .select("groupId")
+    .eq("userId", tenantUser.id);
 
-    // Find all groups this user belongs to
-    const { data: memberships } = await db
-      .from("approval_group_members")
-      .select("groupId")
-      .eq("userId", tenantUser.id);
+  const groupIds = (memberships || []).map((m: { groupId: string }) => m.groupId);
+  if (groupIds.length === 0) return [];
 
-    const groupIds = (memberships || []).map((m) => m.groupId);
-
-    if (groupIds.length === 0) {
-      return NextResponse.json([]);
-    }
-
-    // Find pending decisions for those groups
-    const { data: decisions } = await db
-      .from("approval_decisions")
-      .select(`
+  // lint-conventions-allow: child-table-direct-query — `groupIds` comes from the
+  // membership query above, never from the request, so it cannot name a group
+  // outside the caller's tenant.
+  const { data: decisions } = await db
+    .from("approval_decisions")
+    .select(
+      `
         *,
         group:approval_groups!approval_decisions_groupId_fkey(name),
         request:approval_requests!approval_decisions_requestId_fkey(
           id, type, entityType, entityId, title, description, status, createdAt,
           requestedBy:tenant_users!approval_requests_requestedById_fkey(fullName, email)
         )
-      `)
-      .in("groupId", groupIds)
-      .eq("status", "PENDING")
-      .order("createdAt", { ascending: false });
+      `
+    )
+    .in("groupId", groupIds)
+    .eq("status", "PENDING")
+    .order("createdAt", { ascending: false });
 
-    // Filter to only show decisions where the parent request is still pending
-    const pending = (decisions || []).filter(
-      (d) => d.request?.status === "PENDING"
-    );
-
-    return NextResponse.json(pending);
-  } catch (err) {
-    console.error("GET /api/approvals failed:", err);
-    return NextResponse.json({ error: "Failed to fetch approvals" }, { status: 500 });
-  }
-}
+  // Only surface decisions whose parent request is still open.
+  return (decisions || []).filter(
+    (d: { request?: { status?: string } }) => d.request?.status === "PENDING"
+  );
+});

@@ -9,8 +9,22 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Logo } from "./logo";
 import {
-  FolderOpen, FileText, ClipboardList, Settings,
-  Users, History, LayoutDashboard, Tag, CheckCircle, ShieldCheck, Package, KeyRound, Cpu, Building2, Workflow,
+  FolderOpen,
+  FileText,
+  ClipboardList,
+  Settings,
+  Users,
+  History,
+  LayoutDashboard,
+  Tag,
+  CheckCircle,
+  ShieldCheck,
+  Package,
+  KeyRound,
+  Cpu,
+  Building2,
+  Workflow,
+  Palette,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,9 +47,7 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
-    items: [
-      { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    ],
+    items: [{ name: "Dashboard", href: "/", icon: LayoutDashboard }],
   },
   {
     label: "Library",
@@ -66,6 +78,11 @@ const navGroups: NavGroup[] = [
       { name: "Metadata", href: "/admin/metadata", icon: FileText },
       { name: "Audit Log", href: "/audit-log", icon: History, permission: PERMISSIONS.AUDIT_VIEW },
       { name: "Settings", href: "/admin/settings", icon: Settings },
+      // Development aid, not a product surface: the primitive gallery. Hidden
+      // in production so it does not read as a feature.
+      ...(process.env.NODE_ENV === "development"
+        ? [{ name: "Kitchen sink", href: "/admin/kitchen-sink", icon: Palette }]
+        : []),
     ],
   },
 ];
@@ -99,15 +116,14 @@ export function Sidebar({
     return `${n} unread notification${n === 1 ? "" : "s"}`;
   }
   const isAdmin =
-    user.permissions.includes("*") ||
-    user.permissions.some((p) => p.startsWith("admin."));
+    user.permissions.includes("*") || user.permissions.some((p) => p.startsWith("admin."));
 
   const visibleGroups = navGroups
     .filter((g) => !g.adminOnly || isAdmin)
     .map((g) => ({
       ...g,
       items: g.items.filter(
-        (item) => !item.permission || hasPermission(user.permissions, item.permission),
+        (item) => !item.permission || hasPermission(user.permissions, item.permission)
       ),
     }))
     .filter((g) => g.items.length > 0);
@@ -117,14 +133,11 @@ export function Sidebar({
       <div className={cn("flex flex-col h-full", collapsed ? "w-12" : "w-52")}>
         {/* Logo */}
         <div
-          className={cn(
-            "flex items-center h-12",
-            collapsed ? "justify-center" : "gap-2.5 px-5",
-          )}
+          className={cn("flex items-center h-12", collapsed ? "justify-center" : "gap-2.5 px-5")}
         >
           <Logo size={20} />
           {!collapsed && (
-            <h1 className="font-semibold text-[13px] tracking-tight leading-none">PACE PDM</h1>
+            <h1 className="font-semibold text-sm tracking-tight leading-none">PACE PDM</h1>
           )}
         </div>
 
@@ -133,7 +146,7 @@ export function Sidebar({
           aria-label="Main"
           className={cn(
             "flex-1 py-1 overflow-y-auto overflow-x-hidden",
-            collapsed ? "px-1.5" : "px-3",
+            collapsed ? "px-1.5" : "px-3"
           )}
         >
           {visibleGroups.map((group, groupIdx) => {
@@ -152,13 +165,13 @@ export function Sidebar({
                       ? "mt-2 pt-2 border-t border-border/50"
                       : group.label
                         ? "mt-4"
-                        : "mt-3 pt-3 border-t border-border/50"),
+                        : "mt-3 pt-3 border-t border-border/50")
                 )}
               >
                 {group.label && !collapsed && (
                   <p
                     id={headingId}
-                    className="px-2.5 pb-1 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-[0.15em]"
+                    className="px-2.5 pb-1 text-3xs font-medium text-muted-foreground/60 uppercase tracking-[0.15em]"
                   >
                     {group.label}
                   </p>
@@ -176,13 +189,11 @@ export function Sidebar({
                       aria-current={active ? "page" : undefined}
                       aria-label={collapsed ? item.name : undefined}
                       className={cn(
-                        "relative flex items-center rounded-lg text-[13px] transition-all duration-150",
-                        collapsed
-                          ? "h-9 w-9 justify-center"
-                          : "gap-2.5 px-2.5 py-1.5",
+                        "relative flex items-center rounded-lg text-sm transition-all duration-150",
+                        collapsed ? "h-9 w-9 justify-center" : "gap-2.5 px-2.5 py-1.5",
                         active
                           ? "bg-foreground/12 text-foreground font-medium"
-                          : "text-muted-foreground hover:text-foreground hover:bg-foreground/6",
+                          : "text-muted-foreground hover:text-foreground hover:bg-foreground/6"
                       )}
                     >
                       <item.icon className="w-3.75 h-3.75 shrink-0" aria-hidden="true" />
@@ -190,7 +201,7 @@ export function Sidebar({
                       {showBadge && !collapsed && (
                         <span
                           aria-label={badgeLabel}
-                          className="ml-auto bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-4.5 h-4.5 flex items-center justify-center px-1"
+                          className="ml-auto bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4.5 h-4.5 flex items-center justify-center px-1"
                         >
                           {badgeCount > 9 ? "9+" : badgeCount}
                         </span>
@@ -223,7 +234,7 @@ export function Sidebar({
 
         {!collapsed && (
           <div className="px-5 py-3">
-            <p className="text-[10px] text-muted-foreground/40 tracking-wide">v0.1.0</p>
+            <p className="text-3xs text-muted-foreground/40 tracking-wide">v0.1.0</p>
           </div>
         )}
       </div>

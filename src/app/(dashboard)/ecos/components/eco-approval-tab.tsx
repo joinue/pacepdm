@@ -4,9 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FormattedDate } from "@/components/ui/formatted-date";
-import {
-  Loader2, CheckCircle, XCircle, Clock, Shield, MessageSquare,
-} from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Clock, Shield, MessageSquare } from "lucide-react";
 import { approvalStatusConfig, modeLabels } from "../constants";
 import type { ApprovalData, ApprovalDecision } from "../types";
 import { ApprovalTimeline, formatDuration } from "@/components/approvals/approval-timeline";
@@ -75,7 +73,9 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
             {approvalStatusConfig[approval.status]?.label || approval.status}
           </Badge>
           {approval.workflow && (
-            <span className="text-xs text-muted-foreground">Workflow: {approval.workflow.name}</span>
+            <span className="text-xs text-muted-foreground">
+              Workflow: {approval.workflow.name}
+            </span>
           )}
           <span className="text-xs text-muted-foreground">
             Started <FormattedDate date={approval.createdAt} variant="date" />
@@ -98,9 +98,13 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
         {/* Step progress bar */}
         {showProgress && (
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-              <span>Step {approval.currentStepOrder} of {approval.decisions.length}</span>
-              <span>{completedCount}/{approval.decisions.length} completed</span>
+            <div className="flex items-center justify-between text-3xs text-muted-foreground">
+              <span>
+                Step {approval.currentStepOrder} of {approval.decisions.length}
+              </span>
+              <span>
+                {completedCount}/{approval.decisions.length} completed
+              </span>
             </div>
             <div className="flex gap-1">
               {sortedDecisions.map((d, i) => (
@@ -120,7 +124,9 @@ export function EcoApprovalTab({ approval, loading }: EcoApprovalTabProps) {
             Approval Steps
           </p>
           <div className="space-y-2">
-            {sortedDecisions.map((d) => <DecisionRow key={d.id} decision={d} />)}
+            {sortedDecisions.map((d) => (
+              <DecisionRow key={d.id} decision={d} />
+            ))}
           </div>
         </div>
 
@@ -152,21 +158,23 @@ function DecisionRow({ decision: d }: { decision: ApprovalDecision }) {
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border">
       {stepNum && (
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${stepIconBg(d.status)}`}>
+        <div
+          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${stepIconBg(d.status)}`}
+        >
           {stepIcon(d.status, stepNum)}
         </div>
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{d.group.name}</span>
-          <Badge variant={dConfig.variant} className="text-[9px]">{dConfig.label}</Badge>
+          <Badge variant={dConfig.variant} className="text-4xs">
+            {dConfig.label}
+          </Badge>
           {d.approvalMode && d.approvalMode !== "ANY" && (
-            <span className="text-[10px] text-muted-foreground">{modeLabels[d.approvalMode]}</span>
+            <span className="text-3xs text-muted-foreground">{modeLabels[d.approvalMode]}</span>
           )}
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {d.signatureLabel || "Approval"}
-        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">{d.signatureLabel || "Approval"}</p>
         {d.decider && (
           <p className="text-xs mt-1">
             {d.decider.fullName} — <FormattedDate date={d.decidedAt!} />
@@ -179,12 +187,17 @@ function DecisionRow({ decision: d }: { decision: ApprovalDecision }) {
           </div>
         )}
         {d.deadlineAt && d.status === "PENDING" && (
-          <p className={`text-[10px] mt-1.5 flex items-center gap-1 ${isOverdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
+          <p
+            className={`text-3xs mt-1.5 flex items-center gap-1 ${isOverdue ? "text-destructive font-medium" : "text-muted-foreground"}`}
+          >
             <Clock className="w-3 h-3" />
-            {isOverdue
-              ? "Overdue"
-              : <>Deadline: <FormattedDate date={d.deadlineAt} /></>
-            }
+            {isOverdue ? (
+              "Overdue"
+            ) : (
+              <>
+                Deadline: <FormattedDate date={d.deadlineAt} />
+              </>
+            )}
           </p>
         )}
       </div>
@@ -196,20 +209,29 @@ function DecisionRow({ decision: d }: { decision: ApprovalDecision }) {
 
 function stepBarColor(status: string): string {
   switch (status) {
-    case "APPROVED": return "bg-green-500";
-    case "REJECTED": return "bg-red-500";
-    case "PENDING": return "bg-yellow-500 animate-pulse";
-    case "REWORK": return "bg-purple-500";
-    default: return "bg-muted";
+    case "APPROVED":
+      return "bg-success";
+    case "REJECTED":
+      return "bg-destructive";
+    case "PENDING":
+      return "bg-warning animate-pulse";
+    case "REWORK":
+      return "bg-chart-4";
+    default:
+      return "bg-muted";
   }
 }
 
 function stepIconBg(status: string): string {
   switch (status) {
-    case "APPROVED": return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
-    case "REJECTED": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
-    case "PENDING": return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
-    default: return "bg-muted";
+    case "APPROVED":
+      return "bg-success/10 text-success /30 ";
+    case "REJECTED":
+      return "bg-destructive/10 text-destructive /30 ";
+    case "PENDING":
+      return "bg-warning/10 text-warning /30 ";
+    default:
+      return "bg-muted";
   }
 }
 

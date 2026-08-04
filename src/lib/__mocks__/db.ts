@@ -5,18 +5,33 @@ import { vi } from "vitest";
  * Each method returns `this` so calls like .from().select().eq().single() work.
  * Set `mockData` / `mockError` before the test to control what queries return.
  */
-export function createMockQueryBuilder(overrides?: {
-  data?: unknown;
-  error?: unknown;
-}) {
+export function createMockQueryBuilder(overrides?: { data?: unknown; error?: unknown }) {
   const result = { data: overrides?.data ?? null, error: overrides?.error ?? null };
 
   const builder: Record<string, unknown> = {};
   const chainMethods = [
-    "from", "select", "insert", "update", "delete",
-    "eq", "in", "neq", "is", "not", "lt", "gt", "gte", "lte", "like", "ilike",
-    "order", "limit", "single", "maybeSingle",
-    "upsert", "match",
+    "from",
+    "select",
+    "insert",
+    "update",
+    "delete",
+    "eq",
+    "in",
+    "neq",
+    "is",
+    "not",
+    "lt",
+    "gt",
+    "gte",
+    "lte",
+    "like",
+    "ilike",
+    "order",
+    "limit",
+    "single",
+    "maybeSingle",
+    "upsert",
+    "match",
   ];
 
   for (const method of chainMethods) {

@@ -142,7 +142,9 @@ export default function LoginPage() {
             )}
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
+              <Label htmlFor="email" className="text-sm sm:text-xs">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -158,8 +160,13 @@ export default function LoginPage() {
 
             <div className="space-y-2 sm:space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-sm sm:text-xs">Password</Label>
-                <Link href="/forgot-password" className="text-sm sm:text-xs text-muted-foreground hover:text-primary transition-colors">
+                <Label htmlFor="password" className="text-sm sm:text-xs">
+                  Password
+                </Label>
+                <Link
+                  href="/forgot-password"
+                  className="text-sm sm:text-xs text-muted-foreground hover:text-primary transition-colors"
+                >
                   Forgot password?
                 </Link>
               </div>
@@ -179,16 +186,24 @@ export default function LoginPage() {
                   className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                   tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> : <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />}
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  )}
                 </button>
               </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading || ssoLoading}>
+            <Button
+              type="submit"
+              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+              disabled={loading || ssoLoading}
+            >
               {loading ? "Signing in..." : "Sign In"}
             </Button>
 
-            <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-muted-foreground/60">
+            <div className="flex items-center gap-3 text-3xs uppercase tracking-widest text-muted-foreground/60">
               <span className="flex-1 h-px bg-border" />
               or
               <span className="flex-1 h-px bg-border" />

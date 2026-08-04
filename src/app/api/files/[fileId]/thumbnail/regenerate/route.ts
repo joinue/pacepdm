@@ -45,7 +45,7 @@ export async function POST(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -55,7 +55,10 @@ export async function POST(
     // Released artifact is locked — including its thumbnail. The visual
     // representation is part of what was approved.
     if (file.isFrozen) {
-      return NextResponse.json({ error: "Cannot regenerate the thumbnail of a frozen/released file. Revise it first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot regenerate the thumbnail of a frozen/released file. Revise it first." },
+        { status: 409 }
+      );
     }
 
     // We need the bytes of the *current* version. The thumbnail always
@@ -68,10 +71,7 @@ export async function POST(
       .single();
 
     if (!version?.storageKey) {
-      return NextResponse.json(
-        { error: "No version found for this file" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "No version found for this file" }, { status: 404 });
     }
 
     // Download the file from storage. We use the service client to
@@ -83,24 +83,34 @@ export async function POST(
 
     if (dlError || !blob) {
       console.error("Thumbnail regenerate: download failed:", dlError);
-      return NextResponse.json(
-        { error: "Failed to download file from storage" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to download file from storage" }, { status: 500 });
     }
 
     const arrayBuffer = await blob.arrayBuffer();
     const thumb = await extractThumbnail(arrayBuffer, file.name);
 
     if (!thumb) {
-      // Extraction returned null. Don't touch thumbnailKey — leaving the
-      // existing value intact means a previous good thumbnail (if any)
-      // stays in place.
+      // Extraction produced nothing. The user explicitly asked for a
+      // fresh extraction, which only happens when the current thumbnail
+      // is wrong or missing — leaving a stale (broken-img) thumbnailKey
+      // in place is exactly the bug this endpoint exists to fix. Clear
+      // it so the file-detail-panel falls into the canPreview=false
+      // branch and offers the "Upload thumbnail" manual escape hatch.
+      // The old object in storage is left as an orphan (Supabase storage
+      // costs are pennies and the new key/null path is clearer than
+      // deletion + race-free cleanup).
+      const now = new Date().toISOString();
+      await db
+        .from("files")
+        .update({ thumbnailKey: null, thumbnailAttemptedAt: now, updatedAt: now })
+        .eq("id", fileId);
       return NextResponse.json({
         regenerated: false,
+        cleared: !!file.thumbnailKey,
         reason:
-          "The extractor couldn't find an embedded raster preview in this file. " +
-          "Run `npm run debug-thumbnail` against the file locally to see what's inside.",
+          "The extractor couldn't find a decodable embedded preview in this file. " +
+          "If the SolidWorks file was saved without the 'Save preview picture' option, " +
+          "there's nothing to extract — upload a thumbnail manually instead.",
       });
     }
 
@@ -109,19 +119,14 @@ export async function POST(
     // deleting the old thumbnail object — Supabase storage costs are
     // pennies and an orphaned thumbnail is harmless.
     const thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
-    const { error: upError } = await db.storage
-      .from("vault")
-      .upload(thumbnailKey, thumb.data, {
-        contentType: thumb.mimeType,
-        upsert: false,
-      });
+    const { error: upError } = await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
+      contentType: thumb.mimeType,
+      upsert: false,
+    });
 
     if (upError) {
       console.error("Thumbnail regenerate: upload failed:", upError);
-      return NextResponse.json(
-        { error: "Failed to upload new thumbnail" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to upload new thumbnail" }, { status: 500 });
     }
 
     const now = new Date().toISOString();

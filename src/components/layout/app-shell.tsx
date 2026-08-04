@@ -79,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div
         className={cn(
           "hidden md:block shrink-0 transition-[width] duration-200 ease-out",
-          mounted && !desktopOpen ? "md:w-12" : "md:w-52",
+          mounted && !desktopOpen ? "md:w-12" : "md:w-52"
         )}
       >
         <Sidebar onNavigate={() => {}} collapsed={mounted && !desktopOpen} />

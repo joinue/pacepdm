@@ -27,7 +27,9 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
         return;
@@ -143,7 +145,9 @@ export default function OnboardingPage() {
             )}
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="companyName" className="text-sm sm:text-xs">Company Name</Label>
+              <Label htmlFor="companyName" className="text-sm sm:text-xs">
+                Company Name
+              </Label>
               <Input
                 id="companyName"
                 placeholder="PACE Technologies"
@@ -155,7 +159,9 @@ export default function OnboardingPage() {
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="fullName" className="text-sm sm:text-xs">Full Name</Label>
+              <Label htmlFor="fullName" className="text-sm sm:text-xs">
+                Full Name
+              </Label>
               <Input
                 id="fullName"
                 placeholder="John Smith"
@@ -167,7 +173,9 @@ export default function OnboardingPage() {
             </div>
 
             <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="email" className="text-sm sm:text-xs">Email</Label>
+              <Label htmlFor="email" className="text-sm sm:text-xs">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -177,7 +185,11 @@ export default function OnboardingPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+              disabled={loading}
+            >
               {loading ? "Creating..." : "Create Workspace"}
             </Button>
           </div>

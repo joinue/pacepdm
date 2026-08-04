@@ -3,16 +3,36 @@
 import { useState, useMemo, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { AuditDetails } from "./audit-details";
 import {
-  History, X, Search, ArrowUpDown, ArrowUp, ArrowDown, Download,
-  SlidersHorizontal, Calendar, User, Zap, Box, CalendarRange,
+  History,
+  X,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Download,
+  SlidersHorizontal,
+  Calendar,
+  User,
+  Zap,
+  Box,
+  CalendarRange,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FormattedDate } from "@/components/ui/formatted-date";
@@ -102,12 +122,40 @@ const actionLabels: Record<string, string> = {
 };
 
 // Action category colors
-function getActionVariant(action: string): "info" | "success" | "warning" | "error" | "purple" | "orange" | "muted" {
-  if (action.includes("delete") || action.includes("remove") || action.includes("rejected") || action.includes("unlink")) return "error";
-  if (action.includes("create") || action.includes("upload") || action.includes("add") || action.includes("invite") || action.includes("link")) return "success";
-  if (action.includes("update") || action.includes("rename") || action.includes("move") || action.includes("change")) return "info";
-  if (action.includes("approv") || action.includes("completed") || action.includes("activate")) return "purple";
-  if (action.includes("checkout") || action.includes("checkin") || action.includes("transition") || action.includes("requested")) return "warning";
+function getActionVariant(
+  action: string
+): "info" | "success" | "warning" | "error" | "purple" | "orange" | "muted" {
+  if (
+    action.includes("delete") ||
+    action.includes("remove") ||
+    action.includes("rejected") ||
+    action.includes("unlink")
+  )
+    return "error";
+  if (
+    action.includes("create") ||
+    action.includes("upload") ||
+    action.includes("add") ||
+    action.includes("invite") ||
+    action.includes("link")
+  )
+    return "success";
+  if (
+    action.includes("update") ||
+    action.includes("rename") ||
+    action.includes("move") ||
+    action.includes("change")
+  )
+    return "info";
+  if (action.includes("approv") || action.includes("completed") || action.includes("activate"))
+    return "purple";
+  if (
+    action.includes("checkout") ||
+    action.includes("checkin") ||
+    action.includes("transition") ||
+    action.includes("requested")
+  )
+    return "warning";
   return "muted";
 }
 
@@ -144,14 +192,8 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
   const [showFilters, setShowFilters] = useState(false);
 
   // Extract unique values for filter dropdowns
-  const entityTypes = useMemo(
-    () => [...new Set(logs.map((l) => l.entityType))].sort(),
-    [logs]
-  );
-  const actions = useMemo(
-    () => [...new Set(logs.map((l) => l.action))].sort(),
-    [logs]
-  );
+  const entityTypes = useMemo(() => [...new Set(logs.map((l) => l.entityType))].sort(), [logs]);
+  const actions = useMemo(() => [...new Set(logs.map((l) => l.action))].sort(), [logs]);
   const users = useMemo(() => {
     const map = new Map<string, string>();
     for (const l of logs) {
@@ -215,7 +257,17 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
     });
 
     return results;
-  }, [logs, searchQuery, entityTypeFilter, actionFilter, userFilter, dateFrom, dateTo, sortField, sortDir]);
+  }, [
+    logs,
+    searchQuery,
+    entityTypeFilter,
+    actionFilter,
+    userFilter,
+    dateFrom,
+    dateTo,
+    sortField,
+    sortDir,
+  ]);
 
   const activeFilterCount =
     (entityTypeFilter !== "all" ? 1 : 0) +
@@ -235,14 +287,17 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
     setDateTo("");
   }
 
-  const toggleSort = useCallback((field: SortField) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir(field === "createdAt" ? "desc" : "asc");
-    }
-  }, [sortField]);
+  const toggleSort = useCallback(
+    (field: SortField) => {
+      if (sortField === field) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortField(field);
+        setSortDir(field === "createdAt" ? "desc" : "asc");
+      }
+    },
+    [sortField]
+  );
 
   // Inline helper that returns the appropriate sort indicator for a column.
   // Defined as a plain function (not a component) to satisfy
@@ -250,9 +305,11 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
   // inside another component's render body.
   const sortIcon = (field: SortField) => {
     if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-40" />;
-    return sortDir === "asc"
-      ? <ArrowUp className="w-3 h-3 ml-1" />
-      : <ArrowDown className="w-3 h-3 ml-1" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="w-3 h-3 ml-1" />
+    ) : (
+      <ArrowDown className="w-3 h-3 ml-1" />
+    );
   };
 
   function exportCsv() {
@@ -312,14 +369,20 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
             <SlidersHorizontal className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Filters</span>
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-bold">
+              <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-foreground/20 text-3xs font-bold">
                 {activeFilterCount}
               </span>
             )}
           </Button>
 
           {/* Export */}
-          <Button variant="outline" size="sm" onClick={exportCsv} className="h-8 gap-1.5 shrink-0" disabled={filtered.length === 0}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCsv}
+            className="h-8 gap-1.5 shrink-0"
+            disabled={filtered.length === 0}
+          >
             <Download className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">CSV</span>
           </Button>
@@ -354,25 +417,27 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
             />
             <div className="flex items-end gap-2">
               <div className="space-y-1">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <CalendarRange className="w-3 h-3" />From
+                <span className="text-3xs font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <CalendarRange className="w-3 h-3" />
+                  From
                 </span>
                 <Input
                   type="date"
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value)}
-                  className="h-7 w-[130px] text-xs"
+                  className="h-7 w-32 text-xs"
                 />
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />To
+                <span className="text-3xs font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                  <Calendar className="w-3 h-3" />
+                  To
                 </span>
                 <Input
                   type="date"
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
-                  className="h-7 w-[130px] text-xs"
+                  className="h-7 w-32 text-xs"
                 />
               </div>
             </div>
@@ -393,7 +458,9 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
         {/* Active filter chips */}
         {activeFilterCount > 0 && !showFilters && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">Filters:</span>
+            <span className="text-3xs uppercase tracking-wider text-muted-foreground mr-1">
+              Filters:
+            </span>
             {actionFilter !== "all" && (
               <FilterChip
                 label={actionLabels[actionFilter] || actionFilter}
@@ -412,15 +479,11 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
                 onRemove={() => setUserFilter("all")}
               />
             )}
-            {dateFrom && (
-              <FilterChip label={`From ${dateFrom}`} onRemove={() => setDateFrom("")} />
-            )}
-            {dateTo && (
-              <FilterChip label={`To ${dateTo}`} onRemove={() => setDateTo("")} />
-            )}
+            {dateFrom && <FilterChip label={`From ${dateFrom}`} onRemove={() => setDateFrom("")} />}
+            {dateTo && <FilterChip label={`To ${dateTo}`} onRemove={() => setDateTo("")} />}
             <button
               onClick={clearFilters}
-              className="text-[10px] text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
+              className="text-3xs text-muted-foreground hover:text-foreground ml-1 cursor-pointer"
             >
               Clear all
             </button>
@@ -432,7 +495,8 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
           <p className="text-xs text-muted-foreground">
             {hasFilters ? (
               <>
-                <span className="font-medium text-foreground">{filtered.length}</span> of {logs.length} entries
+                <span className="font-medium text-foreground">{filtered.length}</span> of{" "}
+                {logs.length} entries
               </>
             ) : (
               <>{logs.length} entries</>
@@ -447,22 +511,34 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>
-                <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("createdAt")}>
+                <button
+                  className="flex items-center hover:text-foreground cursor-pointer"
+                  onClick={() => toggleSort("createdAt")}
+                >
                   Timestamp{sortIcon("createdAt")}
                 </button>
               </TableHead>
               <TableHead>
-                <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("user")}>
+                <button
+                  className="flex items-center hover:text-foreground cursor-pointer"
+                  onClick={() => toggleSort("user")}
+                >
                   User{sortIcon("user")}
                 </button>
               </TableHead>
               <TableHead>
-                <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("action")}>
+                <button
+                  className="flex items-center hover:text-foreground cursor-pointer"
+                  onClick={() => toggleSort("action")}
+                >
                   Action{sortIcon("action")}
                 </button>
               </TableHead>
               <TableHead>
-                <button className="flex items-center hover:text-foreground cursor-pointer" onClick={() => toggleSort("entityType")}>
+                <button
+                  className="flex items-center hover:text-foreground cursor-pointer"
+                  onClick={() => toggleSort("entityType")}
+                >
                   Entity{sortIcon("entityType")}
                 </button>
               </TableHead>
@@ -496,12 +572,16 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
                     <FormattedDate date={log.createdAt} />
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm">{log.user?.fullName ?? <span className="text-muted-foreground italic">System</span>}</span>
+                    <span className="text-sm">
+                      {log.user?.fullName ?? (
+                        <span className="text-muted-foreground italic">System</span>
+                      )}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <Badge
                       variant={getActionVariant(log.action)}
-                      className="text-[10px] px-1.5 py-0 font-medium"
+                      className="text-3xs px-1.5 py-0 font-medium"
                     >
                       {actionLabels[log.action] || log.action}
                     </Badge>
@@ -512,7 +592,11 @@ export function AuditLogClient({ logs }: { logs: AuditEntry[] }) {
                     </span>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs">
-                    {log.details ? <AuditDetails details={log.details} /> : <span className="text-muted-foreground/40">--</span>}
+                    {log.details ? (
+                      <AuditDetails details={log.details} />
+                    ) : (
+                      <span className="text-muted-foreground/40">--</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -543,17 +627,20 @@ function FilterSelect({
 }) {
   return (
     <div className="space-y-1">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-        {icon}{label}
+      <span className="text-3xs font-medium uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+        {icon}
+        {label}
       </span>
       <Select value={value} onValueChange={(v) => onChange(v ?? "all")}>
-        <SelectTrigger className="h-7 w-[160px] text-xs">
+        <SelectTrigger className="h-7 w-40 text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">{allLabel}</SelectItem>
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>

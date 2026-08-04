@@ -10,10 +10,14 @@ const MetadataSchema = z.object({
   partNumber: optionalString,
   description: optionalString,
   category: z.string().optional(),
-  metadata: z.array(z.object({
-    fieldId: z.string(),
-    value: z.union([z.string(), z.number(), z.boolean()]),
-  })).optional(),
+  metadata: z
+    .array(
+      z.object({
+        fieldId: z.string(),
+        value: z.union([z.string(), z.number(), z.boolean()]),
+      })
+    )
+    .optional(),
 });
 
 export async function PUT(
@@ -37,7 +41,7 @@ export async function PUT(
     const db = getServiceClient();
 
     const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId) {
+    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
@@ -46,7 +50,10 @@ export async function PUT(
 
     // Frozen files can only be edited by admins
     if (file.isFrozen && !permissions.includes("*")) {
-      return NextResponse.json({ error: "Cannot edit a frozen/released file. Revise it first." }, { status: 409 });
+      return NextResponse.json(
+        { error: "Cannot edit a frozen/released file. Revise it first." },
+        { status: 409 }
+      );
     }
 
     // Checked-out files can only be edited by the checkout owner — no exceptions.
@@ -71,7 +78,10 @@ export async function PUT(
           .single();
 
         if (existing) {
-          await db.from("metadata_values").update({ value: String(value) }).eq("id", existing.id);
+          await db
+            .from("metadata_values")
+            .update({ value: String(value) })
+            .eq("id", existing.id);
         } else {
           await db.from("metadata_values").insert({
             id: uuid(),

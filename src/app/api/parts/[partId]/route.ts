@@ -48,30 +48,59 @@ export async function GET(
     // ECO history comes from `eco_items` rows linked to this part (added in
     // migration-017) joined to the parent ECO — one row per time the part
     // was touched by an ECO, in reverse chronological order.
-    const [{ data: vendors }, { data: partFiles }, { data: bomItems }, { data: ecoItems }] = await Promise.all([
-      // Join the canonical vendors row so we get a stable name even if the
-      // legacy `vendorName` text column is later dropped. Order by isPrimary
-      // first so the primary vendor lands at index 0.
-      db.from("part_vendors")
-        .select("*, vendor:vendors!part_vendors_vendorId_fkey(id, name, website, contactName, contactEmail, contactPhone)")
-        .eq("partId", partId)
-        .order("isPrimary", { ascending: false }),
-      db.from("part_files").select("*, file:files!part_files_fileId_fkey(id, name, partNumber, revision, lifecycleState, fileType)").eq("partId", partId),
-      db.from("bom_items").select("id, itemNumber, name, quantity, unit, bomId, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId)").eq("partId", partId),
-      db.from("eco_items")
-        .select("id, fromRevision, toRevision, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId)")
-        .eq("partId", partId),
-    ]);
+    const [{ data: vendors }, { data: partFiles }, { data: bomItems }, { data: ecoItems }] =
+      await Promise.all([
+        // Join the canonical vendors row so we get a stable name even if the
+        // legacy `vendorName` text column is later dropped. Order by isPrimary
+        // first so the primary vendor lands at index 0.
+        db
+          .from("part_vendors")
+          .select(
+            "*, vendor:vendors!part_vendors_vendorId_fkey(id, name, website, contactName, contactEmail, contactPhone)"
+          )
+          .eq("partId", partId)
+          .order("isPrimary", { ascending: false }),
+        db
+          .from("part_files")
+          .select(
+            "*, file:files!part_files_fileId_fkey(id, name, partNumber, revision, lifecycleState, fileType)"
+          )
+          .eq("partId", partId),
+        db
+          .from("bom_items")
+          .select(
+            "id, itemNumber, name, quantity, unit, bomId, bom:boms!bom_items_bomId_fkey(id, name, revision, status, tenantId, deletedAt)"
+          )
+          .eq("partId", partId),
+        db
+          .from("eco_items")
+          .select(
+            "id, fromRevision, toRevision, eco:ecos!eco_items_ecoId_fkey(id, ecoNumber, title, status, implementedAt, createdAt, tenantId, deletedAt)"
+          )
+          .eq("partId", partId),
+      ]);
 
     // Filter where-used to current tenant
     const whereUsed = (bomItems || [])
       .filter((item) => {
-        const bom = item.bom as unknown as { tenantId: string } | null;
-        return bom && bom.tenantId === tenantUser.tenantId;
+        const bom = item.bom as unknown as { tenantId: string; deletedAt: string | null } | null;
+        return bom && bom.tenantId === tenantUser.tenantId && !bom.deletedAt;
       })
       .map((item) => {
-        const bom = item.bom as unknown as { id: string; name: string; revision: string; status: string };
-        return { bomId: bom.id, bomName: bom.name, bomRevision: bom.revision, bomStatus: bom.status, quantity: item.quantity, unit: item.unit };
+        const bom = item.bom as unknown as {
+          id: string;
+          name: string;
+          revision: string;
+          status: string;
+        };
+        return {
+          bomId: bom.id,
+          bomName: bom.name,
+          bomRevision: bom.revision,
+          bomStatus: bom.status,
+          quantity: item.quantity,
+          unit: item.unit,
+        };
       });
 
     // Shape ECO history. Filter cross-tenant rows defensively even though
@@ -80,10 +109,16 @@ export async function GET(
     const ecoHistory = (ecoItems || [])
       .map((row) => {
         const eco = row.eco as unknown as {
-          id: string; ecoNumber: string; title: string; status: string;
-          implementedAt: string | null; createdAt: string; tenantId: string;
+          id: string;
+          ecoNumber: string;
+          title: string;
+          status: string;
+          implementedAt: string | null;
+          createdAt: string;
+          tenantId: string;
+          deletedAt: string | null;
         } | null;
-        if (!eco || eco.tenantId !== tenantUser.tenantId) return null;
+        if (!eco || eco.tenantId !== tenantUser.tenantId || eco.deletedAt) return null;
         return {
           ecoId: eco.id,
           ecoNumber: eco.ecoNumber,
@@ -146,7 +181,8 @@ export async function PUT(
     const { partId } = await params;
     const db = getServiceClient();
 
-    const { data: existing } = await db.from("parts")
+    const { data: existing } = await db
+      .from("parts")
       .select("partNumber")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
@@ -161,17 +197,28 @@ export async function PUT(
       if (value !== undefined) updates[key] = value;
     }
 
-    const { data: part, error } = await db.from("parts").update(updates).eq("id", partId).select().single();
+    const { data: part, error } = await db
+      .from("parts")
+      .update(updates)
+      .eq("id", partId)
+      .select()
+      .single();
     if (error) {
       if (error.code === "23505") {
-        return NextResponse.json({ error: "A part with this number already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A part with this number already exists" },
+          { status: 409 }
+        );
       }
       throw error;
     }
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "part.update", entityType: "part", entityId: partId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.update",
+      entityType: "part",
+      entityId: partId,
       details: { partNumber: part.partNumber },
     });
 
@@ -198,15 +245,28 @@ export async function DELETE(
     const { partId } = await params;
     const db = getServiceClient();
 
-    const { data: existing } = await db.from("parts").select("partNumber, name, deletedAt").eq("id", partId).eq("tenantId", tenantUser.tenantId).single();
+    const { data: existing } = await db
+      .from("parts")
+      .select("partNumber, name, deletedAt")
+      .eq("id", partId)
+      .eq("tenantId", tenantUser.tenantId)
+      .single();
     if (!existing || existing.deletedAt) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
     }
 
     // Check if used in any BOMs
-    const { count } = await db.from("bom_items").select("*", { count: "exact", head: true }).eq("partId", partId);
+    const { count } = await db
+      .from("bom_items")
+      .select("*", { count: "exact", head: true })
+      .eq("partId", partId);
     if (count && count > 0) {
-      return NextResponse.json({ error: `Cannot delete — part is used in ${count} BOM item(s). Remove it from all BOMs first.` }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: `Cannot delete — part is used in ${count} BOM item(s). Remove it from all BOMs first.`,
+        },
+        { status: 400 }
+      );
     }
 
     // Soft-delete: mark as deleted instead of removing the row.
@@ -217,8 +277,11 @@ export async function DELETE(
     if (error) throw error;
 
     await logAudit({
-      tenantId: tenantUser.tenantId, userId: tenantUser.id,
-      action: "part.delete", entityType: "part", entityId: partId,
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      action: "part.delete",
+      entityType: "part",
+      entityId: partId,
       details: { partNumber: existing.partNumber, name: existing.name },
     });
 

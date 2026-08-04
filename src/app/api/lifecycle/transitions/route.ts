@@ -24,11 +24,13 @@ export async function GET() {
     // Get all transitions with state names
     const { data: transitions } = await db
       .from("lifecycle_transitions")
-      .select(`
+      .select(
+        `
         id, name, lifecycleId, requiresApproval,
         fromState:lifecycle_states!lifecycle_transitions_fromStateId_fkey(name),
         toState:lifecycle_states!lifecycle_transitions_toStateId_fkey(name)
-      `)
+      `
+      )
       .in("lifecycleId", lifecycleIds)
       .order("name");
 
@@ -36,8 +38,13 @@ export async function GET() {
       id: t.id,
       name: t.name,
       lifecycleName: lifecycleMap[t.lifecycleId] || "Unknown",
-      fromState: (Array.isArray(t.fromState) ? t.fromState[0]?.name : (t.fromState as { name: string })?.name) || "?",
-      toState: (Array.isArray(t.toState) ? t.toState[0]?.name : (t.toState as { name: string })?.name) || "?",
+      fromState:
+        (Array.isArray(t.fromState)
+          ? t.fromState[0]?.name
+          : (t.fromState as { name: string })?.name) || "?",
+      toState:
+        (Array.isArray(t.toState) ? t.toState[0]?.name : (t.toState as { name: string })?.name) ||
+        "?",
       requiresApproval: t.requiresApproval,
     }));
 

@@ -5,41 +5,67 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import type { PartWhereUsed } from "@/lib/where-used";
 import {
-  Plus, Search, Loader2, Package, MoreHorizontal, Pencil,
-  Trash2, Upload, Download,
+  Plus,
+  Search,
+  Loader2,
+  Package,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Upload,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Part, PartDetail } from "./parts-types";
-import { CATEGORIES, categoryVariants, stateVariants } from "./parts-types";
+import { CATEGORIES, categoryVariants } from "./parts-types";
 import { PartDetailPanel } from "./components/part-detail-panel";
 import { PartFormDialog } from "./components/part-form-dialog";
 import { AddVendorDialog } from "./components/add-vendor-dialog";
 import { LinkFileDialog } from "./components/link-file-dialog";
 import { FilePreviewDialog } from "./components/file-preview-dialog";
 import { ImportResultsDialog } from "./components/import-results-dialog";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageContainer } from "@/components/ui/page-container";
 
 // --- Helpers ---
 
 function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback((...args: Parameters<T>) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => fn(...args), delay);
-  }, [fn, delay]) as T;
+  return useCallback(
+    (...args: Parameters<T>) => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => fn(...args), delay);
+    },
+    [fn, delay]
+  ) as T;
 }
 
 // --- Component ---
@@ -64,8 +90,16 @@ export default function PartsPage() {
   const csvImportRef = useRef<HTMLInputElement>(null);
   const [importingCsv, setImportingCsv] = useState(false);
   const [importResult, setImportResult] = useState<{
-    inserted: number; updated: number; failed: number; total: number;
-    results: { row: number; partNumber: string; action: "inserted" | "updated" | "failed"; error?: string }[];
+    inserted: number;
+    updated: number;
+    failed: number;
+    total: number;
+    results: {
+      row: number;
+      partNumber: string;
+      action: "inserted" | "updated" | "failed";
+      error?: string;
+    }[];
   } | null>(null);
 
   // Dialogs
@@ -95,17 +129,16 @@ export default function PartsPage() {
       fetch(`/api/parts/${partId}`),
       fetch(`/api/parts/${partId}/where-used`),
     ]);
-    const [detailData, whereUsedData] = await Promise.all([
-      detailRes.json(),
-      whereUsedRes.json(),
-    ]);
+    const [detailData, whereUsedData] = await Promise.all([detailRes.json(), whereUsedRes.json()]);
     setDetail(detailData);
     setPartWhereUsed(whereUsedRes.ok ? whereUsedData : null);
     setLoadingDetail(false);
   }, []);
 
   useEffect(() => {
-    void (async () => { await loadParts(); })();
+    void (async () => {
+      await loadParts();
+    })();
   }, [loadParts]);
 
   // Realtime
@@ -119,12 +152,16 @@ export default function PartsPage() {
   });
   useRealtimeTable({
     table: "eco_items",
-    onChange: () => { if (selectedPartId) void loadPartDetail(selectedPartId); },
+    onChange: () => {
+      if (selectedPartId) void loadPartDetail(selectedPartId);
+    },
     enabled: !!selectedPartId,
   });
   useRealtimeTable({
     table: "bom_items",
-    onChange: () => { if (selectedPartId) void loadPartDetail(selectedPartId); },
+    onChange: () => {
+      if (selectedPartId) void loadPartDetail(selectedPartId);
+    },
     enabled: !!selectedPartId,
   });
 
@@ -137,7 +174,9 @@ export default function PartsPage() {
         const data = await res.json();
         const mode = data?.settings?.partNumberMode;
         if (mode === "MANUAL") setPartNumberMode("MANUAL");
-      } catch { /* keep AUTO default */ }
+      } catch {
+        /* keep AUTO default */
+      }
     })();
   }, []);
 
@@ -146,7 +185,9 @@ export default function PartsPage() {
     const partId = searchParams.get("partId");
     if (!partId || parts.length === 0 || selectedPartId) return;
     if (!parts.some((p) => p.id === partId)) return;
-    void (async () => { await loadPartDetail(partId); })();
+    void (async () => {
+      await loadPartDetail(partId);
+    })();
   }, [parts, searchParams, selectedPartId, loadPartDetail]);
 
   const debouncedSearch = useDebounce((q: string) => {
@@ -178,16 +219,26 @@ export default function PartsPage() {
 
   async function handleDeletePart(partId: string) {
     const res = await fetch(`/api/parts/${partId}`, { method: "DELETE" });
-    if (!res.ok) { const d = await res.json(); toast.error(d.error); return; }
+    if (!res.ok) {
+      const d = await res.json();
+      toast.error(d.error);
+      return;
+    }
     toast.success("Part deleted");
-    if (selectedPartId === partId) { setSelectedPartId(null); setDetail(null); setPartWhereUsed(null); }
+    if (selectedPartId === partId) {
+      setSelectedPartId(null);
+      setDetail(null);
+      setPartWhereUsed(null);
+    }
     loadParts(searchQuery, categoryFilter, stateFilter);
   }
 
   async function handleDeleteVendorLink(linkId: string) {
     if (!selectedPartId) return;
     await fetch(`/api/parts/${selectedPartId}/vendors`, {
-      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendorId: linkId }),
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vendorId: linkId }),
     });
     toast.success("Vendor removed");
     loadPartDetail(selectedPartId);
@@ -196,7 +247,9 @@ export default function PartsPage() {
   async function handleUnlinkFile(fileId: string) {
     if (!selectedPartId) return;
     await fetch(`/api/parts/${selectedPartId}/files`, {
-      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId }),
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId }),
     });
     toast.success("File unlinked");
     loadPartDetail(selectedPartId);
@@ -237,10 +290,17 @@ export default function PartsPage() {
       formData.append("file", file);
       const res = await fetch("/api/parts/import", { method: "POST", body: formData });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Import failed"); return; }
+      if (!res.ok) {
+        toast.error(data.error || "Import failed");
+        return;
+      }
       setImportResult(data);
       const summary = `${data.inserted} added, ${data.updated} updated${data.failed ? `, ${data.failed} failed` : ""}`;
-      if (data.failed > 0) { toast.warning(summary); } else { toast.success(summary); }
+      if (data.failed > 0) {
+        toast.warning(summary);
+      } else {
+        toast.success(summary);
+      }
       loadParts(searchQuery, categoryFilter, stateFilter);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");
@@ -253,48 +313,84 @@ export default function PartsPage() {
   // --- Render ---
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Parts Library</h2>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleExportCsv}>
-            <Download className="w-4 h-4 mr-1.5" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => csvImportRef.current?.click()} disabled={importingCsv}>
-            {importingCsv ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
-            <span className="hidden sm:inline">Import CSV</span>
-          </Button>
-          <input ref={csvImportRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportCsv} />
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="w-4 h-4 mr-2" />
-            New Part
-          </Button>
-        </div>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Parts Library"
+        actions={
+          <>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleExportCsv}>
+                <Download className="w-4 h-4 mr-1.5" />
+                <span className="hidden sm:inline">Export CSV</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => csvImportRef.current?.click()}
+                disabled={importingCsv}
+              >
+                {importingCsv ? (
+                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-1.5" />
+                )}
+                <span className="hidden sm:inline">Import CSV</span>
+              </Button>
+              <input
+                ref={csvImportRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleImportCsv}
+              />
+              <Button size="sm" onClick={openCreateDialog}>
+                <Plus className="w-4 h-4 mr-2" />
+                New Part
+              </Button>
+            </div>
+          </>
+        }
+      />
 
       {/* Search and filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input value={searchQuery} onChange={(e) => handleSearchInput(e.target.value)} placeholder="Search by part number, name, or description..." className="pl-8" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            placeholder="Search by part number, name, or description..."
+            className="pl-8"
+          />
         </div>
-        <Select value={categoryFilter} onValueChange={(v) => handleFilterChange(v ?? "all", stateFilter)}>
+        <Select
+          value={categoryFilter}
+          onValueChange={(v) => handleFilterChange(v ?? "all", stateFilter)}
+        >
           <SelectTrigger className="w-full sm:w-44">
             <SelectValue placeholder="Category">
-              {(v) => v === "all" ? "All Categories" : (CATEGORIES.find((c) => c.value === v)?.label ?? "Category")}
+              {(v) =>
+                v === "all"
+                  ? "All Categories"
+                  : (CATEGORIES.find((c) => c.value === v)?.label ?? "Category")
+              }
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+            {CATEGORIES.map((c) => (
+              <SelectItem key={c.value} value={c.value}>
+                {c.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <Select value={stateFilter} onValueChange={(v) => handleFilterChange(categoryFilter, v ?? "all")}>
+        <Select
+          value={stateFilter}
+          onValueChange={(v) => handleFilterChange(categoryFilter, v ?? "all")}
+        >
           <SelectTrigger className="w-full sm:w-36">
-            <SelectValue placeholder="State">
-              {(v) => v === "all" ? "All States" : v}
-            </SelectValue>
+            <SelectValue placeholder="State">{(v) => (v === "all" ? "All States" : v)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All States</SelectItem>
@@ -321,7 +417,7 @@ export default function PartsPage() {
                   <p className="text-muted-foreground">
                     {searchQuery || categoryFilter !== "all" || stateFilter !== "all"
                       ? "No parts match your search."
-                      : "No parts yet. Click \"New Part\" to add one."}
+                      : 'No parts yet. Click "New Part" to add one.'}
                   </p>
                 </CardContent>
               </Card>
@@ -349,7 +445,11 @@ export default function PartsPage() {
                         <TableCell>
                           {part.thumbnailUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={part.thumbnailUrl} alt="" className="w-8 h-8 rounded object-cover" />
+                            <img
+                              src={part.thumbnailUrl}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover"
+                            />
                           ) : (
                             <div className="w-8 h-8 rounded bg-muted flex items-center justify-center">
                               <Package className="w-3.5 h-3.5 text-muted-foreground/40" />
@@ -359,29 +459,42 @@ export default function PartsPage() {
                         <TableCell className="font-mono text-sm">{part.partNumber}</TableCell>
                         <TableCell className="font-medium text-sm">{part.name}</TableCell>
                         <TableCell>
-                          <Badge variant={categoryVariants[part.category] || "secondary"} className="text-[10px]">
-                            {CATEGORIES.find((c) => c.value === part.category)?.label || part.category}
+                          <Badge
+                            variant={categoryVariants[part.category] || "secondary"}
+                            className="text-3xs"
+                          >
+                            {CATEGORIES.find((c) => c.value === part.category)?.label ||
+                              part.category}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={stateVariants[part.lifecycleState] || "secondary"} className="text-[10px]">
-                            {part.lifecycleState}
-                          </Badge>
+                          <StatusBadge
+                            status={part.lifecycleState}
+                            kind="lifecycle"
+                            className="text-3xs"
+                          />
                         </TableCell>
                         <TableCell className="font-mono text-sm">
                           {part.unitCost != null ? `$${part.unitCost.toFixed(2)}` : "—"}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
-                            <DropdownMenuTrigger render={
-                              <Button variant="ghost" size="icon-xs"><MoreHorizontal className="w-3.5 h-3.5" /></Button>
-                            } />
+                            <DropdownMenuTrigger
+                              render={
+                                <Button variant="ghost" size="icon-xs">
+                                  <MoreHorizontal className="w-3.5 h-3.5" />
+                                </Button>
+                              }
+                            />
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem onClick={() => openEditDialog(part)}>
                                 <Pencil className="w-3.5 h-3.5 mr-2" /> Edit
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-destructive" onClick={() => handleDeletePart(part.id)}>
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleDeletePart(part.id)}
+                              >
                                 <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -401,7 +514,11 @@ export default function PartsPage() {
               detail={detail}
               loading={loadingDetail}
               partWhereUsed={partWhereUsed}
-              onClose={() => { setSelectedPartId(null); setDetail(null); setPartWhereUsed(null); }}
+              onClose={() => {
+                setSelectedPartId(null);
+                setDetail(null);
+                setPartWhereUsed(null);
+              }}
               onThumbnailUpload={handleThumbnailUpload}
               onShowLinkFile={() => setShowLinkFile(true)}
               onShowAddVendor={() => setShowAddVendor(true)}
@@ -446,6 +563,6 @@ export default function PartsPage() {
 
       <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
       <ImportResultsDialog result={importResult} onClose={() => setImportResult(null)} />
-    </div>
+    </PageContainer>
   );
 }

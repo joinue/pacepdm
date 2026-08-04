@@ -14,13 +14,9 @@ export function AuditDetails({ details }: { details: Record<string, unknown> }) 
   return (
     <div>
       <div className="flex items-center gap-1">
-        <span className="truncate max-w-[200px]">{summary}</span>
+        <span className="truncate max-w-50">{summary}</span>
         {Object.keys(details).length > 0 && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setExpanded(!expanded)}
-          >
+          <Button variant="ghost" size="icon-xs" onClick={() => setExpanded(!expanded)}>
             {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </Button>
         )}

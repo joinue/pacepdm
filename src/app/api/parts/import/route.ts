@@ -31,24 +31,24 @@ const HEADER_MAP: Record<string, string> = {
   "part number": "partNumber",
   partnumber: "partNumber",
   pn: "partNumber",
-  "name": "name",
-  "description": "description",
-  "category": "category",
-  "revision": "revision",
-  "rev": "revision",
+  name: "name",
+  description: "description",
+  category: "category",
+  revision: "revision",
+  rev: "revision",
   "lifecycle state": "lifecycleState",
-  "lifecyclestate": "lifecycleState",
-  "state": "lifecycleState",
-  "material": "material",
-  "weight": "weight",
+  lifecyclestate: "lifecycleState",
+  state: "lifecycleState",
+  material: "material",
+  weight: "weight",
   "weight unit": "weightUnit",
-  "weightunit": "weightUnit",
+  weightunit: "weightUnit",
   "unit cost": "unitCost",
-  "unitcost": "unitCost",
-  "cost": "unitCost",
-  "currency": "currency",
-  "unit": "unit",
-  "notes": "notes",
+  unitcost: "unitCost",
+  cost: "unitCost",
+  currency: "currency",
+  unit: "unit",
+  notes: "notes",
 };
 
 const VALID_CATEGORIES = new Set([
@@ -195,16 +195,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!Array.from(headerMap.values()).includes("partNumber")) {
-      return NextResponse.json(
-        { error: "CSV must include a Part Number column" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "CSV must include a Part Number column" }, { status: 400 });
     }
     if (!Array.from(headerMap.values()).includes("name")) {
-      return NextResponse.json(
-        { error: "CSV must include a Name column" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "CSV must include a Name column" }, { status: 400 });
     }
 
     const db = getServiceClient();
@@ -230,6 +224,11 @@ export async function POST(request: NextRequest) {
 
     const existingById = new Map<string, { id: string }>();
     if (incomingPartNumbers.length > 0) {
+      // Includes soft-deleted parts on purpose. parts_tenantId_partNumber_key
+      // is a plain unique index, so a deleted part still owns its part
+      // number; treating it as absent would send the row down the insert
+      // path and fail it with a 23505 the importer can't recover from.
+      // Matching it means a re-import revives the row instead.
       const { data: existing } = await db
         .from("parts")
         .select("id, partNumber")
@@ -285,6 +284,9 @@ export async function POST(request: NextRequest) {
               unit: parsed.unit ?? undefined,
               notes: parsed.notes,
               updatedAt: now,
+              // Re-importing a part number that was soft-deleted brings it
+              // back, rather than updating a row the user can't see.
+              deletedAt: null,
             })
             .eq("id", existing.id);
           if (error) throw error;
