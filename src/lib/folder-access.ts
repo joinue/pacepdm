@@ -41,27 +41,17 @@ function extractPermissions(role: { permissions: unknown }): string[] {
 }
 
 /**
- * Postgres error codes meaning "this function does not exist" — the
- * expected state when migration 012 hasn't been applied in an environment
- * yet. PGRST202 is PostgREST's schema-cache miss; 42883 is Postgres's own
- * undefined_function.
- */
-const MISSING_RPC_CODES = new Set(["PGRST202", "42883"]);
-
-/**
  * Call the get_folder_access_scope RPC and return a strongly-typed scope.
  *
- * Fallback behavior is deliberately narrow. If the RPC is *missing* (i.e.
- * migration 012 hasn't run here), we return a fully-open scope so the
- * vault stays usable during a deploy — folder ACLs don't exist yet in that
- * environment, so opening up doesn't bypass anything.
- *
- * Any other failure — a timeout, a dropped connection, pool exhaustion —
- * fails CLOSED by throwing. This used to catch everything and open up,
- * which meant a transient DB blip silently disabled folder access control
- * tenant-wide, handing every restricted folder to every user with nothing
- * but a console.warn to show for it. A 500 on the folder listing is a much
- * better outcome than quietly serving restricted CAD files.
+ * Fallback behavior:
+ *   - If the RPC is missing (PGRST202) — pre-migration environment —
+ *     we return a fully-open scope so a half-migrated dev/preview env
+ *     stays usable. Once migration 012 lands the path is dead code.
+ *   - For any other RPC error we fail closed: bypass-permission users
+ *     still see everything, but regular users are denied access until
+ *     the underlying problem is resolved. Better to lock the vault for
+ *     30 seconds during a Supabase blip than to expose every restricted
+ *     folder to every tenant member.
  */
 export async function getFolderAccessScope(
   tenantUser: TenantUserForAccess
@@ -82,21 +72,18 @@ export async function getFolderAccessScope(
     if (result.error) throw result.error;
     data = result.data;
   } catch (err) {
-    const code = (err as { code?: string } | null)?.code;
-    if (code && MISSING_RPC_CODES.has(code)) {
+    if (isMissingFunctionError(err)) {
       console.warn(
-        "[folder-access] get_folder_access_scope RPC does not exist — falling back to open scope. Run migration 012 to enable folder ACLs.",
+        "[folder-access] get_folder_access_scope RPC missing — falling back to open scope. Run migration 012 to enable folder ACLs.",
         err
       );
       return openScope();
     }
-    // Anything else is a real failure. Fail closed rather than silently
-    // dropping every folder ACL in the tenant.
     console.error(
-      "[folder-access] get_folder_access_scope failed — refusing to resolve access.",
+      "[folder-access] get_folder_access_scope RPC failed — failing closed for non-bypass users.",
       err
     );
-    throw err;
+    return closedScope(bypass);
   }
 
   const raw = (data ?? {}) as {
@@ -187,4 +174,29 @@ export function openScope(): FolderAccessScope {
     denied: new Set(),
     restricted: new Set(),
   };
+}
+
+/**
+ * Closed scope — nothing allowed unless the user holds bypass. Used as
+ * the fail-closed default when the access-resolver RPC errors. With
+ * `restrictedAny: true`, every predicate falls through to the empty
+ * allowed/editable/admin sets and returns false for non-bypass users.
+ */
+export function closedScope(bypass: boolean): FolderAccessScope {
+  return {
+    bypass,
+    restrictedAny: true,
+    allowed: new Set(),
+    editable: new Set(),
+    admin: new Set(),
+    denied: new Set(),
+    restricted: new Set(),
+  };
+}
+
+function isMissingFunctionError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "PGRST202" || e.code === "42883") return true;
+  return typeof e.message === "string" && /function .* does not exist/i.test(e.message);
 }

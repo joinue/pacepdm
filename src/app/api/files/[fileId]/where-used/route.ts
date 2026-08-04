@@ -1,5 +1,5 @@
-import { withTenant, notFound } from "@/lib/api-route";
-import { requireFileAccess } from "@/lib/folder-access-guards";
+import { withTenant } from "@/lib/api-route";
+import { loadFile } from "@/lib/folder-access-guards";
 import { getFileWhereUsed } from "@/lib/where-used";
 import { z, uuid } from "@/lib/validation";
 
@@ -15,24 +15,15 @@ import { z, uuid } from "@/lib/validation";
  *   - `linkedParts`    — parts that have this file attached via part_files
  *   - `ecos`           — ECOs that have touched this file via eco_items
  *
- * Role permissions are not enough here: folder ACLs are a second, independent
- * gate, so the file is re-checked through `requireFileAccess`. The heavy
- * lifting lives in `lib/where-used.ts`.
+ * `loadFile` applies the tenant filter, the soft-delete exclusion, and the
+ * folder ACL check. Role permission alone is not enough: folder ACLs are an
+ * independent second gate. The heavy lifting lives in `lib/where-used.ts`.
  */
 
 const ParamsSchema = z.object({ fileId: uuid });
 
 export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
-  const { data: file } = await db
-    .from("files")
-    .select("id, tenantId, folderId, deletedAt")
-    .eq("id", params.fileId)
-    .is("deletedAt", null)
-    .maybeSingle();
-  if (!file) throw notFound("File not found");
-
-  const access = await requireFileAccess(tenantUser, file, "view");
-  if (!access.ok) return access.response;
+  await loadFile(db, tenantUser, params.fileId, "view", "id, tenantId, folderId, deletedAt");
 
   return getFileWhereUsed(
     db.unscoped("where-used takes a raw client and filters every joined row by the tenantId given"),

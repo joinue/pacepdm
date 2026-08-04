@@ -20,7 +20,9 @@ export async function GET(
 ) {
   try {
     const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!tenantUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { lifecycleId } = await params;
     const { searchParams } = new URL(request.url);
     const fromState = searchParams.get("fromState");
@@ -31,16 +33,14 @@ export async function GET(
 
     const db = getServiceClient();
 
-    // Tenant-scope the lifecycle before reading anything hanging off it.
-    // lifecycle_states and lifecycle_transitions carry no tenantId of
-    // their own, so this lookup is the only thing standing between a
-    // caller and another tenant's lifecycle configuration.
+    // Verify lifecycle belongs to caller's tenant before returning anything
+    // about it (including state names, transition names, etc.).
     const { data: lifecycle } = await db
       .from("lifecycles")
       .select("id")
       .eq("id", lifecycleId)
       .eq("tenantId", tenantUser.tenantId)
-      .maybeSingle();
+      .single();
     if (!lifecycle) {
       return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
     }

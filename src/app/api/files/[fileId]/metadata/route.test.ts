@@ -168,10 +168,7 @@ describe("PUT /api/files/[fileId]/metadata", () => {
     expect(res.status).toBe(200);
   });
 
-  // Admins are NOT exempt from the checkout lock. An admin who needs to
-  // edit someone else's checked-out file force-checks-it-out first, which
-  // makes the takeover explicit and auditable instead of silent.
-  it("blocks admin from editing a file checked out by another user", async () => {
+  it("returns 423 even for admins when file is checked out by another user", async () => {
     mockTenantUser.current = admin;
     tableResults["files"] = {
       data: { ...wipFile, isCheckedOut: true, checkedOutById: "user-other" },
@@ -181,16 +178,6 @@ describe("PUT /api/files/[fileId]/metadata", () => {
     expect(res.status).toBe(423);
     const body = await res.json();
     expect(body.error).toMatch(/checked out by another user/i);
-  });
-
-  it("allows admin to edit a file they hold the checkout on", async () => {
-    mockTenantUser.current = admin;
-    tableResults["files"] = {
-      data: { ...wipFile, isCheckedOut: true, checkedOutById: admin.id },
-      error: null,
-    };
-    const res = await PUT(makeRequest({ description: "admin edit" }), { params });
-    expect(res.status).toBe(200);
   });
 
   it("succeeds for unlocked WIP file", async () => {

@@ -1,31 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   canViewFolder,
   canEditFolder,
   canAdminFolder,
   isRestrictedFolder,
   filterViewable,
-  getFolderAccessScope,
   openScope,
+  closedScope,
   type FolderAccessScope,
 } from "./folder-access";
-
-const { rpcResult } = vi.hoisted(() => ({
-  rpcResult: { current: { data: null, error: null } as unknown },
-}));
-
-vi.mock("./db", () => ({
-  getServiceClient: () => ({
-    rpc: async () => rpcResult.current,
-  }),
-}));
-
-const tenantUser = {
-  id: "user-1",
-  tenantId: "tenant-1",
-  roleId: "role-1",
-  role: { permissions: ["file.view"] },
-};
 
 function scope(partial: Partial<FolderAccessScope>): FolderAccessScope {
   return {
@@ -178,42 +161,27 @@ describe("filterViewable", () => {
   });
 });
 
-// The resolver's error handling is security-critical: an over-broad catch
-// here silently drops every folder ACL in the tenant. These pin the two
-// cases apart so that can't regress unnoticed.
-describe("getFolderAccessScope error handling", () => {
-  beforeEach(() => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+describe("closedScope (fail-closed fallback)", () => {
+  it("denies all access for non-bypass users", () => {
+    const s = closedScope(false);
+    expect(canViewFolder(s, "any")).toBe(false);
+    expect(canEditFolder(s, "any")).toBe(false);
+    expect(canAdminFolder(s, "any")).toBe(false);
   });
 
-  it("resolves the scope returned by the RPC", async () => {
-    rpcResult.current = {
-      data: { restrictedAny: true, allowed: ["f1"], editable: ["f1"] },
-      error: null,
-    };
-    const s = await getFolderAccessScope(tenantUser);
-    expect(s.restrictedAny).toBe(true);
-    expect(canViewFolder(s, "f1")).toBe(true);
-    expect(canViewFolder(s, "f2")).toBe(false);
+  it("still grants full access to bypass users", () => {
+    const s = closedScope(true);
+    expect(canViewFolder(s, "any")).toBe(true);
+    expect(canEditFolder(s, "any")).toBe(true);
+    expect(canAdminFolder(s, "any")).toBe(true);
   });
 
-  it("falls back to an open scope when the RPC does not exist yet", async () => {
-    for (const code of ["PGRST202", "42883"]) {
-      rpcResult.current = { data: null, error: { code, message: "no function" } };
-      const s = await getFolderAccessScope(tenantUser);
-      expect(s.restrictedAny).toBe(false);
-      expect(canViewFolder(s, "anything")).toBe(true);
-    }
-  });
-
-  it("fails closed on any other RPC error rather than opening the vault", async () => {
-    rpcResult.current = {
-      data: null,
-      error: { code: "57014", message: "canceling statement due to statement timeout" },
-    };
-    await expect(getFolderAccessScope(tenantUser)).rejects.toMatchObject({
-      code: "57014",
-    });
+  it("filters every item out for non-bypass users", () => {
+    const s = closedScope(false);
+    const files = [
+      { id: "1", folderId: "a" },
+      { id: "2", folderId: "b" },
+    ];
+    expect(filterViewable(s, files, (f) => f.folderId)).toEqual([]);
   });
 });

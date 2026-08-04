@@ -1,22 +1,19 @@
-import { withTenant, notFound } from "@/lib/api-route";
-import { requireFileAccess } from "@/lib/folder-access-guards";
+import { withTenant } from "@/lib/api-route";
+import { loadFile } from "@/lib/folder-access-guards";
 import { z, uuid } from "@/lib/validation";
 
 const ParamsSchema = z.object({ fileId: uuid });
 
-/** ECOs that have touched this file, via eco_items. */
+/**
+ * ECOs that have touched this file, via eco_items.
+ *
+ * `loadFile` carries both guards origin/main added here: the soft-delete
+ * exclusion (a deleted file must not be readable through any route except
+ * `restore`) and the folder ACL check, on top of the tenant filter the
+ * scoped client applies.
+ */
 export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser, params }) => {
-  const { data: file } = await db
-    .from("files")
-    .select("id, tenantId, folderId, deletedAt")
-    .eq("id", params.fileId)
-    .is("deletedAt", null)
-    .maybeSingle();
-  if (!file) throw notFound("File not found");
-
-  // Folder ACLs are a second gate, independent of role permissions.
-  const access = await requireFileAccess(tenantUser, file, "view");
-  if (!access.ok) return access.response;
+  await loadFile(db, tenantUser, params.fileId, "view", "id, tenantId, folderId, deletedAt");
 
   // lint-conventions-allow: child-table-direct-query — keyed on the file
   // resolved through the scoped client above, so it cannot reach another

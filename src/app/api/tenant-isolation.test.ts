@@ -159,6 +159,14 @@ vi.mock("@/lib/approval-engine", () => ({
 import { GET as getFileDetail } from "@/app/api/files/[fileId]/route";
 import { GET as listFiles } from "@/app/api/files/route";
 import { GET as getEco, PUT as putEco, DELETE as deleteEco } from "@/app/api/ecos/[ecoId]/route";
+import { GET as exportBom } from "@/app/api/boms/[bomId]/export/route";
+import { GET as listLifecycleTransitions } from "@/app/api/lifecycle/[lifecycleId]/transitions/route";
+import {
+  POST as linkPartFile,
+  DELETE as unlinkPartFile,
+} from "@/app/api/parts/[partId]/files/route";
+import { PUT as putFileMetadata } from "@/app/api/files/[fileId]/metadata/route";
+import { GET as listShareTokens } from "@/app/api/share-tokens/route";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -353,6 +361,163 @@ describe("Multi-tenant isolation (API routes)", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /api/boms/[bomId]/export — SQL-level tenant guard", () => {
+    it("returns 401 when no tenant user is authenticated", async () => {
+      mockTenantUser.current = null;
+      const res = await exportBom(makeRequest() as never, {
+        params: Promise.resolve({ bomId: "bom-1" }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when the BOM belongs to another tenant", async () => {
+      // Route filters by tenantId; honor that — return null for tenant-A queries.
+      supabaseResponses.set("boms", (filters) =>
+        filters.tenantId === TENANT_A
+          ? { data: null, error: null }
+          : { data: { name: "secret-bom" }, error: null }
+      );
+      const res = await exportBom(makeRequest() as never, {
+        params: Promise.resolve({ bomId: "bom-1" }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /api/lifecycle/[lifecycleId]/transitions — SQL-level tenant guard", () => {
+    it("returns 401 when no tenant user is authenticated", async () => {
+      mockTenantUser.current = null;
+      const res = await listLifecycleTransitions(
+        new Request("http://test.local/api/lifecycle/lc-1/transitions?fromState=DRAFT") as never,
+        { params: Promise.resolve({ lifecycleId: "lc-1" }) }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when the lifecycle belongs to another tenant", async () => {
+      supabaseResponses.set("lifecycles", (filters) =>
+        filters.tenantId === TENANT_A
+          ? { data: null, error: null }
+          : { data: { id: "lc-1" }, error: null }
+      );
+      const res = await listLifecycleTransitions(
+        new Request("http://test.local/api/lifecycle/lc-1/transitions?fromState=DRAFT") as never,
+        { params: Promise.resolve({ lifecycleId: "lc-1" }) }
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST/DELETE /api/parts/[partId]/files — partId tenant guard", () => {
+    it("POST returns 404 when the part belongs to another tenant", async () => {
+      supabaseResponses.set("parts", (filters) =>
+        filters.tenantId === TENANT_A
+          ? { data: null, error: null }
+          : { data: { id: "part-1" }, error: null }
+      );
+      const req = new Request("http://test.local/api/parts/part-1/files", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileId: "file-1" }),
+      });
+      const res = await linkPartFile(req as never, {
+        params: Promise.resolve({ partId: "part-1" }),
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/part not found/i);
+    });
+
+    it("DELETE returns 404 when the part belongs to another tenant", async () => {
+      supabaseResponses.set("parts", (filters) =>
+        filters.tenantId === TENANT_A
+          ? { data: null, error: null }
+          : { data: { id: "part-1" }, error: null }
+      );
+      const req = new Request("http://test.local/api/parts/part-1/files", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileId: "file-1" }),
+      });
+      const res = await unlinkPartFile(req as never, {
+        params: Promise.resolve({ partId: "part-1" }),
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/part not found/i);
+    });
+  });
+
+  describe("PUT /api/files/[fileId]/metadata — fieldId tenant guard + soft-delete", () => {
+    const ownFile = {
+      id: "file-1",
+      tenantId: TENANT_A,
+      name: "x.sldprt",
+      isFrozen: false,
+      isCheckedOut: false,
+      checkedOutById: null,
+      folderId: "folder-1",
+      deletedAt: null,
+    };
+
+    it("returns 404 when any supplied fieldId is from another tenant", async () => {
+      supabaseResponses.set("files", { data: ownFile, error: null });
+      // metadata_fields query is filtered by tenantId — return empty so the
+      // requested fieldId is treated as foreign.
+      supabaseResponses.set("metadata_fields", { data: [], error: null });
+      const req = new Request("http://test.local/api/files/file-1/metadata", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          metadata: [{ fieldId: "field-from-tenant-b", value: "x" }],
+        }),
+      });
+      const res = await putFileMetadata(req as never, {
+        params: Promise.resolve({ fileId: "file-1" }),
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/metadata fields not found/i);
+    });
+
+    it("returns 404 when the file is soft-deleted", async () => {
+      supabaseResponses.set("files", {
+        data: { ...ownFile, deletedAt: new Date().toISOString() },
+        error: null,
+      });
+      const req = new Request("http://test.local/api/files/file-1/metadata", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: "x" }),
+      });
+      const res = await putFileMetadata(req as never, {
+        params: Promise.resolve({ fileId: "file-1" }),
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/file not found/i);
+    });
+  });
+
+  describe("GET /api/share-tokens — permission gate", () => {
+    it("returns 403 when caller lacks SHARE_CREATE", async () => {
+      mockTenantUser.current = {
+        ...userInTenantA,
+        role: { id: "role-viewer", name: "Viewer", permissions: ["file.view"] },
+      };
+      const req = new Request(
+        "http://test.local/api/share-tokens?resourceType=file&resourceId=file-1"
+      );
+      const res = await listShareTokens(req as never);
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 401 when no tenant user is authenticated", async () => {
+      mockTenantUser.current = null;
+      const req = new Request(
+        "http://test.local/api/share-tokens?resourceType=file&resourceId=file-1"
+      );
+      const res = await listShareTokens(req as never);
+      expect(res.status).toBe(401);
     });
   });
 

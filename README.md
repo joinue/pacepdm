@@ -76,8 +76,27 @@ Two conventions carry more weight than the rest:
 
 2. **Every new table gets RLS enabled in the migration that creates it.** The anon key is public, so a table without RLS is readable by anyone with `curl`. → [`docs/decisions/rls-new-tables.md`](docs/decisions/rls-new-tables.md)
 
-## Deployment
+## Deploy
 
-Vercel. `vercel.json` registers one cron (`/api/cron/approval-reminders`, every 30 minutes), authenticated with `CRON_SECRET`.
+The app is designed to deploy to any Node host. Vercel is the path of least resistance:
+
+1. **Provision a Supabase project.** Capture the project URL, anon key, and service-role key for the env vars above.
+2. **Run migrations.** Apply files in [`supabase/migrations/`](./supabase/migrations) in numeric order against the target database. Migrations are sequential — never skip or reorder. The most recent migrations as of launch are 037 (share-token access log) and 038 (BOM snapshot FK fix).
+3. **Configure storage.** The vault uses a Supabase Storage bucket; create it and set the RLS policies that ship with the migrations.
+4. **Set environment variables** in the hosting provider, matching `.env.example`. Use a freshly-generated random string for `CRON_SECRET`.
+5. **Deploy.** Vercel: connect the repo, set env vars, push to `main`. Other hosts: run `npm run build` then `npm start`.
+6. **Schedule cron.** The app exposes `/api/cron/approval-reminders`. Configure your scheduler (Vercel Cron, GitHub Actions, an external cron service) to hit it on a cadence (hourly is reasonable) with header `Authorization: Bearer $CRON_SECRET`.
+7. **Verify.** Hit the deployed URL, register a workspace, invite a teammate, and exercise checkout/checkin and a share-link download to confirm storage + email + cron auth all work.
 
 `@napi-rs/canvas`, `pdfjs-dist`, and `sharp` are declared as `serverExternalPackages` in `next.config.ts` because they load platform-specific native bindings that the bundler cannot resolve. Server-side thumbnail generation breaks if that changes.
+
+## Project layout
+
+```
+src/app/                Next.js App Router routes (UI + API)
+src/components/         React components (UI primitives + features)
+src/lib/                Server/client helpers (auth, db, validation, etc.)
+src/hooks/              Client hooks
+supabase/migrations/    Sequential SQL migrations
+e2e/                    Playwright tests
+```

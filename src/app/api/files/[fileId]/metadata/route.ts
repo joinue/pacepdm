@@ -61,6 +61,27 @@ export async function PUT(
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
+    // If the caller supplied custom metadata field values, verify every
+    // fieldId belongs to this tenant before any writes. Without this,
+    // metadata_values can reference foreign-tenant fields, breaking the
+    // same-tenant invariant on that table.
+    if (metadata && metadata.length > 0) {
+      const fieldIds = Array.from(new Set(metadata.map((m) => m.fieldId)));
+      const { data: ownedFields } = await db
+        .from("metadata_fields")
+        .select("id")
+        .eq("tenantId", tenantUser.tenantId)
+        .in("id", fieldIds);
+      const ownedIds = new Set((ownedFields || []).map((f) => f.id));
+      const foreign = fieldIds.filter((id) => !ownedIds.has(id));
+      if (foreign.length > 0) {
+        return NextResponse.json(
+          { error: "One or more metadata fields not found" },
+          { status: 404 }
+        );
+      }
+    }
+
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (partNumber !== undefined) updates.partNumber = partNumber;
     if (description !== undefined) updates.description = description;
