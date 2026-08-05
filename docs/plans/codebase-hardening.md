@@ -3,9 +3,9 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 106
-routes-wrapped: 37
-unwrapped-route: 324
+routes-total: 109
+routes-wrapped: 41
+unwrapped-route: 319
 raw-fetch: 44
 generic-error-toast: 8
 swallowed-error: 6
@@ -90,7 +90,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **37 / 106**                         | 106                                                   |
+| Routes on `withTenant`                | 0                | **41 / 109**                         | 109                                                   |
 | `raw-fetch` in client components      | 112              | **44**                               | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                | 0                                                     |
@@ -140,14 +140,16 @@ backup. Do the restore once, into the dev project from item 4.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 69 routes
+### 1. Finish the route wrapper — 68 routes
 
-> 70 → 66. Three of those four are new routes that were wrapped from the start
-> (the BOM and vendor thumbnail endpoints); one is a genuine conversion —
-> `parts/[partId]/thumbnail` was rewritten onto `withTenant` when the shared
-> `src/lib/thumbnails.ts` landed, because three copies of the upload rules was
-> two too many. That is the shape to copy: convert the handler you are already
-> inside, in the same commit as the feature.
+> 70 → 66 → 68 of 109. The count went _up_ because the supplier-access work
+> added three new routes (`GET /api/releases`, `/api/parts/[partId]/zip`,
+> `/api/parts/[partId]/package`), all wrapped from the start. The genuine
+> conversion in that batch was **`/api/share-tokens`**, done because adding a
+> fourth resource type to a handler that hand-rolls auth, the permission check
+> and the tenant filter meant writing the tenant filter by hand a fourth time.
+> That is the shape to copy: convert the handler you are already inside, in
+> the same commit as the feature.
 
 Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 
@@ -155,7 +157,11 @@ Makes tenant isolation correct by construction rather than by review. Note the r
 node scripts/lint-conventions.mjs --list unwrapped-route
 ```
 
-Remaining by domain: `files` 16, `parts` 7, `boms` 6, `lifecycle` 5, `workflows` 4, `folders` 4, `ecos` 4, `admin` 4, `public` 3, `approval-groups` 3, then singles.
+Remaining by domain: `files` 16, `parts` 7, `boms` 6, `lifecycle` 5, `workflows` 4, `folders` 4, `ecos` 4, `admin` 4, `public` 3, `approval-groups` 3, then singles. Run the `--list` command above rather than trusting this line; it drifts.
+
+**`ecos/[ecoId]/implement` is the one worth converting next.** It is the most
+consequential handler in the app — it is the only caller of `implement_eco`,
+it is where a change order becomes real, and it still resolves auth by hand.
 
 **Convert a whole domain at a time, not individual handlers.** Routes within a domain share helpers and permission choices, and splitting one across two styles is how a guard gets dropped.
 

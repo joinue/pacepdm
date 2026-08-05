@@ -9,6 +9,7 @@ import {
 } from "@/lib/share-tokens";
 import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getReleaseById, type ReleaseManifest } from "@/lib/releases";
+import { buildPartPackage, type PartPackageBom } from "@/lib/part-package";
 
 // Type dispatch for the preview path — mirrors the authenticated
 // /api/files/[fileId]/preview route. Kept in sync manually; if the
@@ -42,6 +43,36 @@ interface BomContent {
     material: string | null;
     vendor: string | null;
   }>;
+  allowDownload: boolean;
+}
+
+interface PartContent {
+  kind: "part";
+  partNumber: string;
+  name: string;
+  description: string | null;
+  revision: string;
+  lifecycleState: string;
+  category: string | null;
+  material: string | null;
+  unit: string | null;
+  weight: number | null;
+  weightUnit: string | null;
+  files: Array<{
+    fileName: string;
+    fileType: string;
+    role: string;
+    isPrimary: boolean;
+    revision: string;
+    version: number;
+    /** Not released. Only present when the link opted into WIP. */
+    isPreliminary: boolean;
+    /** Signed storage URL, ~5 min expiry. Absent if signing failed. */
+    url?: string;
+  }>;
+  boms: PartPackageBom[];
+  /** Drives the viewer's package-level warning banner. */
+  containsPreliminary: boolean;
   allowDownload: boolean;
 }
 
@@ -294,6 +325,78 @@ export async function GET(
         releasedAt: release.releasedAt,
         note: release.note,
         manifest: release.manifest,
+        allowDownload: row.allowDownload,
+      };
+      void bumpAccessCount(row.id);
+      logShareAccess({
+        tenantId: row.tenantId,
+        tokenId: row.id,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+        action: "view-content",
+        ipAddress,
+        userAgent,
+      });
+      return NextResponse.json(payload, {
+        headers: { "X-Robots-Tag": "noindex, nofollow" },
+      });
+    }
+
+    if (row.resourceType === "part") {
+      // Part branch: the package is resolved now, not when the link was
+      // minted, so a supplier returning after an ECO ships sees the
+      // current revision. See src/lib/part-package.ts.
+      const pkg = await buildPartPackage(db, row.tenantId, row.resourceId, {
+        includeWip: row.includeWip,
+      });
+      if (!pkg) {
+        return NextResponse.json(
+          { error: "not_found" },
+          { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+        );
+      }
+
+      // Each released file gets its own short-lived signed URL so the
+      // viewer can preview and (when permitted) save individual documents
+      // without pulling the whole zip.
+      const files = await Promise.all(
+        pkg.files.map(async (f) => {
+          const { data: signed } = await db.storage
+            .from("vault")
+            .createSignedUrl(f.storageKey, 300);
+          return {
+            fileName: f.fileName,
+            fileType: f.fileType,
+            role: f.role,
+            isPrimary: f.isPrimary,
+            revision: f.revision,
+            version: f.version,
+            // The guest is told a document is preliminary. They are not told
+            // which internal lifecycle state it sits in.
+            isPreliminary: f.isPreliminary,
+            url: signed?.signedUrl,
+          };
+        })
+      );
+
+      // `filesWithheld` is deliberately not forwarded — a supplier has no
+      // business learning that unreleased drawings exist. It is reported
+      // to the internal user in the share dialog instead.
+      const payload: PartContent = {
+        kind: "part",
+        partNumber: pkg.partNumber,
+        name: pkg.name,
+        description: pkg.description,
+        revision: pkg.revision,
+        lifecycleState: pkg.lifecycleState,
+        category: pkg.category,
+        material: pkg.material,
+        unit: pkg.unit,
+        weight: pkg.weight,
+        weightUnit: pkg.weightUnit,
+        files,
+        boms: pkg.boms,
+        containsPreliminary: pkg.preliminaryCount > 0,
         allowDownload: row.allowDownload,
       };
       void bumpAccessCount(row.id);

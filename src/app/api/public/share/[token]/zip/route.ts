@@ -13,14 +13,18 @@ import {
   buildReleaseZipStream,
   releaseZipFilename,
 } from "@/lib/releases";
+import { buildPartPackage, buildPartZipStream, partZipFilename } from "@/lib/part-package";
 
 /**
  * GET /api/public/share/[token]/zip
  *
- * Public zip download for a release that has been wrapped in a share
- * link. Same auth rules as the content endpoint: token must resolve,
- * password cookie must be valid if the token has one, and the share
- * must have `allowDownload: true`.
+ * Public zip download for a release or a part wrapped in a share link.
+ * Same auth rules for both: token must resolve, password cookie must be
+ * valid if the token has one, and the share must have
+ * `allowDownload: true`.
+ *
+ * File and BOM shares have no zip — a file share already hands over the
+ * one file, and a BOM share is a table with no attachments.
  */
 export async function GET(
   request: NextRequest,
@@ -38,9 +42,9 @@ export async function GET(
     );
   }
   const row = result.token;
-  if (row.resourceType !== "release") {
+  if (row.resourceType !== "release" && row.resourceType !== "part") {
     return NextResponse.json(
-      { error: "Zip download is only available for release share links" },
+      { error: "Zip download is only available for release and part share links" },
       { status: 400, headers: { "X-Robots-Tag": "noindex, nofollow" } }
     );
   }
@@ -61,12 +65,34 @@ export async function GET(
   }
 
   const db = getServiceClient();
-  const release = await getReleaseById(db, row.tenantId, row.resourceId);
-  if (!release) {
-    return NextResponse.json(
-      { error: "Release not found" },
-      { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
-    );
+
+  // Resolve the target first, then log — a 404 should not record a
+  // successful zip-download against the token.
+  let stream: ReadableStream<Uint8Array>;
+  let filename: string;
+
+  if (row.resourceType === "part") {
+    const pkg = await buildPartPackage(db, row.tenantId, row.resourceId, {
+      includeWip: row.includeWip,
+    });
+    if (!pkg) {
+      return NextResponse.json(
+        { error: "Part not found" },
+        { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+      );
+    }
+    stream = buildPartZipStream(pkg, db);
+    filename = partZipFilename(pkg);
+  } else {
+    const release = await getReleaseById(db, row.tenantId, row.resourceId);
+    if (!release) {
+      return NextResponse.json(
+        { error: "Release not found" },
+        { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+      );
+    }
+    stream = buildReleaseZipStream(release, db);
+    filename = releaseZipFilename(release);
   }
 
   void bumpAccessCount(row.id);
@@ -80,11 +106,10 @@ export async function GET(
     userAgent: request.headers.get("user-agent"),
   });
 
-  const stream = buildReleaseZipStream(release, db);
   return new Response(stream, {
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${releaseZipFilename(release)}"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store",
       "X-Robots-Tag": "noindex, nofollow",
     },

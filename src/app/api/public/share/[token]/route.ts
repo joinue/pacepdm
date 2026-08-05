@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { resolveToken, logShareAccess } from "@/lib/share-tokens";
+import { resolveToken, logShareAccess, type ShareResourceType } from "@/lib/share-tokens";
 import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 
 // Shape returned to the public viewer page. Deliberately minimal — enough
@@ -9,7 +9,7 @@ import { enforceRateLimit, getClientIp } from "@/lib/rate-limit";
 // details beyond the display name for the "shared by" line.
 interface ResolvedMetadata {
   status: "ok" | "revoked" | "expired" | "not_found";
-  resourceType?: "file" | "bom" | "release";
+  resourceType?: ShareResourceType;
   resourceName?: string;
   requiresPassword?: boolean;
   allowDownload?: boolean;
@@ -46,7 +46,7 @@ export async function GET(
           logShareAccess({
             tenantId: row.tenantId as string,
             tokenId: row.id as string,
-            resourceType: row.resourceType as "file" | "bom" | "release",
+            resourceType: row.resourceType as ShareResourceType,
             resourceId: row.resourceId as string,
             action: "resolve",
             success: false,
@@ -99,6 +99,17 @@ export async function GET(
         .is("deletedAt", null)
         .single();
       resourceName = (data?.name as string | undefined) ?? null;
+    } else if (row.resourceType === "part") {
+      // Part number and revision, not the descriptive name — that pair is
+      // what the recipient quoted in the email that asked for the link.
+      const { data } = await db
+        .from("parts")
+        .select("partNumber, revision")
+        .eq("id", row.resourceId)
+        .eq("tenantId", row.tenantId)
+        .is("deletedAt", null)
+        .single();
+      resourceName = data ? `${data.partNumber} rev ${data.revision}` : null;
     } else {
       // release
       const { data } = await db

@@ -117,7 +117,7 @@ export async function createReleaseFromEco(args: CreateReleaseArgs): Promise<Rel
   //           part_files linkage from any part items.
   const { data: items, error: itemsError } = await db
     .from("eco_items")
-    .select("id, partId, fileId, fromRevision, toRevision")
+    .select("id, partId, fileId, bomId, fromRevision, toRevision")
     .eq("ecoId", ecoId);
   if (itemsError) throw itemsError;
 
@@ -126,6 +126,11 @@ export async function createReleaseFromEco(args: CreateReleaseArgs): Promise<Rel
     { fromRevision: string | null; toRevision: string | null }
   >();
   const directFileIds = new Set<string>();
+  // BOMs the ECO carries directly. Before migration 049 the manifest found
+  // BOMs only by walking `boms.fileId` into the affected file set, so a BOM
+  // attached to the ECO as its own item — the whole point of eco_items.bomId
+  // — was absent from the release it shipped in.
+  const directBomIds = new Set<string>();
   for (const item of items ?? []) {
     if (item.partId) {
       partItemById.set(item.partId as string, {
@@ -134,6 +139,7 @@ export async function createReleaseFromEco(args: CreateReleaseArgs): Promise<Rel
       });
     }
     if (item.fileId) directFileIds.add(item.fileId as string);
+    if (item.bomId) directBomIds.add(item.bomId as string);
   }
 
   // ── Step 3: parts — read post-implement state for every partId touched.
@@ -213,45 +219,66 @@ export async function createReleaseFromEco(args: CreateReleaseArgs): Promise<Rel
     }
   }
 
-  // ── Step 5: BOMs — any BOM whose parent file is in the affected set
-  //           gets its own snapshot via captureBomSnapshot, and we inline
-  //           the lightweight header (name, itemCount, total cost) into
-  //           the release manifest. The heavy items[] payload lives in
-  //           bom_snapshots.items and the release page loads it lazily
-  //           from there, so manifest size stays bounded.
+  // ── Step 5: BOMs — two sources, unioned. A BOM carried on the ECO as
+  //           its own item (eco_items.bomId), plus any BOM whose parent
+  //           file is in the affected set. Each gets a snapshot via
+  //           captureBomSnapshot, and we inline the lightweight header
+  //           (name, itemCount, total cost) into the manifest. The heavy
+  //           items[] payload lives in bom_snapshots.items and the release
+  //           page loads it lazily, so manifest size stays bounded.
+  //
+  //           The direct source was missing until migration 049: the
+  //           manifest walked `boms.fileId` only, so the BOM revision a
+  //           change order existed to ship was absent from its own release.
   const boms: ReleaseBomSnapshot[] = [];
+  const bomRowsById = new Map<string, Record<string, unknown>>();
+
+  if (directBomIds.size > 0) {
+    const { data: rows, error } = await db
+      .from("boms")
+      .select("id, name, revision, status")
+      .in("id", Array.from(directBomIds))
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null);
+    if (error) throw error;
+    for (const b of rows ?? []) bomRowsById.set(b.id as string, b);
+  }
+
   if (allFileIds.size > 0) {
-    const { data: bomRows, error: bomErr } = await db
+    const { data: rows, error } = await db
       .from("boms")
       .select("id, name, revision, status")
       .in("fileId", Array.from(allFileIds))
       .eq("tenantId", tenantId)
       .is("deletedAt", null);
-    if (bomErr) throw bomErr;
-    for (const b of bomRows ?? []) {
-      try {
-        const snap = await captureBomSnapshot({
-          db,
-          tenantId,
-          bomId: b.id as string,
-          userId,
-          trigger: "ECO_IMPLEMENT",
-          ecoId,
-        });
-        boms.push({
-          snapshotId: snap.snapshotId,
-          bomId: b.id as string,
-          bomName: (b.name as string) ?? "",
-          bomRevision: (b.revision as string | null) ?? null,
-          bomStatus: (b.status as string | null) ?? null,
-          itemCount: snap.itemCount,
-          flatTotalCost: snap.flatTotalCost,
-        });
-      } catch (err) {
-        // Snapshot of one BOM failed — log and continue. A missing BOM
-        // snapshot is less serious than a missing release row.
-        console.error(`[releases] BOM snapshot failed for bom ${b.id} in ECO ${ecoId}:`, err);
-      }
+    if (error) throw error;
+    // Map keyed by id, so a BOM reachable both ways is snapshotted once.
+    for (const b of rows ?? []) bomRowsById.set(b.id as string, b);
+  }
+
+  for (const b of bomRowsById.values()) {
+    try {
+      const snap = await captureBomSnapshot({
+        db,
+        tenantId,
+        bomId: b.id as string,
+        userId,
+        trigger: "ECO_IMPLEMENT",
+        ecoId,
+      });
+      boms.push({
+        snapshotId: snap.snapshotId,
+        bomId: b.id as string,
+        bomName: (b.name as string) ?? "",
+        bomRevision: (b.revision as string | null) ?? null,
+        bomStatus: (b.status as string | null) ?? null,
+        itemCount: snap.itemCount,
+        flatTotalCost: snap.flatTotalCost,
+      });
+    } catch (err) {
+      // Snapshot of one BOM failed — log and continue. A missing BOM
+      // snapshot is less serious than a missing release row.
+      console.error(`[releases] BOM snapshot failed for bom ${b.id} in ECO ${ecoId}:`, err);
     }
   }
 

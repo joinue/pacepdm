@@ -188,9 +188,6 @@
   "src/app/api/share-tokens/[id]/activity/route.ts": {
     "unwrapped-route": 2
   },
-  "src/app/api/share-tokens/route.ts": {
-    "unwrapped-route": 5
-  },
   "src/app/api/tenants/route.ts": {
     "unwrapped-route": 2
   },

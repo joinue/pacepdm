@@ -97,6 +97,17 @@ export async function POST(
             `${release.manifest.boms.length} boms)`
         );
       }
+      // The RPC reports what it released; the manifest reports what got
+      // snapshotted. They should agree on BOM count, and a mismatch means
+      // captureBomSnapshot silently dropped one — worth a log line, since
+      // both failure paths here are deliberately non-fatal.
+      const rpcBoms = (result as { bomsReleased?: number } | null)?.bomsReleased ?? 0;
+      if (release && rpcBoms > release.manifest.boms.length) {
+        console.warn(
+          `[ecos/${ecoId}] implement released ${rpcBoms} BOM(s) but only ` +
+            `${release.manifest.boms.length} reached the manifest`
+        );
+      }
     } catch (err) {
       console.error(`[ecos/${ecoId}] release capture failed:`, err);
     }

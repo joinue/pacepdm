@@ -15,3 +15,4 @@ One file per decision that constrains future work. Each explains the context, th
 | [`bom-structure.md`](bom-structure.md)                     | BOM hierarchy is derived from `linkedBomId` and never stored; "is this a product" is declared on `parts.isEndItem` and never inferred. |
 | [`perceived-performance.md`](perceived-performance.md)     | Cache the session per request, mutate optimistically, suppress your own realtime echo, and shape skeletons like the page they replace. |
 | [`system-roles.md`](system-roles.md)                       | Four seeded roles, what Manager must never hold, and why a change to `DEFAULT_ROLES` needs a backfill migration.                       |
+| [`supplier-access.md`](supplier-access.md)                 | Part shares resolve live and carry released files only; release shares are frozen. The two must never converge.                        |

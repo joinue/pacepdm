@@ -26,6 +26,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { useFetch } from "@/hooks/use-fetch";
 import { ShareActivityPanel } from "./share-activity-panel";
 
 interface ShareLink {
@@ -45,7 +46,7 @@ interface ShareLink {
 interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  resourceType: "file" | "bom" | "release";
+  resourceType: "file" | "bom" | "release" | "part";
   resourceId: string;
   resourceName: string;
 }
@@ -54,7 +55,15 @@ const RESOURCE_LABELS: Record<ShareDialogProps["resourceType"], string> = {
   file: "file",
   bom: "BOM",
   release: "release",
+  part: "part",
 };
+
+/** Summary of what a part share would actually contain. */
+interface PartPackageSummary {
+  files: Array<{ fileName: string; isPreliminary: boolean }>;
+  filesWithheld: number;
+  preliminaryCount: number;
+}
 
 // Expiry options map to a relative offset from "now". "never" serializes
 // to a null expiresAt so the token never expires (the decision we agreed
@@ -95,6 +104,10 @@ export function ShareDialog({
   const [allowDownload, setAllowDownload] = useState(true);
   const [password, setPassword] = useState("");
   const [creating, setCreating] = useState(false);
+  // Part shares only. Off by default and reset on every open — an opt-in
+  // that persists between dialogs is one somebody eventually sends without
+  // meaning to.
+  const [includeWip, setIncludeWip] = useState(false);
 
   const loadLinks = useCallback(async () => {
     if (!resourceId) return;
@@ -122,8 +135,20 @@ export function ShareDialog({
       setExpiry("never");
       setAllowDownload(true);
       setPassword("");
+      setIncludeWip(false);
     }
   }, [open, loadLinks]);
+
+  // A part share resolves to the part's *released* files. Anything still in
+  // WIP is left out, and the person about to send the link is the one who
+  // needs to know that — a supplier told "here's the drawing package" and
+  // given three of five documents is the exact failure this feature exists
+  // to prevent.
+  const { data: pkg } = useFetch<PartPackageSummary>(
+    open && resourceType === "part"
+      ? `/api/parts/${resourceId}/package?includeWip=${includeWip}`
+      : null
+  );
 
   async function handleCreate() {
     setCreating(true);
@@ -135,6 +160,7 @@ export function ShareDialog({
         allowDownload,
         password: password.trim() ? password : null,
         label: label.trim() || null,
+        ...(resourceType === "part" ? { includeWip } : {}),
       };
       const created = await fetchJson<ShareLink>("/api/share-tokens", {
         method: "POST",
@@ -190,6 +216,71 @@ export function ShareDialog({
         </DialogHeader>
 
         <div className="text-sm text-muted-foreground -mt-2 mb-2 truncate">{resourceName}</div>
+
+        {/* What a part link will actually contain. Shown before the link
+            is minted, because after it is sent it is too late. */}
+        {resourceType === "part" && (
+          <div className="mb-2 space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+            <p className="text-muted-foreground">
+              Recipients see the{" "}
+              <strong className="font-medium text-foreground">
+                {includeWip ? "current" : "released"}
+              </strong>{" "}
+              documents for this part, and the link follows future revisions.
+            </p>
+
+            {pkg && (
+              <p>
+                {pkg.files.length === 0 ? (
+                  <span className="text-destructive">
+                    {includeWip
+                      ? "This part has no documents attached at all — recipients would see an empty package."
+                      : "This part has no released documents — recipients would see an empty package."}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {pkg.files.length} document{pkg.files.length === 1 ? "" : "s"} included
+                    {pkg.preliminaryCount > 0 && (
+                      <>
+                        {" · "}
+                        <span className="font-medium text-foreground">
+                          {pkg.preliminaryCount} preliminary
+                        </span>
+                      </>
+                    )}
+                    {pkg.filesWithheld > 0 && (
+                      <>
+                        {" · "}
+                        <span className="text-destructive">
+                          {pkg.filesWithheld} withheld (not released)
+                        </span>
+                      </>
+                    )}
+                  </span>
+                )}
+              </p>
+            )}
+
+            <label className="flex items-start gap-2 cursor-pointer pt-1">
+              <Checkbox
+                id="share-include-wip"
+                checked={includeWip}
+                onCheckedChange={(c) => setIncludeWip(c === true)}
+                className="mt-0.5"
+              />
+              <span className="min-w-0">
+                <span className="block font-medium text-foreground">
+                  Include work-in-progress documents
+                </span>
+                <span className="block text-muted-foreground">
+                  For quoting before release. Recipients see a{" "}
+                  <strong className="font-medium">PRELIMINARY — NOT FOR PRODUCTION</strong> label on
+                  each one, and the download prefixes their filenames. Recorded in the audit log.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
 
         {/* ── Existing links ─────────────────────────────────────── */}
         <div className="space-y-2">

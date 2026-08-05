@@ -15,7 +15,7 @@ const scrypt = promisify(scryptCb) as (
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
-export type ShareResourceType = "file" | "bom" | "release";
+export type ShareResourceType = "file" | "bom" | "release" | "part";
 
 export interface ShareTokenRow {
   id: string;
@@ -32,6 +32,8 @@ export interface ShareTokenRow {
   label: string | null;
   accessCount: number;
   lastAccessedAt: string | null;
+  /** Part shares only — include unreleased docs, stamped PRELIMINARY. */
+  includeWip: boolean;
 }
 
 export interface ResolveResult {
@@ -141,6 +143,11 @@ export interface CreateShareTokenInput {
   allowDownload: boolean;
   password: string | null;
   label: string | null;
+  /**
+   * Part shares only. Include unreleased documents, stamped PRELIMINARY.
+   * Defaults false at the column, so omitting it is the safe behaviour.
+   */
+  includeWip?: boolean;
 }
 
 export async function createShareToken(input: CreateShareTokenInput): Promise<ShareTokenRow> {
@@ -160,6 +167,9 @@ export async function createShareToken(input: CreateShareTokenInput): Promise<Sh
     label: input.label,
     accessCount: 0,
     lastAccessedAt: null,
+    // Only ever true for part shares. The creation route refuses it on any
+    // other resource type rather than storing a flag nothing would read.
+    includeWip: input.includeWip === true,
   };
   const { data, error } = await db.from("share_tokens").insert(row).select().single();
   if (error) throw error;

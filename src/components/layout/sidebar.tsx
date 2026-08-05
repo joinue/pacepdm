@@ -25,6 +25,7 @@ import {
   Building2,
   Workflow,
   Palette,
+  Rocket,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +63,7 @@ const navGroups: NavGroup[] = [
     items: [
       { name: "ECOs", href: "/ecos", icon: ClipboardList, badge: "ecos" },
       { name: "Approvals", href: "/approvals", icon: CheckCircle, badge: "approvals" },
+      { name: "Releases", href: "/releases", icon: Rocket },
     ],
   },
   // Every item here declares the permission its own page and API require.

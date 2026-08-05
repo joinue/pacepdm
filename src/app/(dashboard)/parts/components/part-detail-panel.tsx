@@ -1,15 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { PartWhereUsed } from "@/lib/where-used";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, X, FileText, Building2, Loader2 } from "lucide-react";
+import { Plus, X, FileText, Building2, Loader2, Link as LinkIcon, Download } from "lucide-react";
 import { ThumbnailPicker } from "@/components/ui/entity-thumbnail";
+import { ShareDialog } from "@/components/share/share-dialog";
+import { usePermissions } from "@/hooks/use-permissions";
+import { PERMISSIONS } from "@/lib/permissions";
 import type { PartDetail, PartVendorLink } from "../parts-types";
 import { CATEGORIES, categoryVariants } from "../parts-types";
 
@@ -45,6 +49,11 @@ export function PartDetailPanel({
   onToggleEndItem,
 }: PartDetailPanelProps) {
   const router = useRouter();
+  const [shareOpen, setShareOpen] = useState(false);
+  const { can } = usePermissions();
+  // Hides a button the user cannot use. The server is the boundary — the
+  // share route declares SHARE_CREATE itself.
+  const canShare = can(PERMISSIONS.SHARE_CREATE);
 
   if (loading || !detail) {
     return (
@@ -86,6 +95,34 @@ export function PartDetailPanel({
 
         {detail.description && (
           <p className="text-sm text-muted-foreground">{detail.description}</p>
+        )}
+
+        {/*
+          Supplier handoff. A share link resolves the part's released
+          documents at view time, so a supplier who bookmarks it sees the
+          revision that is current then — not the one that was current when
+          the link was sent. The zip is the same package for anyone who
+          would rather attach it to an email. See src/lib/part-package.ts.
+        */}
+        {canShare && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => setShareOpen(true)}
+            >
+              <LinkIcon className="w-3.5 h-3.5 mr-1.5" /> Share with supplier
+            </Button>
+            <a
+              href={`/api/parts/${detail.id}/zip`}
+              aria-label="Download document package"
+              title="Download document package"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <Download className="w-3.5 h-3.5" />
+            </a>
+          </div>
         )}
 
         {/*
@@ -185,6 +222,14 @@ export function PartDetailPanel({
           </>
         )}
       </div>
+
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        resourceType="part"
+        resourceId={detail.id}
+        resourceName={`${detail.partNumber} rev ${detail.revision} — ${detail.name}`}
+      />
     </div>
   );
 }

@@ -4,8 +4,7 @@
 
 <!-- plan-metrics
 bom-revise-route: 1
-eco-implements-boms: 0
--->
+eco-implements-boms: 1-->
 
 A review of the four core PDM workflows — file lifecycle, change orders,
 BOM lifecycle, and impact analysis — walked end to end against the code on
@@ -36,7 +35,15 @@ superseded when the new one is _released_, not when it is drafted.
 **2. An ECO could not contain a BOM.** `eco_items` had `fileId` and
 `partId`, so a change order could govern a part revision but not the BOM
 revision that went with it — which is most of what a change order is for.
-Fixed by `eco_items.bomId` (migration 046), end to end including the picker.
+Migration 046 added `eco_items.bomId` and the picker.
+
+~~Fixed end to end.~~ **It was not.** Migration 046 left migration 017's
+two-column CHECK in place, so every BOM-on-ECO insert was rejected by the
+database, and `implement_eco` ignored BOM rows even in principle. Both closed
+by migration 049 on 2026-08-05 — see [item 1](#1-implement_eco-does-not-act-on-bom-items-closed-2026-08-05).
+The claim above stood in this plan for a day while the feature did not work,
+which is the argument for the plan-metrics linter covering behaviour and not
+just counts.
 
 **3. Revision sequencing corrupted data silently.**
 `String.fromCharCode(rev.charCodeAt(0) + 1)` turned `Z` into `[` and `R2`
@@ -53,28 +60,54 @@ field kept for notes.
 
 ## What is left
 
-### 1. `implement_eco` does not act on BOM items — the top item
+### ~~1. `implement_eco` does not act on BOM items~~ Closed 2026-08-05
 
-An ECO can now **record** that a BOM goes from revision B to C. Implementing
-that ECO does nothing about it: the Postgres function bumps part revisions
-and freezes files, and skips `eco_items` rows carrying a `bomId` entirely.
-So the loop is only three-quarters closed — the change order describes the
-BOM change and a human still has to go and make it.
+**Both halves of this were broken, and the second one was worse.**
 
-Two ways to close it, and the choice matters:
+**The framing above was wrong, and the correction is the useful part.** It
+weighed "call the revise logic from `implement_eco`" against "have the route
+orchestrate", both of which assume implementation has to _create_ the
+revision. It does not. `POST /api/boms/[bomId]/revise` already takes an
+`ecoId` and runs at ECO **authoring** time, so revision C exists as a DRAFT
+and is linked to the ECO before anyone approves it. What implementation owes
+is a **release**, not a revise:
 
-- **Call the revise logic from `implement_eco`.** Atomic with the rest of
-  the implementation, which is the appeal. But the revise rules currently
-  live in a route handler, and duplicating them into PL/pgSQL is exactly
-  the drift `status-flows.ts` exists to prevent.
-- **Have the route orchestrate**: implement the ECO, then revise each BOM
-  item. Rules stay in one place, but it is no longer one transaction, and a
-  half-implemented ECO is the state migration 011 went out of its way to
-  make impossible.
+1. the carried BOM → `RELEASED`
+2. its `previousRevisionId` → `OBSOLETE`, `supersededById` → the new row
 
-Leaning toward the first with the shared rules pushed down into SQL, but it
-wants a decision doc rather than a preference. Until then, note that
-`toRevision` on a BOM item is documentation, not an instruction.
+That is small enough to live in PL/pgSQL without duplicating the revise
+rules, so the dilemma dissolves. Done in
+[`migration-049`](../../supabase/migrations/migration-049-implement-eco-boms.sql).
+
+**`eco_items.bomId` never worked at all.** Migration 046 added the column,
+the FK, the index, the unique key, the picker and the revise-route link — and
+left migration 017's `CHECK (("partId" IS NULL) <> ("fileId" IS NULL))` in
+place. A BOM-only row has both NULL, so the check evaluates `TRUE <> TRUE` =
+`FALSE` and Postgres rejects the insert with 23514. Every BOM ever added to
+an ECO was refused by the database.
+
+It hid because the revise route deliberately downgrades an ECO-link failure
+to a `warning` in the response body rather than throwing, so a hard schema
+rejection read as a soft note. Migration 049 replaces the constraint with an
+exactly-one-of-three check named `eco_items_target_one`.
+
+**Verify this one against the live database before trusting it.** The
+migration files are not a ledger, and this is precisely the class of drift
+[`../decisions/hand-applied-migrations.md`](../decisions/hand-applied-migrations.md)
+exists for.
+
+Two smaller things came with it:
+
+- **`createReleaseFromEco` never saw ECO-carried BOMs either.** It found BOMs
+  by walking `boms.fileId` into the affected file set, so the BOM revision a
+  change order existed to ship was absent from its own release manifest. Now
+  unioned by id with the direct `eco_items.bomId` set.
+- **Releasing from DRAFT crosses `BOM_STATUS_FLOW`**, which allows only
+  `APPROVED → RELEASED`. Deliberate: the ECO's approval is the review, and a
+  second independent approval cycle is ceremony. Recorded as
+  `BOM_STATES_RELEASABLE_BY_ECO` in
+  [`status-flows.ts`](../../src/lib/status-flows.ts) and pinned against the
+  migration text by `status-flows.test.ts`, so the two copies cannot drift.
 
 ### 2. No revision history in the UI
 
@@ -82,6 +115,10 @@ A superseded revision is filtered out of `GET /api/boms` (correctly — it is
 not what you are working on) and there is no way to reach it except by URL.
 `previousRevisionId` and `supersededById` make the chain walkable; nothing
 walks it.
+
+**This is now the top item.** With implement closing the loop, ECO
+implementation is what sets `supersededById` — so the chain fills up on its
+own from here, and nothing displays it.
 
 Wants: a "Revision history" section on the BOM detail listing the chain with
 dates and the ECO that caused each step, and a badge on a superseded
@@ -127,8 +164,17 @@ draft. A draft supersedes nothing.
 ## Viability, as assessed
 
 For PACE internally: the workflow is sound now that item 1 of the review is
-fixed. Commercially, gaps 1–3 above were table stakes and are done; what is
-left in this plan is depth rather than blockers.
+fixed, and closed end to end since 2026-08-05 — an approved ECO now releases
+the BOM revision it carries instead of leaving a human to do it. Commercially,
+gaps 1–3 above were table stakes and are done; what is left in this plan is
+depth rather than blockers.
+
+One lesson worth carrying out of the `eco_items.bomId` bug: a feature can be
+complete in the schema, the API, the UI and the plan, and still be rejected
+by a CHECK constraint on every call. The tell was there — the revise route's
+graceful `warning` path fired every single time — and nobody read it as a
+failure because it was designed to look survivable. **When an error path is
+deliberately soft, something has to notice when it stops being rare.**
 
 The honest limit remains unchanged and is not in scope to fix: this is not a
 CAD-native vault. There is no add-in, no reference parsing, and no file

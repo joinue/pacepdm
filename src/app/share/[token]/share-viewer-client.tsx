@@ -11,7 +11,7 @@ import { fetchJson, errorMessage, ApiError } from "@/lib/api-client";
 // Mirrors /api/public/share/[token] GET response.
 interface ResolvedMetadata {
   status: "ok" | "revoked" | "expired" | "not_found";
-  resourceType?: "file" | "bom" | "release";
+  resourceType?: "file" | "bom" | "release" | "part";
   resourceName?: string;
   requiresPassword?: boolean;
   allowDownload?: boolean;
@@ -84,7 +84,42 @@ interface ReleaseContent {
   allowDownload: boolean;
 }
 
-type Content = FileContent | BomContent | ReleaseContent;
+// Mirrors /api/public/share/[token]/content GET response (part branch).
+// The part package is resolved on each request rather than frozen when
+// the link was minted, so a bookmarked link follows revisions.
+interface PartContent {
+  kind: "part";
+  partNumber: string;
+  name: string;
+  description: string | null;
+  revision: string;
+  lifecycleState: string;
+  category: string | null;
+  material: string | null;
+  unit: string | null;
+  weight: number | null;
+  weightUnit: string | null;
+  files: Array<{
+    fileName: string;
+    fileType: string;
+    role: string;
+    isPrimary: boolean;
+    revision: string;
+    version: number;
+    isPreliminary: boolean;
+    url?: string;
+  }>;
+  boms: Array<{
+    bomId: string;
+    name: string;
+    revision: string | null;
+    status: string | null;
+  }>;
+  containsPreliminary: boolean;
+  allowDownload: boolean;
+}
+
+type Content = FileContent | BomContent | ReleaseContent | PartContent;
 
 export function ShareViewerClient({ token }: { token: string }) {
   const [metadata, setMetadata] = useState<ResolvedMetadata | null>(null);
@@ -159,7 +194,9 @@ export function ShareViewerClient({ token }: { token: string }) {
       ? "BOM"
       : metadata?.resourceType === "release"
         ? "release"
-        : "file";
+        : metadata?.resourceType === "part"
+          ? "part"
+          : "file";
   const header = (
     <header className="border-b bg-card/60 backdrop-blur">
       <div className="max-w-5xl mx-auto px-6 py-3 flex items-center gap-3">
@@ -277,6 +314,7 @@ export function ShareViewerClient({ token }: { token: string }) {
         {content?.kind === "file" && <FileContentView content={content} />}
         {content?.kind === "bom" && <BomContentView content={content} token={token} />}
         {content?.kind === "release" && <ReleaseContentView content={content} token={token} />}
+        {content?.kind === "part" && <PartContentView content={content} token={token} />}
       </main>
       <footer className="border-t text-center py-3 text-2xs text-muted-foreground">
         Powered by <span className="font-semibold">PACE PDM</span>
@@ -628,6 +666,203 @@ function ReleaseContentView({ content, token }: { content: ReleaseContent; token
 
       <div className="text-2xs text-muted-foreground pt-4 border-t">
         This release is an immutable snapshot taken when {content.ecoNumber} was implemented.
+      </div>
+    </div>
+  );
+}
+
+// ─── Part view ─────────────────────────────────────────────────────────────
+//
+// The supplier-facing package. Unlike the release view, this is *not* a
+// snapshot — it is resolved on every request, so a link bookmarked in
+// March shows the revision that is current in August. The closing line
+// says so, because a recipient who thinks they are looking at a frozen
+// document will not come back to re-check it.
+
+const FILE_ROLE_LABELS: Record<string, string> = {
+  DRAWING: "Drawing",
+  MODEL_3D: "3D model",
+  SPEC_SHEET: "Spec sheet",
+  DATASHEET: "Datasheet",
+  OTHER: "Other",
+};
+
+function PartContentView({ content, token }: { content: PartContent; token: string }) {
+  const specs: Array<[string, string]> = [
+    ["Revision", content.revision],
+    ...(content.material ? ([["Material", content.material]] as Array<[string, string]>) : []),
+    ...(content.unit ? ([["Unit", content.unit]] as Array<[string, string]>) : []),
+    ...(content.weight !== null
+      ? ([["Weight", `${content.weight} ${content.weightUnit ?? ""}`.trim()]] as Array<
+          [string, string]
+        >)
+      : []),
+    ...(content.category
+      ? ([["Category", content.category.replace(/_/g, " ").toLowerCase()]] as Array<
+          [string, string]
+        >)
+      : []),
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Part</div>
+          <h1 className="text-2xl font-semibold truncate font-mono">{content.partNumber}</h1>
+          <div className="text-sm text-muted-foreground">
+            {content.name}
+            {" · "}rev {content.revision}
+            {" · "}
+            {content.lifecycleState}
+          </div>
+        </div>
+        {content.allowDownload && content.files.length > 0 && (
+          <a
+            href={`/api/public/share/${token}/zip`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Download className="w-4 h-4 mr-1.5" /> Download all
+          </a>
+        )}
+      </div>
+
+      {/* Package-level warning. Placed above everything, before the specs
+          and the document table, because a recipient who scrolls straight
+          to the download must have passed it. */}
+      {content.containsPreliminary && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle
+              className="w-4 h-4 mt-0.5 shrink-0 text-destructive"
+              aria-hidden="true"
+            />
+            <div className="text-sm space-y-1">
+              <p className="font-semibold text-destructive">
+                This package contains preliminary documents
+              </p>
+              <p className="text-muted-foreground">
+                Documents marked <strong className="font-medium">PRELIMINARY</strong> have not been
+                released. They are provided for quotation and planning only, are subject to change,
+                and must not be used for production, tooling, or final inspection. Request a
+                released package before committing to manufacture.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {content.description && (
+        <div className="rounded-lg border bg-card p-4 text-sm">{content.description}</div>
+      )}
+
+      {/* Specs */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {specs.map(([label, value]) => (
+          <div key={label} className="rounded-lg border p-3">
+            <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
+            <div className="text-sm mt-0.5 capitalize">{value}</div>
+          </div>
+        ))}
+      </section>
+
+      {/* Documents */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <FileText className="w-4 h-4" /> Documents
+        </h2>
+        {content.files.length === 0 ? (
+          <div className="text-xs text-muted-foreground py-4 text-center border border-dashed rounded-md">
+            No documents are available for this part yet.
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">File</th>
+                  <th className="text-left px-3 py-2 font-medium">Type</th>
+                  <th className="text-left px-3 py-2 font-medium">Rev</th>
+                  {content.allowDownload && <th className="px-3 py-2 font-medium sr-only">Get</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {content.files.map((f) => (
+                  <tr key={f.fileName} className="border-t">
+                    <td className="px-3 py-2">
+                      <span className="truncate">{f.fileName}</span>
+                      {f.isPrimary && (
+                        <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+                          primary
+                        </span>
+                      )}
+                      {f.isPreliminary && (
+                        <span className="ml-2 rounded bg-destructive/15 px-1.5 py-0.5 text-2xs font-medium text-destructive whitespace-nowrap">
+                          PRELIMINARY — NOT FOR PRODUCTION
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {FILE_ROLE_LABELS[f.role] ?? f.role}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{f.revision || "—"}</td>
+                    {content.allowDownload && (
+                      <td className="px-3 py-2 text-right">
+                        {f.url ? (
+                          <a
+                            href={f.url}
+                            download={f.fileName}
+                            className="text-xs underline underline-offset-2 hover:text-foreground text-muted-foreground"
+                          >
+                            Download
+                          </a>
+                        ) : (
+                          <span className="text-2xs text-muted-foreground">unavailable</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* BOMs this part heads */}
+      {content.boms.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+            <Layers className="w-4 h-4" /> Bills of material
+          </h2>
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium">Rev</th>
+                  <th className="text-left px-3 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {content.boms.map((b) => (
+                  <tr key={b.bomId} className="border-t">
+                    <td className="px-3 py-2">{b.name}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{b.revision ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{b.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <div className="text-2xs text-muted-foreground pt-4 border-t">
+        This page always shows the current documents for {content.partNumber}. Check back here
+        rather than saving a copy — if the part is revised, this link updates.
+        {content.containsPreliminary &&
+          " Preliminary documents in particular are expected to change."}
       </div>
     </div>
   );
