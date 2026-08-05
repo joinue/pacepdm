@@ -2,6 +2,21 @@
 
 **Started:** 2026-08-04 · **Last updated:** 2026-08-04 · **Status:** in progress
 
+<!-- plan-metrics
+routes-total: 98
+routes-wrapped: 28
+unwrapped-route: 330
+raw-fetch: 112
+generic-error-toast: 14
+swallowed-error: 11
+token-violations: 6
+component-tests: 1
+-->
+
+> These numbers are verified by `npm run lint:plans`, which recomputes them from
+> the codebase and fails the build if this plan has drifted. If it fails, fix the
+> prose below, then run `npm run lint:plans -- --update`.
+
 The foundations are in and pushed to `main` (`9695e8d`). What remains is volume, not design: every outstanding item is mechanical, has a counter that can only go down, and can be picked up and put down without losing your place.
 
 **Read [`../ENGINEERING.md`](../ENGINEERING.md) and [`../../AGENTS.md`](../../AGENTS.md) first if you are coming to this cold.**

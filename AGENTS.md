@@ -122,9 +122,22 @@ Creation routes that a client may retry accept an `idempotency-key` header and p
 - Test behavior, not markup. Skip trivial presentational primitives.
 - Playwright E2E in `e2e/` for full journeys (upload → check out → check in, ECO submit → approve).
 
+## Keep the plans current
+
+[`docs/plans/`](docs/plans/) holds what is half-finished and what to do next. **Work that changes what a plan describes must update that plan in the same commit.** A plan that misstates where things stand is worse than no plan: it reads as current, so the next person trusts it and re-does finished work or skips unfinished work.
+
+In practice, if you convert routes, burn down lint violations, or finish a queue item:
+
+1. Update the prose — move the item, strike the done part, note anything you learned that would trip up the next person.
+2. Run `npm run lint:plans -- --update` to sync the metrics block.
+
+Each plan declares its numbers in a `<!-- plan-metrics -->` block, and `npm run lint:plans` recomputes them from the codebase. Drift fails the build, so a plan cannot silently rot. New plans need the block too; add a metric to `scripts/lint-plans.mjs` if a plan needs to assert something not yet covered.
+
+A finished plan gets deleted, not archived. Anything durable in it belongs in [`docs/decisions/`](docs/decisions/) or in this file.
+
 ## Before you commit
 
-`npm run check` (typecheck + lint + token lint + conventions lint + tests) is the gate. The pre-commit hook runs a fast subset; CI runs the whole thing.
+`npm run check` (typecheck + lint + token lint + conventions lint + plan lint + tests) is the gate. The pre-commit hook runs a fast subset; CI runs the whole thing.
 
 Never add AI attribution or `Co-Authored-By` trailers to commit messages. Keep them concise and human.
 <!-- END:pace-conventions -->

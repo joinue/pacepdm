@@ -37,6 +37,12 @@ jobs:
       - name: Conventions
         run: npm run lint:conventions
 
+      # Fails when a doc in docs/plans/ misstates where things stand. See
+      # docs/plans/README.md — work is expected to update its plan in the
+      # same commit.
+      - name: Plans current
+        run: npm run lint:plans
+
       - name: Tests
         run: npm test
 

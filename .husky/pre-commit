@@ -1,10 +1,16 @@
-# Format and lint the staged files, then hold the two gates that guard the
+# Format and lint the staged files, then hold the gates that guard the
 # conventions ESLint cannot express, then typecheck the project.
 #
 # The token and convention gates run against the whole tree rather than the
 # staged subset: both are ratchets (scripts/*.baseline.json), and a partial
 # view would let a violation move between files unnoticed.
+#
+# lint:plans is here rather than only in CI because the point of it is to
+# make you update the plan in the SAME commit as the work. Catching it on
+# push is too late — by then the commit that should have carried the update
+# already exists.
 npx lint-staged
 npm run lint:tokens
 npm run lint:conventions
+npm run lint:plans
 npm run typecheck
