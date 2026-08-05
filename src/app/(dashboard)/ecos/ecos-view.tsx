@@ -37,6 +37,7 @@ import { EcoItemsTab } from "./components/eco-items-tab";
 import { EcoApprovalTab } from "./components/eco-approval-tab";
 import { EcoBomImpact } from "./components/eco-bom-impact";
 import { PageHeader } from "@/components/ui/page-header";
+import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 
 /**
  * ECOs view — list + optional detail. Selection lives in the URL path
@@ -191,10 +192,32 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // and `approval_decisions` globally for the bell, but that only
   // refreshes the count — the ECO detail panel needs its own refetch
   // to rerender the decisions list.
+  // Every mutation on this page already reloads what it changed, so acting on
+  // the realtime replay of that same write just fetches it twice. The guard is
+  // marked by `refreshEcos` / `refreshItems` below, which the mutations call
+  // in place of the raw loaders.
+  const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+
+  const refreshEcos = useCallback(() => {
+    markLocalWrite();
+    return loadEcos();
+  }, [markLocalWrite, loadEcos]);
+
+  const refreshItems = useCallback(
+    (ecoId: string) => {
+      markLocalWrite();
+      return loadItems(ecoId);
+    },
+    [markLocalWrite, loadItems]
+  );
+
   useRealtimeTable({
     table: "ecos",
     filter: `tenantId=eq.${user.tenantId}`,
-    onChange: loadEcos,
+    onChange: () => {
+      if (isEcho()) return;
+      void loadEcos();
+    },
   });
   useRealtimeTable({
     table: "eco_items",
@@ -202,12 +225,16 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
     // ecos row. We still fire a refresh on every change and let the
     // detail-load below no-op when nothing is selected. Cheap.
     onChange: () => {
+      if (isEcho()) return;
       if (selectedEcoId) void loadItems(selectedEcoId);
     },
     enabled: !!selectedEcoId,
   });
   useRealtimeTable({
     table: "approval_decisions",
+    // Not guarded: approving is the one action here whose realtime event is
+    // usually somebody else's, and the decisions list is the thing the user
+    // is watching when it arrives.
     onChange: () => {
       if (selectedEcoId) void loadApproval(selectedEcoId);
     },

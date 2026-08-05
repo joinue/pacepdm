@@ -3,10 +3,10 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 105
-routes-wrapped: 36
+routes-total: 106
+routes-wrapped: 37
 unwrapped-route: 324
-raw-fetch: 55
+raw-fetch: 49
 generic-error-toast: 8
 swallowed-error: 6
 token-violations: 6
@@ -90,11 +90,11 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **36 / 105**                         | 105                                                   |
-| `raw-fetch` in client components      | 112              | **55**                               | 0                                                     |
+| Routes on `withTenant`                | 0                | **37 / 106**                         | 106                                                   |
+| `raw-fetch` in client components      | 112              | **49**                               | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                | 0                                                     |
-| Component tests                       | 0                | **4** files (57 stateful components) | the ones with real logic                              |
+| Component tests                       | 0                | **6** files (57 stateful components) | the ones with real logic                              |
 
 ### How the ratchet works
 
@@ -226,6 +226,14 @@ Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form
 `item-source-cell.test.tsx` is a useful third pattern alongside the other two: the component is trivial to render but encodes a precedence rule (sub-assembly before part before file) whose breakage is invisible — it sent every sub-assembly line to the parts list for a day. Small pure-decision components inside big files are worth exporting purely so the decision can be pinned. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
 
 `entity-thumbnail.test.tsx` is the fourth, and shows where the line sits on a shared primitive: the tile itself is not tested, only the two decisions inside `ThumbnailPicker` — a disabled picker renders no control at all, and re-picking the same file still fires (the input's value is cleared for exactly that reason, and re-uploading after a failure is what breaks without it).
+
+`use-vault-contents.test.tsx` and `use-realtime-echo-guard.test.tsx` are the
+fifth and sixth, and are **hook** tests rather than component tests — note they
+must be named `.test.tsx`, because `vitest.config.ts` runs `.test.ts` in node
+and `renderHook` needs jsdom. Both pin rollback behaviour that is invisible
+until it is wrong: an optimistic edit restores only its own row (so a
+concurrent edit or a realtime refresh that landed in between survives), and a
+`removeFile` rollback does not re-insert a row a refresh already brought back.
 
 ### 5. Split the oversized files
 
