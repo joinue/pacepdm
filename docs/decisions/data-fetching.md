@@ -53,7 +53,7 @@ So `npm run lint:conventions` now fails the build on a raw `fetch(` in a client 
 
 - **`fetch` inside `src/lib/` and `src/app/api/`** — server-side calls to external services are not this rule's business.
 - **Streaming and binary responses** — file downloads and the zip stream read `response.body`, which `fetchJson` does not model. Use raw `fetch` with an explanatory comment.
-- **`FormData` uploads** — `fetchJson` JSON-stringifies its body. File uploads pass `FormData` through raw `fetch`, or through the upload helper.
+- **`FormData` uploads** — `fetchJson` JSON-stringifies its body, and a multipart body must reach `fetch` untouched so the browser can set the boundary. Use **`uploadFile`** from [`src/lib/api-client.ts`](../../src/lib/api-client.ts): same `ApiError`, same server-message handling, no suppression comment needed. Raw `fetch` here is now a finding, not an exception.
 
 ## Consequences
 

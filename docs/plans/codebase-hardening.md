@@ -91,10 +91,11 @@ npm run probe:rls                                      # live RLS posture
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
 | Routes on `withTenant`                | 0                | **37 / 106**                         | 106                                                   |
-| `raw-fetch` in client components      | 112              | **48**                               | 0                                                     |
+| `raw-fetch` in client components      | 112              | **44**                               | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                | 0                                                     |
 | Component tests                       | 0                | **6** files (57 stateful components) | the ones with real logic                              |
+| Route segments with `error.tsx`       | 0                | **4** + `global-error`               | every segment that fetches                            |
 
 ### How the ratchet works
 
@@ -180,13 +181,13 @@ Things that will trip you up:
 - **Helpers that take a raw client** (`captureBomSnapshot`, `getFileWhereUsed`, `getReleaseById`) need `db.unscoped("reason")`. They scope by the `tenantId` you pass them.
 - **Add a case to `src/app/api/tenant-isolation.test.ts`** for any route that resolves a record by id. That file is the registry of what is proven safe.
 
-### 2. Adopt `useFetch` / `fetchJson` — 48 sites
+### 2. Adopt `useFetch` / `fetchJson` — 44 sites
 
 ```bash
 node scripts/lint-conventions.mjs --list raw-fetch
 ```
 
-Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `parts/components/part-form-dialog.tsx` (6), `parts/components/add-vendor-dialog.tsx` (3).
+Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `parts/components/part-form-dialog.tsx` (6). Everything below that is a one- or two-line tail spread across sixteen files.
 
 **These headings are prose, so `lint:plans` does not check them.** Only the
 `plan-metrics` block is verified; a count written into a heading drifts
@@ -204,12 +205,25 @@ pages — a different shape of work:
 
 - `file-detail-panel` and `upload-file-dialog` are upload/streaming flows where
   `uploadFile` (not `useFetch`) is the right target.
-- `part-form-dialog`, `add-vendor-dialog`, `link-file-dialog` are
-  typeahead searches. `useFetch` handles these well — build the URL from a
-  debounced query and let the hook abort the superseded request, the way
-  `vendors/page.tsx` and `parts/page.tsx` now do — but each needs its local
+- **~~`add-vendor-dialog`, `link-file-dialog`~~ Done 2026-08-05.** Both are now
+  URL-driven `useFetch` typeaheads: a debounced query builds the URL, a null
+  URL means no request, and the hook aborts a superseded search instead of
+  letting a slow early response land on top of a fast later one. Each also
+  dropped its private copy of `useDebounce`. **`part-form-dialog` still has one
+  and is the last of the three** — copy `link-file-dialog`, and note the
+  gotcha: `useFetch` keeps its last payload when the URL goes null, so gate
+  the rendered results on the same condition that built the URL, not on
+  `data`.
+- `part-form-dialog` is a typeahead search. `useFetch` handles these well —
+  build the URL from a debounced query, the way `link-file-dialog` and
+  `vendors/page.tsx` now do — but it still needs its local
   `useDebounce` helper replaced rather than kept alongside.
-- `notification-provider` is a long-lived subscription, not a page read.
+- **~~`notification-provider`~~ Done 2026-08-05** — a long-lived subscription
+  rather than a page read, so it went to `fetchJson` and kept its own state.
+  Two behaviour fixes came with it, both perf rather than convention: it now
+  reads `/api/approvals/count` instead of fetching the entire
+  `/api/approvals` list to call `.length` on it, and the 60s safety poll skips
+  its tick while the tab is hidden.
 
 Two of `parts/page.tsx`'s came out while fixing a bug, and the bug is the argument for the whole item: `loadPartDetail` used bare `fetch` with no staleness guard, so a response that started before a write could land after it and silently revert the UI. `useFetch`/`fetchJson` do not fix that on their own, but the routine that reaches for them is the one that notices.
 

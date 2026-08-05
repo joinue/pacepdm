@@ -69,11 +69,24 @@ Pick the pattern that matches the context. Full rationale in [`docs/decisions/da
 - **Mutations** — `fetchJson` ([`src/lib/api-client.ts`](src/lib/api-client.ts)) in the event handler, then `refetch()`.
 - **Never**: bare `fetch(url).then(r => r.json())`, `.catch(() => {})`, or `catch { toast.error("Failed") }`. Always surface the server's message via `errorMessage(err)`. The conventions linter enforces this.
 
+## Perceived performance
+
+The app's slowness was never query time. Full rationale in [`docs/decisions/perceived-performance.md`](docs/decisions/perceived-performance.md).
+
+- **Resolving the caller is expensive** — `auth.getUser()` is a network call, not a local JWT decode. Anything that reads the session goes through the `cache()`-wrapped resolver in [`src/lib/auth.ts`](src/lib/auth.ts). Never add a second uncached path.
+- **Mutations apply locally first.** A mutation that changes something already on screen patches it optimistically and rolls back on failure. Rollbacks are row-scoped, never whole-list snapshots — a refresh may have landed in between.
+- **A component that subscribes to a table it also writes to needs `useRealtimeEchoGuard`**, or one user action costs two fetches.
+- **If the UI renders a count, the endpoint returns a count.** Never fetch a list to call `.length` on it. `/api/approvals/count` is the reference, including how to keep a related-table filter countable with `!inner`.
+- **Background tabs do not poll.** Guard any `setInterval` refresh on `document.visibilityState === "visible"`.
+- **Every fetching segment gets a `loading.tsx` shaped like the page it replaces.** Compose from [`src/components/ui/page-skeleton.tsx`](src/components/ui/page-skeleton.tsx); do not fall back to the generic dashboard skeleton.
+- **Heavy viewers load through `next/dynamic`.** Import `cad-viewer-lazy`, never `cad-viewer` — a static import from an eagerly-rendered component ships to everyone.
+
 ## Permissions
 
 - The server is the boundary. Declare the permission in the `withTenant` options; never check it by hand inside the handler.
 - Client-side gating with `usePermissions().can(...)` hides buttons the user cannot use. That is a UX affordance, not a security control.
-- A route that authors roles must call `permissionsExceedingActor` so an admin cannot mint a role more powerful than their own.
+- A route that authors roles **or assigns one to a user** must call `permissionsExceedingActor`, so nobody can mint or hand out a role more powerful than their own.
+- Four system roles ship per tenant: Admin, Manager, Engineer, Viewer. Never branch on a role's _name_ — tenants create custom roles, so a name proves nothing. A new permission needs an entry in `PERMISSION_INFO`, and a change to `DEFAULT_ROLES` needs a backfill migration in the same commit, because the constant only runs at tenant creation. See [`docs/decisions/system-roles.md`](docs/decisions/system-roles.md).
 
 ## Styling and tokens
 
@@ -93,9 +106,9 @@ Compose these instead of re-deriving page chrome (see them all at `/admin/kitche
 
 Every route segment provides what it needs to fail gracefully:
 
-- `loading.tsx` wherever a server component fetches.
-- `error.tsx` for any segment that can throw.
-- `not-found.tsx` for dynamic segments that resolve a record by id.
+- `loading.tsx` wherever a server component fetches, shaped like the page it stands in for — compose from [`page-skeleton.tsx`](src/components/ui/page-skeleton.tsx).
+- `error.tsx` for any segment that can throw — compose from [`route-error.tsx`](src/components/ui/route-error.tsx). The prop is **`retry`**, not `reset`; Next renamed it in 16.3.
+- `not-found.tsx` for dynamic segments that resolve a record by id. Without one, `notFound()` lands outside the dashboard shell.
 
 Wrap heavy feature subtrees (the file detail panel, the BOM editor) in `<ErrorBoundary>` so one crash does not blank the page. Do not wrap the whole app.
 

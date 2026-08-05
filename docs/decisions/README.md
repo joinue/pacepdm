@@ -13,3 +13,5 @@ One file per decision that constrains future work. Each explains the context, th
 | [`testing-strategy.md`](testing-strategy.md)               | What must be tested, what must not, and why route handlers are tested with a mocked Supabase client rather than a live database.       |
 | [`feature-folders.md`](feature-folders.md)                 | Feature code lives in `src/features/<feature>/` and owns its own components, hooks, and types.                                         |
 | [`bom-structure.md`](bom-structure.md)                     | BOM hierarchy is derived from `linkedBomId` and never stored; "is this a product" is declared on `parts.isEndItem` and never inferred. |
+| [`perceived-performance.md`](perceived-performance.md)     | Cache the session per request, mutate optimistically, suppress your own realtime echo, and shape skeletons like the page they replace. |
+| [`system-roles.md`](system-roles.md)                       | Four seeded roles, what Manager must never hold, and why a change to `DEFAULT_ROLES` needs a backfill migration.                       |
