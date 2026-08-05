@@ -49,7 +49,7 @@
     "swallowed-error": 1
   },
   "src/app/(dashboard)/parts/page.tsx": {
-    "raw-fetch": 9,
+    "raw-fetch": 7,
     "swallowed-error": 1
   },
   "src/app/(dashboard)/profile/page.tsx": {

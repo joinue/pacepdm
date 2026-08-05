@@ -6,7 +6,7 @@
 routes-total: 102
 routes-wrapped: 32
 unwrapped-route: 330
-raw-fetch: 112
+raw-fetch: 110
 generic-error-toast: 14
 swallowed-error: 11
 token-violations: 6
@@ -182,7 +182,9 @@ Things that will trip you up:
 node scripts/lint-conventions.mjs --list raw-fetch
 ```
 
-Worst offenders: `vault/file-detail-panel.tsx` (13), `admin/workflows/page.tsx` (10), `parts/page.tsx` (9), `parts/components/part-form-dialog.tsx` (8), `vault/upload-file-dialog.tsx` (7), `admin/lifecycle/page.tsx` (7).
+Worst offenders: `vault/file-detail-panel.tsx` (13), `admin/workflows/page.tsx` (10), `parts/components/part-form-dialog.tsx` (8), `vault/upload-file-dialog.tsx` (7), `admin/lifecycle/page.tsx` (7), `parts/page.tsx` (7).
+
+Two of `parts/page.tsx`'s came out while fixing a bug, and the bug is the argument for the whole item: `loadPartDetail` used bare `fetch` with no staleness guard, so a response that started before a write could land after it and silently revert the UI. `useFetch`/`fetchJson` do not fix that on their own, but the routine that reaches for them is the one that notices.
 
 Reads → `useFetch`. Mutations → `fetchJson` in the handler, then `refetch()`. Always `toast.error(errorMessage(err))` in the catch. Legitimate exceptions (streamed zips, `FormData` uploads) take a `lint-conventions-allow: raw-fetch` comment with the reason. → [`../decisions/data-fetching.md`](../decisions/data-fetching.md)
 

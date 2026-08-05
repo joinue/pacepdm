@@ -76,6 +76,8 @@ function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: n
 export default function PartsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  /** Monotonic id for detail fetches; only the latest may write state. */
+  const detailRequestSeq = useRef(0);
   const user = useTenantUser();
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,12 +149,16 @@ export default function PartsPage() {
     async (isEndItem: boolean) => {
       if (!selectedPartId) return;
       try {
-        await fetchJson(`/api/parts/${selectedPartId}`, {
+        const updated = await fetchJson<{ isEndItem: boolean }>(`/api/parts/${selectedPartId}`, {
           method: "PUT",
           body: { isEndItem },
         });
-        setDetail((prev) => (prev ? { ...prev, isEndItem } : prev));
-        toast.success(isEndItem ? "Marked as an end item" : "No longer an end item");
+        // Trust the row the server wrote, not the value we sent — and bump
+        // the sequence so a detail fetch already in flight cannot overwrite
+        // it with a pre-write snapshot.
+        detailRequestSeq.current++;
+        setDetail((prev) => (prev ? { ...prev, isEndItem: updated.isEndItem } : prev));
+        toast.success(updated.isEndItem ? "Marked as an end item" : "No longer an end item");
       } catch (err) {
         toast.error(errorMessage(err));
       }
@@ -160,17 +166,38 @@ export default function PartsPage() {
     [selectedPartId]
   );
 
+  /**
+   * Load a part's detail, ignoring any response that has been overtaken.
+   *
+   * Three realtime subscriptions call this, and one of them fires on the
+   * very write the user just made — so a fetch can start BEFORE that write
+   * commits and land AFTER the UI has already shown the new value, silently
+   * reverting it. That is what made the End item checkbox tick and then
+   * immediately untick.
+   *
+   * The sequence number is the same guard `useVaultContents` uses for the
+   * same reason: only the most recently issued request may write state.
+   */
   const loadPartDetail = useCallback(async (partId: string) => {
+    const seq = ++detailRequestSeq.current;
+    const isCurrent = () => detailRequestSeq.current === seq;
+
     setSelectedPartId(partId);
     setLoadingDetail(true);
-    const [detailRes, whereUsedRes] = await Promise.all([
-      fetch(`/api/parts/${partId}`),
-      fetch(`/api/parts/${partId}/where-used`),
-    ]);
-    const [detailData, whereUsedData] = await Promise.all([detailRes.json(), whereUsedRes.json()]);
-    setDetail(detailData);
-    setPartWhereUsed(whereUsedRes.ok ? whereUsedData : null);
-    setLoadingDetail(false);
+    try {
+      const [detailData, whereUsedData] = await Promise.all([
+        fetchJson<PartDetail>(`/api/parts/${partId}`),
+        fetchJson<PartWhereUsed>(`/api/parts/${partId}/where-used`).catch(() => null),
+      ]);
+      if (!isCurrent()) return;
+      setDetail(detailData);
+      setPartWhereUsed(whereUsedData);
+    } catch (err) {
+      if (!isCurrent()) return;
+      toast.error(errorMessage(err));
+    } finally {
+      if (isCurrent()) setLoadingDetail(false);
+    }
   }, []);
 
   useEffect(() => {
