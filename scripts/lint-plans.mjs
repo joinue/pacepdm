@@ -112,6 +112,23 @@ const METRICS = {
   /** Migrations declaring an ERP `externalId` column. 0 until we add one. */
   "erp-external-id": () =>
     grepCountFiles(join(ROOT, "supabase/migrations"), /\bexternalId\b/, isMigration),
+
+  // ── Change-control gates (docs/plans/change-control.md) ──
+  /** Revising a released BOM. 1 since the route landed; here so the plan
+   *  cannot claim the dead end still exists. */
+  "bom-revise-route": () =>
+    countFiles(join(ROOT, "src/app/api/boms"), (p) =>
+      p.replace(/\\/g, "/").endsWith("/revise/route.ts")
+    ),
+  /** Migrations teaching `implement_eco` about BOM items. 0 until one does —
+   *  an ECO can record a BOM revision today but implementing does not act on
+   *  it, which is the biggest remaining gap in the change loop. */
+  "eco-implements-boms": () =>
+    grepCountFiles(
+      join(ROOT, "supabase/migrations"),
+      /implement_eco[\s\S]*?"?bomId"?/,
+      isMigration
+    ),
 };
 
 // ─── Scan ───────────────────────────────────────────────────────────────────
