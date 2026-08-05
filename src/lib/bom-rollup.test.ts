@@ -181,3 +181,72 @@ describe("wouldCreateCycle", () => {
     expect(wouldCreateCycle("a", "b", mapOf(a, b, c))).toBeNull();
   });
 });
+
+describe("computeBomRollup — configure-to-order options", () => {
+  // The NANO-1000S pattern: a BOM carries every variant of an option group
+  // side by side, and exactly one of them ships on any given machine.
+  const optionLeaf = (
+    id: string,
+    itemNumber: string,
+    name: string,
+    quantity: number,
+    unitCost: number | null,
+    optionGroup: string
+  ): RollupBomItem => ({
+    id,
+    bomId: "",
+    linkedBomId: null,
+    itemNumber,
+    partNumber: null,
+    name,
+    quantity,
+    unit: "EA",
+    unitCost,
+    optionGroup,
+  });
+
+  const machine = bom("b1", "NANO-1000S", [
+    leaf("i1", "1", "Frame", 1, 100),
+    leaf("i2", "2", "Motor", 1, 250),
+    optionLeaf("i3", "3", "C-110V-001", 1, 40, "Voltage"),
+    optionLeaf("i4", "4", "C-220V-002", 1, 55, "Voltage"),
+    optionLeaf("i5", "5", "PW-1000A", 3, 10, "Bowl size"),
+  ]);
+  const result = computeBomRollup("b1", new Map([["b1", machine]]));
+
+  it("excludes option lines from the base-configuration total", () => {
+    // Frame 100 + Motor 250. Neither voltage nor the bowl is included.
+    expect(result.totalCost).toBe(350);
+  });
+
+  it("totals option lines separately as an upper bound", () => {
+    // 40 + 55 + (3 × 10). Not a buildable configuration, and documented
+    // as such — both voltages cannot ship on one machine.
+    expect(result.optionCost).toBe(125);
+    expect(result.optionItemCount).toBe(3);
+  });
+
+  it("counts only base lines as leaf items", () => {
+    expect(result.leafItemCount).toBe(2);
+    // Every line is still emitted, options included, so the UI can group them.
+    expect(result.totalLineCount).toBe(5);
+  });
+
+  it("tags each line with its group so the UI can partition", () => {
+    const byName = new Map(result.lines.map((l) => [l.name, l.optionGroup]));
+    expect(byName.get("Frame")).toBeNull();
+    expect(byName.get("C-110V-001")).toBe("Voltage");
+    expect(byName.get("PW-1000A")).toBe("Bowl size");
+  });
+
+  it("still reports missing costs across both base and option lines", () => {
+    const withGaps = bom("b2", "X", [
+      leaf("i1", "1", "NoCost", 1, null),
+      optionLeaf("i2", "2", "OptNoCost", 1, null, "Voltage"),
+    ]);
+    const r = computeBomRollup("b2", new Map([["b2", withGaps]]));
+    expect(r.itemsMissingCost).toBe(2);
+    expect(r.totalCost).toBe(0);
+    expect(r.optionCost).toBe(0);
+  });
+});

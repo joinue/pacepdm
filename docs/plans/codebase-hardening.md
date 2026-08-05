@@ -3,8 +3,8 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 100
-routes-wrapped: 30
+routes-total: 101
+routes-wrapped: 31
 unwrapped-route: 330
 raw-fetch: 112
 generic-error-toast: 14
@@ -41,8 +41,9 @@ this plan was written under, and it reorders the priorities below.
   loading real data" items get harder with every part entered, so they should be
   settled before this queue is resumed.
 
-Suggested order: ~~undelete~~ → **dev database → verify backups** → BOM import
-(in the integration plan) → then back to item 1 below.
+Suggested order: ~~undelete~~ → ~~BOM import~~ → **dev database → verify
+backups** → item master import (in the integration plan) → then back to item 1
+below.
 
 Both remaining operational items are yours to do in the Supabase console; there
 is nothing in this repo to change for either.
@@ -88,7 +89,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                               | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                              | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                              | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **30 / 100**                        | 100                                                   |
+| Routes on `withTenant`                | 0                | **31 / 101**                        | 101                                                   |
 | `raw-fetch` in client components      | 112              | **112**                             | 0                                                     |
 | `generic-error-toast`                 | 14               | **14**                              | 0                                                     |
 | `swallowed-error`                     | 11               | **11**                              | 0                                                     |
@@ -139,9 +140,10 @@ backup. Do the restore once, into the dev project from item 4.
 
 ### 1. Finish the route wrapper — 70 routes
 
-> Still 70. `routes-wrapped` went 28 → 30 because the trash work **added** two
-> routes that were wrapped from the start, not because two were converted. The
-> remaining count only falls when an old handler is rewritten.
+> Still 70. `routes-wrapped` has gone 28 → 31 because the trash and BOM-import
+> work **added** three routes that were wrapped from the start, not because any
+> were converted. The remaining count only falls when an old handler is
+> rewritten.
 
 Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 

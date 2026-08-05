@@ -20,6 +20,14 @@ export interface RollupBomItem {
   quantity: number;
   unit: string;
   unitCost: number | null;
+  /**
+   * Configure-to-order group ("Voltage"), or null/absent for the ordinary
+   * always-included lines. A BOM holds every variant in a group — the
+   * NANO-1000S carries 110V and 220V parts side by side — so exactly one
+   * member ships on any given machine. Optional so callers that predate
+   * migration 043 still typecheck.
+   */
+  optionGroup?: string | null;
 }
 
 export interface RollupBom {
@@ -48,12 +56,28 @@ export interface RollupLine {
   depth: number;
   /** True for items that link to another BOM (a sub-assembly node). */
   isSubAssembly: boolean;
+  /** Set when the line is one variant of a configure-to-order group. */
+  optionGroup: string | null;
 }
 
 export interface RollupResult {
-  /** Sum of `extendedCost` across every leaf line. Null cost lines contribute 0. */
+  /**
+   * Sum of `extendedCost` across every leaf line in the BASE configuration.
+   * Null cost lines contribute 0, and option lines are excluded entirely —
+   * a machine ships with one member of each option group, so adding all of
+   * them would overstate. See `optionCost`.
+   */
   totalCost: number;
-  /** Number of leaf items (sub-assembly nodes themselves are not counted). */
+  /**
+   * Sum of `extendedCost` across every option line, i.e. what it would come
+   * to if *every* variant were fitted at once. That is not a buildable
+   * configuration — it is an upper bound, useful for showing the spread of
+   * the configurable content, not a price.
+   */
+  optionCost: number;
+  /** Number of option lines, across all groups. */
+  optionItemCount: number;
+  /** Number of base-configuration leaf items (sub-assembly nodes excluded). */
   leafItemCount: number;
   /** Number of distinct lines in the flattened tree (incl. sub-assembly headers). */
   totalLineCount: number;
@@ -103,6 +127,8 @@ export function computeBomRollup(
 
   const lines: RollupLine[] = [];
   let totalCost = 0;
+  let optionCost = 0;
+  let optionItemCount = 0;
   let leafItemCount = 0;
   let maxDepth = 0;
   let itemsMissingCost = 0;
@@ -155,6 +181,7 @@ export function computeBomRollup(
             extendedCost: null,
             depth,
             isSubAssembly: true,
+            optionGroup: item.optionGroup ?? null,
           });
           continue;
         }
@@ -173,6 +200,7 @@ export function computeBomRollup(
           extendedCost: null,
           depth,
           isSubAssembly: true,
+          optionGroup: item.optionGroup ?? null,
         });
 
         // Recurse into the sub-BOM. Quantity multiplies through:
@@ -183,9 +211,19 @@ export function computeBomRollup(
 
       // Leaf line — actually contributes to cost
       const ext = item.unitCost !== null ? item.unitCost * effectiveQty : null;
-      if (ext !== null) totalCost += ext;
+      const optionGroup = item.optionGroup ?? null;
+
+      // Option lines are counted apart from the base configuration. Only one
+      // member of a group ever ships, so folding them into `totalCost` would
+      // charge a machine for both its 110V and its 220V parts.
+      if (optionGroup) {
+        if (ext !== null) optionCost += ext;
+        optionItemCount++;
+      } else {
+        if (ext !== null) totalCost += ext;
+        leafItemCount++;
+      }
       if (item.unitCost === null) itemsMissingCost++;
-      leafItemCount++;
 
       lines.push({
         path,
@@ -201,6 +239,7 @@ export function computeBomRollup(
         extendedCost: ext,
         depth,
         isSubAssembly: false,
+        optionGroup,
       });
     }
 
@@ -211,6 +250,8 @@ export function computeBomRollup(
 
   return {
     totalCost,
+    optionCost,
+    optionItemCount,
     leafItemCount,
     totalLineCount: lines.length,
     maxDepth,

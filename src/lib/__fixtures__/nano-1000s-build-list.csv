@@ -1,0 +1,232 @@
+﻿Flag,Description,Type,Part,Quantity,UOM,IsVariableQuantity,MinQuantity,MaxQuantity,OptionGroup,OptionGroupPrompt,IsGroupDefault,PriceAdjustment,IsOneTimeItem,IsStage,StageBOMNumber,ConfigurationSortOrder
+BOM,NANO-1000S,"NANO-1000S single wheel, 8 and 10-inch diameter wheel polishing machine (part no. NANO-1000S)  (polishing wheels sold separately)",TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S,Finished Good,NANO-1000S,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,90
+Item,Add NANO-1000S Casting-Components,Raw Good,NANO1000S Casting-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-1000S_2000S Plastic-Components,Raw Good,NANO-1000S_2000S Plastic-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S Plastic-Components,Raw Good,NANO-1000S Plastic-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Sheet-Metal-Components,Raw Good,NANO-S Sheet-Metal-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S Sheet-Metal-Components,Raw Good,NANO-1000S Sheet-Metal-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Machined-Components,Raw Good,NANO-S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S_2000S Machined-Components,Raw Good,NANO-1000S_2000S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S Machined-Components,Raw Good,NANO-1000S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Electrical-Components,Raw Good,NANO-S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add NANO-1000S_2000S Electrical-Components,Raw Good,NANO-1000S_2000S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S Electrical-Components,Raw Good,NANO-1000S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Standard-Components,Raw Good,NANO-S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,5
+Item,Add NANO-1000S_2000S Standard-Components,Raw Good,NANO-1000S_2000S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add NANO-1000S Standard-Components,Raw Good,NANO-1000S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Labels-Stickers-Parts,Raw Good,NANO-S Labels-Stickers-Parts,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,6
+Item,Add NANO-1000S Labels-Stickers-Parts,Raw Good,NANO-1000S Labels-Stickers-Parts,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-1000S Packaging-Components,Raw Good,NANO-1000S Packaging-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Included-Accessories-Components,Raw Good,NANO-S Included-Accessories-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,8
+,,,,,,,,,,,,,,,,
+Item,Add NANO-1000S_2000S Optional-Accessories-Components,Raw Good,NANO-1000S_2000S Optional-Accessories-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-S Customer-Specific-Components,Raw Good,NANO-S Customer-Specific-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,10
+Item,Add NANO-1000S_2000S Customer-Specific-Components,Raw Good,NANO-1000S_2000S Customer-Specific-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+Item,Add NANO-1000S_2000S Assemblies,Raw Good,NANO-1000S_2000S Assemblies,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-1000S Casting-Components,NANO-1000S Casting-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Casting-Components,Finished Good,NANO-1000S Casting-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-M-001-R2,Raw Good,N1S-M-001-R2,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,66
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-1000S_2000S Plastic-Components,NANO-1000S_2000S Plastic-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Plastic-Components,Finished Good,NANO-1000S_2000S Plastic-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-002,Raw Good,N1S-002,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,82
+Item,Add N1S-003,Raw Good,N1S-003,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,83
+BOM,NANO-1000S Plastic-Components,NANO-1000S Plastic-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Plastic-Components,Finished Good,NANO-1000S Plastic-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-001,Raw Good,N1S-001,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,86
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Sheet-Metal-Components,NANO-S Sheet-Metal-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Sheet-Metal-Components,Finished Good,NANO-S Sheet-Metal-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N12S-F-002,Raw Good,N12S-F-002,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,66
+BOM,NANO-1000S Sheet-Metal-Components,NANO-1000S Sheet-Metal-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Sheet-Metal-Components,Finished Good,NANO-1000S Sheet-Metal-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-F-001,Raw Good,N1S-F-001,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+Item,Add N1S-F-003-R1,Raw Good,N1S-F-003-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,1
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Machined-Components,NANO-S Machined-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Machined-Components,Finished Good,NANO-S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1-002PEG-R1,Raw Good,N1-002PEG-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add N1S-M-004-R1,Raw Good,N1S-M-004-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add N1S-M-005,Raw Good,N1S-M-005,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,10
+Item,Add N1S-M-006-R2,Raw Good,N1S-M-006-R2,4,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,14
+Item,Add N1S-M-007,Raw Good,N1S-M-007,4,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,15
+Item,Add N1S-M-012-R1,Raw Good,N1S-M-012-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+BOM,NANO-1000S_2000S Machined-Components,NANO-1000S_2000S Machined-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Machined-Components,Finished Good,NANO-1000S_2000S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1-002A,Raw Good,N1-002A,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,20
+Item,Add N1S-M-002-R1,Raw Good,N1S-M-002-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add N1S-M-003-R1,Raw Good,N1S-M-003-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+BOM,NANO-1000S Machined-Components,NANO-1000S Machined-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Machined-Components,Finished Good,NANO-1000S Machined-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-M-008,Raw Good,N1S-M-008,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,80
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Electrical-Components,NANO-S Electrical-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Electrical-Components,Finished Good,NANO-S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add 80MM-FAN-10,Raw Good,80MM-FAN-10,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,58
+Item,Add COM-2P-MALE,Raw Good,COM-2P-MALE,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,78
+Item,Add E-STOP-LABEL,Raw Good,E-STOP-LABEL,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,73
+Item,Add PCB-24V,Raw Good,PCB-24V,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,89
+Item,Add POW-DB-F,Raw Good,POW-DB-F,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,76
+Item,Add POW-E-STOP-HEAD,Raw Good,POW-E-STOP-HEAD,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,11
+Item,Add POW-E-STOP-1CR,Raw Good,POW-E-STOP-1CR,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,27
+Item,Add PS-24V-LRS75-24,Raw Good,PS-24V-LRS75-24,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,16
+Item,Add SOL-24V-R,Raw Good,SOL-24V-R,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,65
+Item,Add TS-55C,Raw Good,TS-55C,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,71
+BOM,NANO-1000S_2000S Electrical-Components,NANO-1000S_2000S Electrical-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Electrical-Components,Finished Good,NANO-1000S_2000S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add MD-110220-SVO,Raw Good,MD-110220-SVO,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,64
+Item,Add MOT-SVO-750,Raw Good,MOT-SVO-750,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,63
+Item,Add POW-E-SWITCH,Raw Good,POW-E-SWITCH,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,75
+BOM,NANO-1000S Electrical-Components,NANO-1000S Electrical-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Electrical-Components,Finished Good,NANO-1000S Electrical-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-WIRES,Raw Good,N1S-WIRES,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,58
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Standard-Components,NANO-S Standard-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Standard-Components,Finished Good,NANO-S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add DB-6-8-12,Raw Good,DB-6-8-12,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,28
+Item,Add HOSE-32MM-CLP,Raw Good,HOSE-32MM-CLP,9,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,57
+Item,Add KEY-6-6-20,Raw Good,KEY-6-6-20,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,52
+Item,Add M8-FEET,Raw Good,M8-FEET,5,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,40
+Item,Add N1-002-O-Ring,Raw Good,N1-002-O-Ring,3,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,19
+Item,Add N1S-P-001,Raw Good,N1S-P-001,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,29
+Item,Add N1S-P-002,Raw Good,N1S-P-002,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,33
+Item,Add N1S-P-005,Raw Good,N1S-P-005,4,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,45
+Item,Add N1S-P-006,Raw Good,N1S-P-006,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,46
+Item,Add N1S-P-008,Raw Good,N1S-P-008,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,60
+Item,Add N1S-P-009-531,Raw Good,N1S-P-009-531,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,28
+Item,Add P-3/4-25FF,Raw Good,P-3/4-25FF,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,9
+Item,Add P-3/4-25MF,Raw Good,P-3/4-25MF,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,35
+Item,Add P-3/4-M-25BARB,Raw Good,P-3/4-M-25BARB,3,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,34
+Item,Add PTC-1/4-E-M-6MM,Raw Good,PTC-1/4-E-M-6MM,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,69
+Item,Add PTC-1/4-M-8MM,Raw Good,PTC-1/4-M-8MM,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,38
+Item,Add PTC-E-6-6MM,Raw Good,PTC-E-6-6MM,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,38
+Item,Add Tube-6mm-200m,Raw Good,Tube-6mm-200m,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,23
+Item,Add P-3/4-25MM,Raw Good,P-3/4-25MM,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,37
+BOM,NANO-1000S_2000S Standard-Components,NANO-1000S_2000S Standard-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Standard-Components,Finished Good,NANO-1000S_2000S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add TC-52-62-7,Raw Good,TC-52-62-7,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,27
+Item,Add N2S-P-003-S,Raw Good,N2S-P-003-S,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,2
+BOM,NANO-1000S Standard-Components,NANO-1000S Standard-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Standard-Components,Finished Good,NANO-1000S Standard-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-P-004,Raw Good,N1S-P-004,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,21
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Labels-Stickers-Parts,NANO-S Labels-Stickers-Parts,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Labels-Stickers-Parts,Finished Good,NANO-S Labels-Stickers-Parts,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add SNP,Raw Good,SNP,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,27
+Item,Add ST-CDPSBRC-1,Raw Good,ST-CDPSBRC-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,31
+Item,Add ST-DRAIN-1,Raw Good,ST-DRAIN-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,31
+Item,Add ST-FEMTO-1,Raw Good,ST-FEMTO-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,29
+Item,Add ST-ON/OFF-1,Raw Good,ST-ON/OFF-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,44
+Item,Add ST-POWER-1,Raw Good,ST-POWER-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,44
+Item,Add ST-WATER-1,Raw Good,ST-WATER-1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,44
+BOM,NANO-1000S Labels-Stickers-Parts,NANO-1000S Labels-Stickers-Parts,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Labels-Stickers-Parts,Finished Good,NANO-1000S Labels-Stickers-Parts,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-E-001,Raw Good,N1S-E-001,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,53
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-1000S Packaging-Components,NANO-1000S Packaging-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S Packaging-Components,Finished Good,NANO-1000S Packaging-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-B-001A,Raw Good,N1S-B-001A,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,59
+Item,Add N1S-B-001B,Raw Good,N1S-B-001B,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,60
+Item,Add N1S-B-001C,Raw Good,N1S-B-001C,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,61
+Item,Add N1S-B-001D,Raw Good,N1S-B-001D,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,62
+Item,Add N1S-B-002-R1,Raw Good,N1S-B-002-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,63
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Included-Accessories-Components,NANO-S Included-Accessories-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Included-Accessories-Components,Finished Good,NANO-S Included-Accessories-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-P-010,Raw Good,N1S-P-010,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,86
+Item,Add P-3/4-E-25FF,Raw Good,P-3/4-E-25FF,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,15
+Item,Add TEFLON-T,Raw Good,TEFLON-T,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,38
+Item,Add TUBE-8MM-100,Raw Good,TUBE-8MM-100,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,19
+Item,Add HOSE-25-32MM,Raw Good,HOSE-25-32MM,0.05,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,87
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-1000S_2000S Optional-Accessories-Components,NANO-1000S_2000S Optional-Accessories-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Optional-Accessories-Components,Finished Good,NANO-1000S_2000S Optional-Accessories-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add PTM-125-005,Raw Good,PTM-125-005,3,ea,FALSE,0,0,Paper ring size ,What paper ring size ordered,TRUE,0,FALSE,FALSE,,84
+Item,Add PTM-125-006,Raw Good,PTM-125-006,3,ea,FALSE,0,0,Paper ring size ,What paper ring size ordered,TRUE,0,FALSE,FALSE,,84
+Item,Add PW-1000A,Raw Good,PW-1000A,3,ea,FALSE,0,0,Bowl size,What bowl size ordered,TRUE,0,FALSE,FALSE,,84
+Item,Add PW-800A,Raw Good,PW-800A,3,ea,FALSE,0,0,Bowl size,What bowl size ordered,TRUE,0,FALSE,FALSE,,84
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-S Customer-Specific-Components,NANO-S Customer-Specific-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-S Customer-Specific-Components,Finished Good,NANO-S Customer-Specific-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add C-220V-002,Raw Good,C-220V-002,1,ea,FALSE,0,0,Voltage,What Voltage ordered,TRUE,0,FALSE,FALSE,,47
+Item,Add C-220V-003,Raw Good,C-220V-003,1,ea,FALSE,0,0,Voltage,What Voltage ordered,TRUE,0,FALSE,FALSE,,44
+Item,Add C-220V-004,Raw Good,C-220V-004,1,ea,FALSE,0,0,Voltage,What Voltage ordered,TRUE,0,FALSE,FALSE,,24
+BOM,NANO-1000S_2000S Customer-Specific-Components,NANO-1000S_2000S Customer-Specific-Components,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Customer-Specific-Components,Finished Good,NANO-1000S_2000S Customer-Specific-Components,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add C-110V-001,Raw Good,C-110V-001,1,ea,FALSE,0,0,Voltage,What Voltage ordered,TRUE,0,FALSE,FALSE,,44
+Item,Add FUSE-6A,Raw Good,FUSE-6A,1,ea,FALSE,0,0,Fuse,What Fuse ordered,TRUE,0,FALSE,FALSE,,44
+Item,Add FUSE-520-12F,Raw Good,FUSE-520-12F,1,ea,FALSE,0,0,Fuse,What Fuse ordered,TRUE,0,FALSE,FALSE,,44
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+BOM,NANO-1000S_2000S Assemblies,NANO-1000S_2000S Assemblies,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create NANO-1000S_2000S Assemblies,Finished Good,NANO-1000S_2000S Assemblies,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-A-SA,Raw Good,N1S-A-SA,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,11
+Item,Add P-FAUCET,Raw Good,P-FAUCET,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,76
+Item,Add N1S-A-SCA,Raw Good,N1S-A-SCA,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,11
+,,,,,,,,,,,,,,,,
+BOM,N1S-A-SA,NANO-1000/2000S Spindle Assembly,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create N1S-A-SA,Finished Good,N1S-A-SA,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-SA-A-R4,Raw Good,N1S-SA-A-R4,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add N1S-SA-B-R2,Raw Good,N1S-SA-B-R2,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add BB-17-40,Raw Good,BB-17-40,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,28
+Item,Add SN-EX-17,Raw Good,SN-EX-17,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,53
+,,,,,,,,,,,,,,,,
+BOM,P-FAUCET,NANO-1000/2000S Faucet,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create P-FAUCET,Finished Good,P-FAUCET,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add P-FAUCET-A,Raw Good,P-FAUCET-A,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,11
+Item,Add P-FAUCET-B,Raw Good,P-FAUCET-B,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,12
+Item,Add P-FAUCET-C,Raw Good,P-FAUCET-C,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,13
+Item,Add P-FAUCET-D,Raw Good,P-FAUCET-D,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,30
+Item,Add P-FAUCET-F,Raw Good,P-FAUCET-F,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,31
+Item,Add P-FAUCET-G,Raw Good,P-FAUCET-G,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,32
+Item,Add P-FAUCET-H,Raw Good,P-FAUCET-H,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,47
+Item,Add P-FAUCET-I,Raw Good,P-FAUCET-I,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,49
+Item,Add PTC-M6-M-6MM,Raw Good,PTC-M6-M-6MM,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,73
+,,,,,,,,,,,,,,,,
+BOM,N1S-A-SCA,NANO-1000/2000S Screen Post Assembly,TRUE,1,,Never,None,Imported from QuickBooks,,,,,,,,
+Item,Create N1S-A-SCA,Finished Good,N1S-A-SCA,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,4
+Item,Add N1S-SCA-D-R2,Raw Good,N1S-SCA-D-R2,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,66
+Item,Add N1S-SCA-E,Raw Good,N1S-SCA-E,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,23
+Item,Add N1S-SCA-F-R1,Raw Good,N1S-SCA-F-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,2
+Item,Add N1S-SCA-AB,Raw Good,N1S-SCA-AB,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add N1S-SCA-C-R1,Raw Good,N1S-SCA-C-R1,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add NUT-8-M6-10,Raw Good,NUT-8-M6-10,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,51
+Item,Add SCREW-8-M6-12,Raw Good,SCREW-8-M6-12,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,79
+Item,Add N1S-WIRES-A,Raw Good,N1S-WIRES-A,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,58
+Item,Add NANO-SCR-PCB,Raw Good,NANO-SCR-PCB,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,66
+Item,Add SCR-2-inch,Raw Good,SCR-2-inch,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,67
+Item,Add M3-NYLS-3,Raw Good,M3-NYLS-3,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,28
+Item,Add GLD-18,Raw Good,GLD-18,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,27
+Item,Add NANOS-T,Raw Good,NANOS-T,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,69
+Item,Add N1S-SA-B-R2,Raw Good,N1S-SA-B-R2,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,3
+Item,Add BB-17-40,Raw Good,BB-17-40,2,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,28
+Item,Add SN-EX-17,Raw Good,SN-EX-17,1,ea,FALSE,0,0,,,TRUE,0,FALSE,FALSE,,53
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,

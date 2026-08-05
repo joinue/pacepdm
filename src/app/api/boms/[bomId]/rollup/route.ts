@@ -84,7 +84,9 @@ export async function GET(
           .in("id", ids),
         db
           .from("bom_items")
-          .select("id, bomId, linkedBomId, itemNumber, partNumber, name, quantity, unit, unitCost")
+          .select(
+            "id, bomId, linkedBomId, itemNumber, partNumber, name, quantity, unit, unitCost, optionGroup"
+          )
           .in("bomId", ids)
           .order("sortOrder"),
       ]);
@@ -102,6 +104,7 @@ export async function GET(
           quantity: item.quantity ?? 0,
           unit: item.unit || "EA",
           unitCost: item.unitCost,
+          optionGroup: item.optionGroup ?? null,
         });
         itemsByBom.set(item.bomId, list);
         // Queue sub-BOMs for the next BFS round, skipping ones we've
