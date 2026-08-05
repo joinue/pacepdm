@@ -3,8 +3,8 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 101
-routes-wrapped: 31
+routes-total: 102
+routes-wrapped: 32
 unwrapped-route: 330
 raw-fetch: 112
 generic-error-toast: 14
@@ -139,10 +139,10 @@ backup. Do the restore once, into the dev project from item 4.
 
 ### 1. Finish the route wrapper — 70 routes
 
-> Still 70. `routes-wrapped` has gone 28 → 31 because the trash and BOM-import
-> work **added** three routes that were wrapped from the start, not because any
-> were converted. The remaining count only falls when an old handler is
-> rewritten.
+> Still 70. `routes-wrapped` has gone 28 → 32 because the trash, BOM-import and
+> relink work **added** four routes that were wrapped from the start, not
+> because any were converted. The remaining count only falls when an old
+> handler is rewritten.
 
 Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 

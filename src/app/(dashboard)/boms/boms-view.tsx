@@ -100,6 +100,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   }, [notificationCounts.byCategory.boms]);
 
   const [boms, setBoms] = useState<BOM[]>([]);
+  const [relinkingId, setRelinkingId] = useState<string | null>(null);
   // Products vs sub-assemblies, derived from `usedIn` — which the list
   // endpoint computes from `bom_items.linkedBomId`. The split therefore
   // follows the real structure and cannot drift from it.
@@ -130,6 +131,36 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
       setLoading(false);
     }
   }, []);
+
+  /**
+   * Repair a sub-assembly link broken by a typo in the source data. The
+   * server decides what is safe to relink — this only asks. Reloading the
+   * list is what moves the BOM out of Products and into Sub-assemblies.
+   */
+  const handleRelink = useCallback(
+    async (bom: BOM) => {
+      setRelinkingId(bom.id);
+      try {
+        const result = await fetchJson<{
+          repaired: { bomName: string }[];
+          orphanedParts: string[];
+        }>(`/api/boms/${bom.id}/relink`, { method: "POST" });
+
+        const parents = [...new Set(result.repaired.map((r) => r.bomName))];
+        toast.success(`Linked ${bom.name} into ${parents.join(", ")}`, {
+          description: result.orphanedParts.length
+            ? `"${result.orphanedParts.join('", "')}" is no longer referenced by any BOM — you may want to delete it from Parts.`
+            : undefined,
+        });
+        await loadBoms();
+      } catch (err) {
+        toast.error(errorMessage(err));
+      } finally {
+        setRelinkingId(null);
+      }
+    },
+    [loadBoms]
+  );
 
   const loadItems = useCallback(async (bomId: string) => {
     setLoadingItems(true);
@@ -397,6 +428,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
               selectedBomId={selectedBomId}
               bomUnread={bomUnread}
               onSelect={selectBom}
+              canEdit={canEdit}
+              relinkingId={relinkingId}
+              onRelink={handleRelink}
             />
             {groups.subAssemblies.length > 0 && (
               <BomGroupSection
@@ -408,6 +442,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                 bomUnread={bomUnread}
                 onSelect={selectBom}
                 showParent
+                canEdit={canEdit}
+                relinkingId={relinkingId}
+                onRelink={handleRelink}
               />
             )}
           </div>
@@ -664,6 +701,9 @@ function BomGroupSection({
   bomUnread,
   onSelect,
   showParent = false,
+  canEdit,
+  relinkingId,
+  onRelink,
 }: {
   label: string;
   count?: number;
@@ -674,6 +714,9 @@ function BomGroupSection({
   bomUnread: Record<string, number>;
   onSelect: (id: string) => void;
   showParent?: boolean;
+  canEdit: boolean;
+  relinkingId: string | null;
+  onRelink: (bom: BOM) => void;
 }) {
   if (boms.length === 0) return null;
 
@@ -728,14 +771,33 @@ function BomGroupSection({
               {/* A top-level BOM that something meant to reference but
                   misspelt. Without this it sits among the products looking
                   deliberate — which is how NANO-1000S Casting-Components
-                  read after the first import. */}
+                  read after the first import. The fix is offered here
+                  because a warning with no remedy just moves the work. */}
               {bom.orphanHint && (
-                <p className="text-3xs text-warning mt-0.5 flex items-start gap-1">
-                  <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
-                  <span className="min-w-0">
-                    Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
-                  </span>
-                </p>
+                <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5">
+                  <p className="text-3xs text-warning flex items-start gap-1">
+                    <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
+                    <span className="min-w-0">
+                      Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
+                    </span>
+                  </p>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-1.5 h-6 text-3xs"
+                      disabled={relinkingId === bom.id}
+                      onClick={(e) => {
+                        // The card itself navigates; repairing is a different
+                        // intent and must not also open the BOM.
+                        e.stopPropagation();
+                        onRelink(bom);
+                      }}
+                    >
+                      {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
+                    </Button>
+                  )}
+                </div>
               )}
               <div className="flex items-center gap-1.5 mt-0.5">
                 <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
