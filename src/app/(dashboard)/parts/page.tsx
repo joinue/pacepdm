@@ -136,6 +136,8 @@ export default function PartsPage() {
     setSelectedPartId(null);
     setDetail(null);
     setPartWhereUsed(null);
+    // lint-conventions-allow: list-route-navigation — this CLEARS the
+    // ?partId= deep link on close, which is the opposite of dropping an id.
     router.replace("/parts", { scroll: false });
   }, [router]);
 

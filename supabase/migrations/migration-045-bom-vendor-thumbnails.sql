@@ -1,0 +1,46 @@
+-- PACE PDM Migration 045: thumbnails for BOMs and vendors.
+--
+-- Background
+-- ──────────
+-- Parts and files already carry a `thumbnailKey` pointing at an object in the
+-- "vault" bucket, and the app signs a short-lived URL on read (migrations 003
+-- and 024). BOMs and vendors had no equivalent, so both lists rendered as
+-- undifferentiated rows of text — the BOM tree in particular, where 26 rows of
+-- one machine's sub-assemblies read identically.
+--
+-- This adds the same column to both tables so the same code path serves all
+-- four entities: `src/lib/thumbnails.ts` on the server, `EntityThumbnail` in
+-- the UI.
+--
+-- What this migration does
+-- ────────────────────────
+-- 1. `boms.thumbnailKey`    (TEXT, nullable) — `{tenantId}/thumbnails/boms/{bomId}-{ts}.png`
+-- 2. `vendors.thumbnailKey` (TEXT, nullable) — `{tenantId}/thumbnails/vendors/{vendorId}-{ts}.png`
+--
+-- Storage objects
+-- ───────────────
+-- No new bucket: "vault" already exists and object writes happen from server
+-- routes via service_role, which bypasses storage RLS. Reads are handed to the
+-- browser as signed URLs with a 300s expiry, so no storage policy is needed —
+-- same posture as part thumbnails (migration 024).
+--
+-- RLS
+-- ───
+-- No new tables. `boms` and `vendors` are already covered by the lockdown in
+-- migration 039, and a new column inherits the table's policies.
+--
+-- Idempotency
+-- ───────────
+-- ADD COLUMN IF NOT EXISTS on both — safe to paste twice.
+--
+-- Verification
+-- ────────────
+--   select table_name, column_name
+--     from information_schema.columns
+--    where column_name = 'thumbnailKey'
+--      and table_name in ('boms', 'vendors', 'parts', 'files')
+--    order by table_name;
+--   -- expect four rows
+
+ALTER TABLE "boms" ADD COLUMN IF NOT EXISTS "thumbnailKey" TEXT;
+ALTER TABLE "vendors" ADD COLUMN IF NOT EXISTS "thumbnailKey" TEXT;

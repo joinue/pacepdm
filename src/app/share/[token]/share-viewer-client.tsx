@@ -5,7 +5,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Download, Lock, AlertTriangle, Loader2, Package, FileText, Layers } from "lucide-react";
-import { CadViewer } from "@/components/vault/cad-viewer";
+import { CadViewer } from "@/components/vault/cad-viewer-lazy";
 import { fetchJson, errorMessage, ApiError } from "@/lib/api-client";
 
 // Mirrors /api/public/share/[token] GET response.

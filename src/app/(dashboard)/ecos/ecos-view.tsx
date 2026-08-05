@@ -225,6 +225,8 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   );
 
   const clearSelection = useCallback(() => {
+    // lint-conventions-allow: list-route-navigation — deselecting IS a
+    // return to the index; there is no record to link to.
     router.push("/ecos");
   }, [router]);
 

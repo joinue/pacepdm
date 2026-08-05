@@ -243,6 +243,8 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   );
 
   const clearSelection = useCallback(() => {
+    // lint-conventions-allow: list-route-navigation — deselecting IS a
+    // return to the index; there is no record to link to.
     router.push("/boms");
   }, [router]);
 

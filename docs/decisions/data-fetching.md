@@ -60,3 +60,25 @@ So `npm run lint:conventions` now fails the build on a raw `fetch(` in a client 
 - A new client-side read means `useFetch`. If it does not fit (paginated infinite scroll, polling), extend the hook rather than opening a second pattern.
 - Every `catch` in a component ends in `toast.error(errorMessage(err))`. If you want extra context, prepend it: ``toast.error(`Could not check in: ${errorMessage(err)}`)``.
 - If a third-party call genuinely needs raw `fetch` in a component, the comment justifying it is the deliverable, not the exception.
+
+## Linking to a record
+
+A link to a record carries that record's identifier. `/boms/<id>`,
+`/parts?partId=<id>`, `/vault?fileId=<id>`, `/ecos?ecoId=<id>` — every one of
+those destinations already supports being deep-linked, and every list page
+already knows how to open the record it was given.
+
+The failure is silent, which is what makes it worth a rule: nothing errors,
+the user simply lands on an index and has to find by hand what they had
+already clicked. Four separate call sites did this — a BOM line's source
+cell, where-used rows in two different detail panels, and a file version's
+"released by" ECO link — and each of them had the id in scope and dropped it.
+
+`list-route-navigation` in [`scripts/lint-conventions.mjs`](../../scripts/lint-conventions.mjs)
+flags a bare literal navigation to a record route. It is deliberately narrow:
+a template literal or a query string cannot match, so only the shape that
+provably carries no identifier trips it.
+
+Returning to an index is legitimate — deselecting a record, a dashboard
+summary card, clearing a deep link on close. Those take a
+`lint-conventions-allow: list-route-navigation` comment saying which it is.

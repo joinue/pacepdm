@@ -53,7 +53,7 @@ import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { FileWhereUsed } from "@/lib/where-used";
-import { CadViewer } from "@/components/vault/cad-viewer";
+import { CadViewer } from "@/components/vault/cad-viewer-lazy";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { Link as LinkIcon } from "lucide-react";
 
@@ -948,7 +948,10 @@ export function FileDetailPanel({
                   {linkedParts.map((lp) => (
                     <div key={lp.id} className="flex items-center gap-2 text-xs group">
                       <Package className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <Link href="/parts" className="font-mono hover:underline shrink-0">
+                      <Link
+                        href={`/parts?partId=${lp.part.id}`}
+                        className="font-mono hover:underline shrink-0"
+                      >
                         {lp.part.partNumber}
                       </Link>
                       <span className="truncate text-muted-foreground flex-1">{lp.part.name}</span>
@@ -1054,7 +1057,7 @@ export function FileDetailPanel({
                   boms={whereUsedData.boms}
                   representsBoms={whereUsedData.representsBoms}
                   ecos={whereUsedData.ecos}
-                  onNavigateBom={() => router.push("/boms")}
+                  onNavigateBom={(bomId) => router.push(`/boms/${bomId}`)}
                   onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
                 />
               </>
@@ -1132,7 +1135,7 @@ export function FileDetailPanel({
                 </p>
                 {v.eco && (
                   <Link
-                    href="/ecos"
+                    href={`/ecos?ecoId=${v.eco.id}`}
                     className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                   >
                     <ClipboardList className="w-3 h-3" />

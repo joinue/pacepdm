@@ -206,6 +206,8 @@ export default async function DashboardPage() {
           warn={staleCheckoutsCount > 0}
         />
         <ForYouCard
+          // lint-conventions-allow: list-route-navigation — a summary card
+          // for a count of records; the index is the destination.
           href="/ecos"
           icon={ClipboardList}
           title="My open ECOs"

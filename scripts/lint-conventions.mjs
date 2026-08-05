@@ -121,6 +121,24 @@ const RULES = [
     find: (source) => matchAll(source, /(?<![.\w])fetch\s*\(/g),
   },
   {
+    id: "list-route-navigation",
+    message:
+      "navigates to a record list with no identifier — link to the record " +
+      "(/boms/<id>, /parts?partId=<id>, /vault?fileId=<id>). If this really is " +
+      '"back to the list", say so with a lint-conventions-allow comment',
+    applies: () => true,
+    // Deliberately narrow: a bare literal, no template, no query string. A
+    // link that already carries an id cannot match. Catches the shape that
+    // sent every BOM sub-assembly line to the parts index and every
+    // where-used row to the BOM index — three separate call sites that each
+    // had the id in scope and dropped it.
+    find: (source) =>
+      matchAll(
+        source,
+        /(?:router\.(?:push|replace)\(|href=)\s*["']\/(?:boms|parts|vault|ecos|vendors|releases)["']/g
+      ),
+  },
+  {
     id: "swallowed-error",
     message: "empty catch — a swallowed error becomes a spinner that never stops",
     applies: () => true,

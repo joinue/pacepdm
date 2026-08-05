@@ -172,7 +172,7 @@ export function PartDetailPanel({
             boms={partWhereUsed.boms}
             parentParts={partWhereUsed.parentParts}
             ecos={partWhereUsed.ecos}
-            onNavigateBom={() => router.push("/boms")}
+            onNavigateBom={(bomId) => router.push(`/boms/${bomId}`)}
             onNavigatePart={(partId) => onNavigatePartDetail(partId)}
             onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
           />
