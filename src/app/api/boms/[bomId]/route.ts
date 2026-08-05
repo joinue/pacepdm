@@ -5,6 +5,7 @@ import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
 import { captureBomSnapshot } from "@/lib/bom-snapshot";
 import { z, uuid } from "@/lib/validation";
+import { attachThumbnailUrl } from "@/lib/thumbnails";
 
 // Partial-update shape: any of name/status/revision can be supplied. The
 // state-transition rule (only valid next-states allowed) is enforced after
@@ -30,7 +31,9 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) =
     .maybeSingle();
 
   if (!bom) throw notFound("BOM not found");
-  return bom;
+
+  // The client reads `thumbnailUrl`; the storage key never leaves the server.
+  return attachThumbnailUrl(db.storage, bom);
 });
 
 export const PUT = withTenant(
@@ -40,7 +43,7 @@ export const PUT = withTenant(
 
     const { data: existing } = await db
       .from("boms")
-      .select("status, name, createdById")
+      .select("status, name, createdById, previousRevisionId")
       .eq("id", bomId)
       .is("deletedAt", null)
       .maybeSingle();
@@ -89,6 +92,31 @@ export const PUT = withTenant(
     // baseline is a documentation gap, not a correctness problem, and
     // we don't want to block the release on it.
     if (updates.status === "RELEASED") {
+      // Releasing a revision retires the one it came from. Done here rather
+      // than when the revision is drafted, because until B is released A is
+      // still the revision in effect — a draft supersedes nothing.
+      //
+      // The ECO comment above is now only half true: `eco_items.bomId`
+      // (migration 046) lets a change order carry a BOM, but the baseline is
+      // still what makes the released structure immutable.
+      const previousRevisionId = (existing as { previousRevisionId?: string | null })
+        .previousRevisionId;
+      if (previousRevisionId) {
+        const { error: supersedeError } = await db
+          .from("boms")
+          .update({ supersededById: bomId, updatedAt: new Date().toISOString() })
+          .eq("id", previousRevisionId);
+        // Non-fatal, and deliberately so: the release itself has already
+        // committed, and a stale `supersededById` shows an extra revision in
+        // the list rather than losing anything.
+        if (supersedeError) {
+          console.error(
+            `[boms/${bomId}] failed to supersede ${previousRevisionId}:`,
+            supersedeError
+          );
+        }
+      }
+
       try {
         const result = await captureBomSnapshot({
           // Takes a raw SupabaseClient and scopes every query by the tenantId

@@ -20,6 +20,26 @@ const UpdateEcoSchema = z
     costImpact: optionalString,
     disposition: optionalString,
     effectivity: optionalString,
+    /**
+     * Typed effectivity. The prose `effectivity` field above stays for
+     * notes, but it cannot be queried, so "what is in effect on 1 March"
+     * and "which BOM shipped on unit 47" were both unanswerable.
+     *
+     * IMMEDIATE — in effect the moment the ECO is implemented
+     * DATE      — in effect from `effectiveFrom`
+     * SERIAL    — in effect from unit `effectiveSerial` onward
+     */
+    effectivityType: z.enum(["IMMEDIATE", "DATE", "SERIAL"]).nullable().optional(),
+    effectiveFrom: z.string().datetime().nullable().optional(),
+    effectiveSerial: optionalString,
+  })
+  .refine((v) => v.effectivityType !== "DATE" || v.effectiveFrom !== null, {
+    message: "Date effectivity needs a date",
+    path: ["effectiveFrom"],
+  })
+  .refine((v) => v.effectivityType !== "SERIAL" || !!v.effectiveSerial, {
+    message: "Serial effectivity needs a starting serial number",
+    path: ["effectiveSerial"],
   })
   .refine((v) => Object.keys(v).length > 0, { message: "No changes specified" });
 

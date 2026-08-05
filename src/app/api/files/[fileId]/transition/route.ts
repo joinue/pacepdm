@@ -6,6 +6,7 @@ import { notifyFileTransition, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { nextRevision } from "@/lib/revision";
 
 const TransitionSchema = z.object({ transitionId: nonEmptyString });
 
@@ -134,8 +135,22 @@ export async function POST(
 
     if (toStateName === "Released") updateData.isFrozen = true;
     if (transition.fromState.name === "Released" && toStateName === "WIP") {
-      const nextRevision = String.fromCharCode(file.revision.charCodeAt(0) + 1);
-      updateData.revision = nextRevision;
+      // Reopening a released file starts the next revision. Refuse rather
+      // than guess when the current revision is not sequenceable: the old
+      // `charCodeAt(0) + 1` silently turned Z into "[" and R2 into "S",
+      // corrupting the field a release is identified by.
+      const next = nextRevision(file.revision);
+      if (!next) {
+        return NextResponse.json(
+          {
+            error:
+              `Cannot work out the revision after "${file.revision}". ` +
+              `Set the next revision on the file by hand, then reopen it.`,
+          },
+          { status: 409 }
+        );
+      }
+      updateData.revision = next.next;
       updateData.isFrozen = false;
     }
     if (toStateName === "Obsolete") updateData.isFrozen = true;

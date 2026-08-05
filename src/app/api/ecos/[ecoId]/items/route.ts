@@ -15,6 +15,12 @@ const AddEcoItemSchema = z
   .object({
     partId: z.string().trim().min(1).optional(),
     fileId: z.string().trim().min(1).optional(),
+    /**
+     * A change order governs an item AND its structure — that is what makes
+     * it a change order. Before migration 046 an ECO could carry the part
+     * revision but not the BOM revision that went with it.
+     */
+    bomId: z.string().trim().min(1).optional(),
     changeType: z.enum(["ADD", "MODIFY", "REMOVE"]),
     reason: optionalString,
     // Only meaningful for part items. Server auto-bumps (A→B) when
@@ -22,8 +28,8 @@ const AddEcoItemSchema = z
     fromRevision: optionalString,
     toRevision: optionalString,
   })
-  .refine((v) => (v.partId ? 1 : 0) + (v.fileId ? 1 : 0) === 1, {
-    message: "Provide exactly one of partId or fileId",
+  .refine((v) => (v.partId ? 1 : 0) + (v.fileId ? 1 : 0) + (v.bomId ? 1 : 0) === 1, {
+    message: "Provide exactly one of partId, fileId or bomId",
     path: ["partId"],
   });
 
@@ -131,7 +137,7 @@ export async function GET(
 
     const { data: rawItems, error } = await db
       .from("eco_items")
-      .select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision")
+      .select("id, ecoId, partId, fileId, bomId, changeType, reason, fromRevision, toRevision")
       .eq("ecoId", ecoId)
       .order("id", { ascending: true });
 
@@ -163,7 +169,7 @@ export async function POST(
 
     const parsed = await parseBody(request, AddEcoItemSchema);
     if (!parsed.ok) return parsed.response;
-    const { partId, fileId, changeType, reason, fromRevision, toRevision } = parsed.data;
+    const { partId, fileId, bomId, changeType, reason, fromRevision, toRevision } = parsed.data;
 
     const { ecoId } = await params;
     const db = getServiceClient();
@@ -225,6 +231,28 @@ export async function POST(
       if (existing) {
         return NextResponse.json({ error: "This file is already in this ECO" }, { status: 409 });
       }
+    } else if (bomId) {
+      const { data: bom } = await db
+        .from("boms")
+        .select("id, tenantId, deletedAt, revision")
+        .eq("id", bomId)
+        .single();
+      if (!bom || bom.tenantId !== tenantUser.tenantId || bom.deletedAt) {
+        return NextResponse.json({ error: "BOM not found" }, { status: 404 });
+      }
+      // Seed the from-revision the same way parts do, so the ECO records
+      // what the structure looked like before the change.
+      if (!seededFromRevision) seededFromRevision = bom.revision;
+
+      const { data: existing } = await db
+        .from("eco_items")
+        .select("id")
+        .eq("ecoId", ecoId)
+        .eq("bomId", bomId)
+        .maybeSingle();
+      if (existing) {
+        return NextResponse.json({ error: "This BOM is already in this ECO" }, { status: 409 });
+      }
     }
 
     const { data: rawItem, error } = await db
@@ -234,6 +262,7 @@ export async function POST(
         ecoId,
         partId: partId ?? null,
         fileId: fileId ?? null,
+        bomId: bomId ?? null,
         changeType,
         reason: reason ?? null,
         fromRevision: seededFromRevision,

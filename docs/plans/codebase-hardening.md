@@ -3,14 +3,14 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 102
-routes-wrapped: 32
-unwrapped-route: 330
-raw-fetch: 110
-generic-error-toast: 14
-swallowed-error: 11
+routes-total: 105
+routes-wrapped: 36
+unwrapped-route: 324
+raw-fetch: 55
+generic-error-toast: 8
+swallowed-error: 6
 token-violations: 6
-component-tests: 3-->
+component-tests: 6-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -73,7 +73,9 @@ Two things that bite on a fresh clone:
 
 ## Where things stand
 
-Run these rather than trusting the numbers below — they are a snapshot from 2026-08-04.
+Run these rather than trusting the numbers below. Several agents work this
+repo at once, so the counters move between one person reading them and the
+next; `npm run lint:plans` is the only reading that is current.
 
 ```bash
 npm run check                                          # the gate: types, lint, tokens, conventions, tests
@@ -88,11 +90,11 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **31 / 101**                         | 101                                                   |
-| `raw-fetch` in client components      | 112              | **112**                              | 0                                                     |
-| `generic-error-toast`                 | 14               | **14**                               | 0                                                     |
-| `swallowed-error`                     | 11               | **11**                               | 0                                                     |
-| Component tests                       | 0                | **2** files (57 stateful components) | the ones with real logic                              |
+| Routes on `withTenant`                | 0                | **36 / 105**                         | 105                                                   |
+| `raw-fetch` in client components      | 112              | **55**                               | 0                                                     |
+| `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
+| `swallowed-error`                     | 11               | **6**                                | 0                                                     |
+| Component tests                       | 0                | **4** files (57 stateful components) | the ones with real logic                              |
 
 ### How the ratchet works
 
@@ -137,12 +139,14 @@ backup. Do the restore once, into the dev project from item 4.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 70 routes
+### 1. Finish the route wrapper — 66 routes
 
-> Still 70. `routes-wrapped` has gone 28 → 32 because the trash, BOM-import and
-> relink work **added** four routes that were wrapped from the start, not
-> because any were converted. The remaining count only falls when an old
-> handler is rewritten.
+> 70 → 66. Three of those four are new routes that were wrapped from the start
+> (the BOM and vendor thumbnail endpoints); one is a genuine conversion —
+> `parts/[partId]/thumbnail` was rewritten onto `withTenant` when the shared
+> `src/lib/thumbnails.ts` landed, because three copies of the upload rules was
+> two too many. That is the shape to copy: convert the handler you are already
+> inside, in the same commit as the feature.
 
 Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 
@@ -176,17 +180,34 @@ Things that will trip you up:
 - **Helpers that take a raw client** (`captureBomSnapshot`, `getFileWhereUsed`, `getReleaseById`) need `db.unscoped("reason")`. They scope by the `tenantId` you pass them.
 - **Add a case to `src/app/api/tenant-isolation.test.ts`** for any route that resolves a record by id. That file is the registry of what is proven safe.
 
-### 2. Adopt `useFetch` / `fetchJson` — 112 sites
+### 2. Adopt `useFetch` / `fetchJson` — 55 sites
 
 ```bash
 node scripts/lint-conventions.mjs --list raw-fetch
 ```
 
-Worst offenders: `vault/file-detail-panel.tsx` (13), `admin/workflows/page.tsx` (10), `parts/components/part-form-dialog.tsx` (8), `vault/upload-file-dialog.tsx` (7), `admin/lifecycle/page.tsx` (7), `parts/page.tsx` (7).
+Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `providers/notification-provider.tsx` (6), `parts/components/part-form-dialog.tsx` (6), `parts/components/add-vendor-dialog.tsx` (3).
+
+**A perf pass on 2026-08-05 cleared the page-level reads.** `parts/page.tsx`,
+`vendors/page.tsx`, `search/page.tsx`, `profile/page.tsx`, `admin/roles`,
+`admin/lifecycle`, `admin/workflows`, `admin/metadata`, `admin/settings`,
+`admin/users`, `admin/approval-groups` and `boms-view` are all on
+`useFetch`/`fetchJson` now, which is what took `raw-fetch` 70 → 55 and
+`generic-error-toast` 12 → 8. What is left is **dialogs and providers**, not
+pages — a different shape of work:
+
+- `file-detail-panel` and `upload-file-dialog` are upload/streaming flows where
+  `uploadFile` (not `useFetch`) is the right target.
+- `part-form-dialog`, `add-vendor-dialog`, `link-file-dialog` are
+  typeahead searches. `useFetch` handles these well — build the URL from a
+  debounced query and let the hook abort the superseded request, the way
+  `vendors/page.tsx` and `parts/page.tsx` now do — but each needs its local
+  `useDebounce` helper replaced rather than kept alongside.
+- `notification-provider` is a long-lived subscription, not a page read.
 
 Two of `parts/page.tsx`'s came out while fixing a bug, and the bug is the argument for the whole item: `loadPartDetail` used bare `fetch` with no staleness guard, so a response that started before a write could land after it and silently revert the UI. `useFetch`/`fetchJson` do not fix that on their own, but the routine that reaches for them is the one that notices.
 
-Reads → `useFetch`. Mutations → `fetchJson` in the handler, then `refetch()`. Always `toast.error(errorMessage(err))` in the catch. Legitimate exceptions (streamed zips, `FormData` uploads) take a `lint-conventions-allow: raw-fetch` comment with the reason. → [`../decisions/data-fetching.md`](../decisions/data-fetching.md)
+Reads → `useFetch`. Mutations → `fetchJson` in the handler, then `refetch()`. Always `toast.error(errorMessage(err))` in the catch. Streamed zips still take a `lint-conventions-allow: raw-fetch` comment with the reason; **`FormData` uploads no longer need one** — `uploadFile` in [`src/lib/api-client.ts`](../../src/lib/api-client.ts) hands the FormData to fetch untouched and maps errors the same way `fetchJson` does. → [`../decisions/data-fetching.md`](../decisions/data-fetching.md)
 
 The 14 `generic-error-toast` and 11 `swallowed-error` violations mostly live in the same files, so they fall out of this pass.
 
@@ -203,6 +224,8 @@ The jsdom project is configured and working. Two reference files now: `src/compo
 Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing). Skip presentational primitives.
 
 `item-source-cell.test.tsx` is a useful third pattern alongside the other two: the component is trivial to render but encodes a precedence rule (sub-assembly before part before file) whose breakage is invisible — it sent every sub-assembly line to the parts list for a day. Small pure-decision components inside big files are worth exporting purely so the decision can be pinned. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
+
+`entity-thumbnail.test.tsx` is the fourth, and shows where the line sits on a shared primitive: the tile itself is not tested, only the two decisions inside `ThumbnailPicker` — a disabled picker renders no control at all, and re-picking the same file still fires (the input's value is cleared for exactly that reason, and re-uploading after a failure is what breaks without it).
 
 ### 5. Split the oversized files
 

@@ -25,12 +25,22 @@ export interface BOM {
   /** The part this BOM describes, if it has been linked to one. */
   part?: { id: string; partNumber: string; isEndItem: boolean } | null;
   /**
+   * Signed URL for the BOM's image, valid for a few minutes. Null when none has
+   * been uploaded. The storage key never reaches the client — see
+   * `src/lib/thumbnails.ts`.
+   */
+  thumbnailUrl?: string | null;
+  /**
    * Declared on the part, never derived from structure: this BOM describes
    * something sold or shipped on its own. Orthogonal to `usedIn` — a
    * sub-assembly you also sell as a spare is both nested and an end item.
    * See docs/decisions/bom-structure.md.
    */
   isEndItem?: boolean;
+  /** The revision this one was created from, if it was revised into being. */
+  previousRevisionId?: string | null;
+  /** Set on a retired revision once its successor is released. */
+  supersededById?: string | null;
 }
 
 export interface BOMItem {
@@ -86,6 +96,7 @@ export interface BOMItem {
     name: string;
     revision: string;
     status: string;
+    thumbnailUrl: string | null;
   } | null;
 }
 

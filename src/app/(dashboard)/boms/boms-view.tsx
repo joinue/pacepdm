@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useFetch } from "@/hooks/use-fetch";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,12 +29,14 @@ import {
   ArrowRight,
   Link as LinkIcon,
   TriangleAlert,
+  GitBranch,
   ChevronRight,
 } from "lucide-react";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { toast } from "sonner";
 import { BOM_STATUS_FLOW } from "@/lib/status-flows";
-import { fetchJson, errorMessage } from "@/lib/api-client";
+import { fetchJson, errorMessage, uploadFile } from "@/lib/api-client";
+import { EntityThumbnail, ThumbnailPicker } from "@/components/ui/entity-thumbnail";
 import { usePermissions } from "@/hooks/use-permissions";
 import { PERMISSIONS } from "@/lib/permissions";
 import { useNotifications } from "@/components/providers/notification-provider";
@@ -92,26 +95,21 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   // Per-BOM unread counts so each list row can show its own badge. Refetched
   // whenever the top-level counts change (sidebar badge delta is our signal
   // that *something* in /boms became or stopped being unread).
-  const [bomUnread, setBomUnread] = useState<Record<string, number>>({});
+  const { data: bomUnreadData, refetch: refetchBomUnread } = useFetch<{
+    counts: Record<string, number>;
+  }>("/api/notifications/counts-by-ref?prefix=/boms/");
+  const bomUnread = bomUnreadData?.counts ?? {};
+
+  // The sidebar badge delta is our signal that something in /boms became or
+  // stopped being unread, so the per-row counts are re-read off the back of
+  // it rather than polling.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch("/api/notifications/counts-by-ref?prefix=/boms/");
-        if (!r.ok) return;
-        const data = (await r.json()) as { counts: Record<string, number> };
-        if (!cancelled) setBomUnread(data.counts || {});
-      } catch (err) {
-        console.error("[boms] per-bom notif counts failed", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [notificationCounts.byCategory.boms]);
+    void refetchBomUnread();
+  }, [notificationCounts.byCategory.boms, refetchBomUnread]);
 
   const [boms, setBoms] = useState<BOM[]>([]);
   const [relinkingId, setRelinkingId] = useState<string | null>(null);
+  const [revisingBom, setRevisingBom] = useState(false);
   // The BOM tree, derived from `usedIn` — which the list endpoint computes
   // from `bom_items.linkedBomId`. The shape therefore follows the real
   // structure and cannot drift from it.
@@ -134,6 +132,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   // Inline rename
   const [renamingBom, setRenamingBom] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  // True while a BOM image upload or removal is in flight.
+  const [thumbnailBusy, setThumbnailBusy] = useState(false);
 
   // ─── Loaders ─────────────────────────────────────────────────────────
   const loadBoms = useCallback(async () => {
@@ -175,6 +176,33 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
       }
     },
     [loadBoms]
+  );
+
+  /**
+   * Start the next revision of a released BOM. The server copies the
+   * structure and leaves this revision frozen; we navigate to the new one
+   * because that is what the user is about to work on.
+   */
+  const handleReviseBom = useCallback(
+    async (bom: BOM) => {
+      setRevisingBom(true);
+      try {
+        const created = await fetchJson<{ id: string; revision: string; itemsCopied: number }>(
+          `/api/boms/${bom.id}/revise`,
+          { method: "POST", body: {} }
+        );
+        toast.success(`Revision ${created.revision} created`, {
+          description: `${created.itemsCopied} item${created.itemsCopied === 1 ? "" : "s"} copied. ${bom.name} ${bom.revision} stays released until this one is.`,
+        });
+        await loadBoms();
+        router.push(`/boms/${created.id}`);
+      } catch (err) {
+        toast.error(errorMessage(err));
+      } finally {
+        setRevisingBom(false);
+      }
+    },
+    [loadBoms, router]
   );
 
   const toggleExpanded = useCallback((bomId: string) => {
@@ -259,6 +287,37 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
       loadBoms();
     } catch (err) {
       toast.error(errorMessage(err));
+    }
+  }
+
+  /**
+   * BOM images upload immediately — the BOM already exists, so there is no
+   * save step to defer to. The list is reloaded rather than patched locally
+   * because the signed URL comes back from the server.
+   */
+  async function handleThumbnailSelect(bomId: string, file: File) {
+    setThumbnailBusy(true);
+    try {
+      await uploadFile(`/api/boms/${bomId}/thumbnail`, file);
+      toast.success("Image updated");
+      await loadBoms();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setThumbnailBusy(false);
+    }
+  }
+
+  async function handleThumbnailRemove(bomId: string) {
+    setThumbnailBusy(true);
+    try {
+      await fetchJson(`/api/boms/${bomId}/thumbnail`, { method: "DELETE" });
+      toast.success("Image removed");
+      await loadBoms();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setThumbnailBusy(false);
     }
   }
 
@@ -528,52 +587,68 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
             <div className="flex-1 space-y-4 min-w-0">
               {/* Detail header */}
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  {renamingBom === selectedBomId ? (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        className="h-8 text-lg font-semibold px-2 w-64"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRenameBom(selectedBomId);
-                          if (e.key === "Escape") setRenamingBom(null);
-                        }}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleRenameBom(selectedBomId)}
-                      >
-                        <Check className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setRenamingBom(null)}>
-                        <X className="w-4 h-4" />
-                      </Button>
+                {/* The image sits beside the title, where it identifies the
+                    assembly you are looking at. Click it to replace, and the
+                    corner ✕ to clear — the same control the vendor dialog and
+                    the part form use. */}
+                <div className="flex items-start gap-3 min-w-0">
+                  <ThumbnailPicker
+                    src={selectedBomData.thumbnailUrl}
+                    kind="bom"
+                    size="md"
+                    label={`Change image for ${selectedBomData.name}`}
+                    disabled={!canEdit}
+                    busy={thumbnailBusy}
+                    onSelect={(file) => handleThumbnailSelect(selectedBomId, file)}
+                    onRemove={() => handleThumbnailRemove(selectedBomId)}
+                  />
+                  <div className="min-w-0">
+                    {renamingBom === selectedBomId ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          className="h-8 text-lg font-semibold px-2 w-64"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleRenameBom(selectedBomId);
+                            if (e.key === "Escape") setRenamingBom(null);
+                          }}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => handleRenameBom(selectedBomId)}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => setRenamingBom(null)}>
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-semibold truncate">{selectedBomData.name}</h3>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => {
+                            setRenamingBom(selectedBomId);
+                            setRenameValue(selectedBomData.name);
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 mt-1">
+                      <StatusBadge status={selectedBomData.status} kind="bom" />
+                      <span className="text-sm text-muted-foreground">
+                        Rev {selectedBomData.revision} &middot; {items.length} item
+                        {items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
+                      </span>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold truncate">{selectedBomData.name}</h3>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => {
-                          setRenamingBom(selectedBomId);
-                          setRenameValue(selectedBomData.name);
-                        }}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3 mt-1">
-                    <StatusBadge status={selectedBomData.status} kind="bom" />
-                    <span className="text-sm text-muted-foreground">
-                      Rev {selectedBomData.revision} &middot; {items.length} item
-                      {items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
-                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -646,6 +721,22 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                           </DropdownMenuItem>
                         )}
                         {canShare && canEdit && <DropdownMenuSeparator />}
+                        {/* Revising is the only way forward from a released
+                            BOM: RELEASED goes to OBSOLETE and stops, and the
+                            items route refuses edits on both. It creates the
+                            next revision as a draft copy and leaves this one
+                            frozen and citable. */}
+                        {canEdit &&
+                          (selectedBomData.status === "RELEASED" ||
+                            selectedBomData.status === "OBSOLETE") && (
+                            <DropdownMenuItem
+                              disabled={revisingBom}
+                              onClick={() => handleReviseBom(selectedBomData)}
+                            >
+                              <GitBranch className="w-3.5 h-3.5 mr-2" />
+                              {revisingBom ? "Creating revision..." : "Create next revision"}
+                            </DropdownMenuItem>
+                          )}
                         {canEdit && (
                           <DropdownMenuItem
                             onClick={() => {
@@ -854,51 +945,62 @@ function BomTreeRow({
           column on the right, aligned across rows.
         */}
         <div className={compact ? "space-y-1" : "flex items-center justify-between gap-6 min-w-0"}>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-1.5 min-w-0">
-              <p className={`text-sm min-w-0 ${compact ? "truncate flex-1" : "truncate"}`}>
-                {bom.name}
-              </p>
-              {unread > 0 && (
-                <span
-                  aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
-                  className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
-                >
-                  {unread > 9 ? "9+" : unread}
-                </span>
-              )}
-            </div>
+          <div className="min-w-0 flex-1 flex items-center gap-2.5">
+            {/* The picture is what separates one row from the next when a
+                machine brings 25 similarly-named sub-assemblies. Smaller in
+                the sidebar, where 16rem also has to hold the name. */}
+            <EntityThumbnail
+              src={bom.thumbnailUrl}
+              kind="bom"
+              size={compact ? "xs" : "sm"}
+              className="shrink-0"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start gap-1.5 min-w-0">
+                <p className={`text-sm min-w-0 ${compact ? "truncate flex-1" : "truncate"}`}>
+                  {bom.name}
+                </p>
+                {unread > 0 && (
+                  <span
+                    aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
+                    className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
+                  >
+                    {unread > 9 ? "9+" : unread}
+                  </span>
+                )}
+              </div>
 
-            {/* A top-level BOM that something meant to reference but
+              {/* A top-level BOM that something meant to reference but
                 misspelt. Without this it sits among the products looking
                 deliberate, which is how NANO-1000S Casting-Components read
                 after the first import. The fix is offered here because a
                 warning with no remedy just moves the work. */}
-            {bom.orphanHint && (
-              <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5 max-w-xl">
-                <p className="text-3xs text-warning flex items-start gap-1">
-                  <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
-                  <span className="min-w-0">
-                    Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
-                  </span>
-                </p>
-                {canEdit && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-1.5 h-6 text-3xs"
-                    disabled={relinkingId === bom.id}
-                    onClick={(e) => {
-                      // The card navigates; repairing is a different intent.
-                      e.stopPropagation();
-                      onRelink(bom);
-                    }}
-                  >
-                    {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
-                  </Button>
-                )}
-              </div>
-            )}
+              {bom.orphanHint && (
+                <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5 max-w-xl">
+                  <p className="text-3xs text-warning flex items-start gap-1">
+                    <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
+                    <span className="min-w-0">
+                      Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
+                    </span>
+                  </p>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-1.5 h-6 text-3xs"
+                      disabled={relinkingId === bom.id}
+                      onClick={(e) => {
+                        // The card navigates; repairing is a different intent.
+                        e.stopPropagation();
+                        onRelink(bom);
+                      }}
+                    >
+                      {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Fixed-width columns so the values line up down the list rather

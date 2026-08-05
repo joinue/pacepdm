@@ -4,6 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuidv4 } from "uuid";
 import { z, nonEmptyString } from "@/lib/validation";
 import { looseKey } from "@/lib/bom-import";
+import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 
 const CreateBomSchema = z.object({
   name: nonEmptyString,
@@ -27,12 +28,18 @@ export const GET = withTenant({}, async ({ db }) => {
     .from("boms")
     .select("*, part:parts!boms_partId_fkey(id, partNumber, isEndItem)")
     .is("deletedAt", null)
+    // Current revisions only. A superseded revision is still there, still
+    // referenced by its baseline and by any released document citing it —
+    // it just is not what you are working on. Reach it through the
+    // revision history on its successor.
+    .is("supersededById", null)
     .order("createdAt", { ascending: false })
     .limit(500);
 
   const boms = (data ?? []) as unknown as Array<{
     id: string;
     name: string;
+    thumbnailKey?: string | null;
     part: { id: string; partNumber: string; isEndItem: boolean } | null;
   }>;
   if (boms.length === 0) return [];
@@ -75,6 +82,12 @@ export const GET = withTenant({}, async ({ db }) => {
     }
   }
 
+  // One signature per distinct object, not one per row — see lib/thumbnails.ts.
+  const thumbUrls = await signThumbnailUrls(
+    db.storage,
+    boms.map((b) => b.thumbnailKey)
+  );
+
   return boms.map((b) => {
     const parents = usedIn.get(b.id) ?? [];
     const nearMiss = parents.length === 0 ? unlinkedRefs.get(looseKey(b.name)) : undefined;
@@ -82,7 +95,7 @@ export const GET = withTenant({}, async ({ db }) => {
     // depending on how it infers the FK; normalise before reading it.
     const part = Array.isArray(b.part) ? (b.part[0] ?? null) : b.part;
     return {
-      ...b,
+      ...withThumbnailUrl(b, thumbUrls),
       part,
       usedIn: parents,
       /**
