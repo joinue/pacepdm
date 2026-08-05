@@ -10,8 +10,7 @@ raw-fetch: 112
 generic-error-toast: 14
 swallowed-error: 11
 token-violations: 6
-component-tests: 1
--->
+component-tests: 2-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -84,16 +83,16 @@ node scripts/lint-tokens.mjs --list
 npm run probe:rls                                      # live RLS posture
 ```
 
-| Metric                                | At session start | Now                                 | Target                                                |
-| ------------------------------------- | ---------------- | ----------------------------------- | ----------------------------------------------------- |
-| Token violations                      | 373              | **6**                               | 0 (the 6 are marketing gradient blobs; arguably done) |
-| Pages on `PageContainer`/`PageHeader` | 0                | **18**                              | — done                                                |
-| `StatusBadge` call sites              | 0                | **31**                              | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **31 / 101**                        | 101                                                   |
-| `raw-fetch` in client components      | 112              | **112**                             | 0                                                     |
-| `generic-error-toast`                 | 14               | **14**                              | 0                                                     |
-| `swallowed-error`                     | 11               | **11**                              | 0                                                     |
-| Component tests                       | 0                | **1** file (57 stateful components) | the ones with real logic                              |
+| Metric                                | At session start | Now                                  | Target                                                |
+| ------------------------------------- | ---------------- | ------------------------------------ | ----------------------------------------------------- |
+| Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
+| Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
+| `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
+| Routes on `withTenant`                | 0                | **31 / 101**                         | 101                                                   |
+| `raw-fetch` in client components      | 112              | **112**                              | 0                                                     |
+| `generic-error-toast`                 | 14               | **14**                               | 0                                                     |
+| `swallowed-error`                     | 11               | **11**                               | 0                                                     |
+| Component tests                       | 0                | **2** files (57 stateful components) | the ones with real logic                              |
 
 ### How the ratchet works
 
@@ -197,7 +196,7 @@ Do this **after** the route work. It touches import paths everywhere and would c
 
 ### 4. Component tests
 
-The jsdom project is configured and working (`src/components/ui/status-badge.test.tsx` is the reference). One test file against 57 stateful components.
+The jsdom project is configured and working. Two reference files now: `src/components/ui/status-badge.test.tsx` for a pure presentational mapping, and `src/app/(dashboard)/boms/components/import-bom-dialog.test.tsx` for a stateful dialog — the latter is the better model for the list below, since it drives real interactions with `userEvent` and asserts on behaviour (nothing is POSTed before confirmation, the server's own error text reaches the user) rather than markup.
 
 Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing). Skip presentational primitives. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
 

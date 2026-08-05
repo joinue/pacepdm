@@ -39,6 +39,7 @@ import { useNotifications } from "@/components/providers/notification-provider";
 import type { BOM, BOMItem } from "./types";
 import { statusLabels } from "./constants";
 import { CreateBomDialog } from "./components/create-bom-dialog";
+import { ImportBomDialog } from "./components/import-bom-dialog";
 import { CompareBomDialog } from "./components/compare-bom-dialog";
 import { AddItemDialog } from "./components/add-item-dialog";
 import { BomItemsTable } from "./components/bom-items-table";
@@ -102,6 +103,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
   // Dialog visibility
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [showShare, setShowShare] = useState(false);
@@ -328,6 +330,12 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
               {boms.length >= 2 && (
                 <Button variant="outline" size="sm" onClick={() => setShowCompare(true)}>
                   Compare
+                </Button>
+              )}
+              {canEdit && (
+                <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import
                 </Button>
               )}
               {canEdit && (
@@ -604,6 +612,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         onOpenChange={setShowCreate}
         onCreated={handleBomCreated}
       />
+      <ImportBomDialog open={showImport} onOpenChange={setShowImport} onImported={loadBoms} />
       {selectedBomId && (
         <AddItemDialog
           open={showAddItem}

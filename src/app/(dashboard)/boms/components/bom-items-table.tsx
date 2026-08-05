@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -220,7 +221,23 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
                         className="h-6 text-xs px-1"
                       />
                     ) : (
-                      display.name
+                      <span className="inline-flex items-center gap-1.5">
+                        {display.name}
+                        {/* One variant of a configure-to-order group. Marked
+                            because the BOM lists every variant side by side —
+                            without this, a 110V and a 220V line are
+                            indistinguishable and the list reads as if both
+                            ship. Excluded from the base rollup total. */}
+                        {item.optionGroup && (
+                          <Badge
+                            variant="secondary"
+                            className="text-4xs px-1 py-0 font-normal"
+                            title={item.optionPrompt ?? `Option: ${item.optionGroup}`}
+                          >
+                            {item.optionGroup}
+                          </Badge>
+                        )}
+                      </span>
                     )}
                   </TableCell>
 

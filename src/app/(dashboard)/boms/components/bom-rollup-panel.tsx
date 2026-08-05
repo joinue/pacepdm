@@ -20,6 +20,7 @@ interface RollupLine {
   extendedCost: number | null;
   depth: number;
   isSubAssembly: boolean;
+  optionGroup: string | null;
 }
 
 interface RollupResponse {
@@ -27,6 +28,10 @@ interface RollupResponse {
   bomName: string;
   bomRevision: string;
   totalCost: number;
+  /** What every option variant would cost together — an upper bound, not a
+   *  buildable configuration. See `src/lib/bom-rollup.ts`. */
+  optionCost: number;
+  optionItemCount: number;
   leafItemCount: number;
   totalLineCount: number;
   maxDepth: number;
@@ -128,7 +133,10 @@ export function BomRollupPanel({
             <>
               {/* Aggregate totals */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                <Stat label="Total Cost" value={`$${data.totalCost.toFixed(2)}`} />
+                <Stat
+                  label={data.optionItemCount > 0 ? "Base Cost" : "Total Cost"}
+                  value={`$${data.totalCost.toFixed(2)}`}
+                />
                 <Stat label="Leaf Items" value={data.leafItemCount.toString()} />
                 <Stat label="Total Lines" value={data.totalLineCount.toString()} />
                 <Stat
@@ -136,6 +144,22 @@ export function BomRollupPanel({
                   value={data.maxDepth === 0 ? "Flat" : `${data.maxDepth + 1} levels`}
                 />
               </div>
+
+              {/* Configure-to-order content, kept out of the base total. A
+                  machine ships with one member of each group, so summing every
+                  variant into the headline figure would overstate it. Shown
+                  only when the BOM actually has options. */}
+              {data.optionItemCount > 0 && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground bg-muted/40 rounded p-2">
+                  <span>
+                    Plus <strong className="text-foreground">{data.optionItemCount}</strong>{" "}
+                    configurable line{data.optionItemCount !== 1 ? "s" : ""} totalling{" "}
+                    <strong className="text-foreground">${data.optionCost.toFixed(2)}</strong> if
+                    every variant were fitted.
+                  </span>
+                  <span>One option per group ships, so these are excluded from the base cost.</span>
+                </div>
+              )}
 
               {data.itemsMissingCost > 0 && (
                 <div className="flex items-center gap-2 text-xs text-warning bg-warning/10 rounded p-2">
@@ -177,6 +201,15 @@ export function BomRollupPanel({
                             {line.isSubAssembly && (
                               <Badge variant="outline" className="text-4xs ml-1.5 px-1 py-0">
                                 sub
+                              </Badge>
+                            )}
+                            {line.optionGroup && (
+                              <Badge
+                                variant="secondary"
+                                className="text-4xs ml-1.5 px-1 py-0 font-normal"
+                                title={`One of the ${line.optionGroup} options — not in the base cost`}
+                              >
+                                {line.optionGroup}
                               </Badge>
                             )}
                           </td>

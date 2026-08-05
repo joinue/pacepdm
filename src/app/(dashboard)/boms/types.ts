@@ -27,6 +27,14 @@ export interface BOMItem {
   sortOrder: number;
   partId: string | null;
   linkedBomId: string | null;
+  /**
+   * Configure-to-order group ("Voltage") when this line is one variant of a
+   * set, null for the ordinary always-included lines. A BOM carries every
+   * variant; exactly one ships. Excluded from base-configuration rollup
+   * totals — see `src/lib/bom-rollup.ts`.
+   */
+  optionGroup: string | null;
+  optionPrompt: string | null;
   file: {
     id: string;
     name: string;
