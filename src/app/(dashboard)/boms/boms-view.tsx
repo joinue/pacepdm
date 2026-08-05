@@ -82,6 +82,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   const router = useRouter();
   const { can } = usePermissions();
   const canEdit = can(PERMISSIONS.FILE_EDIT);
+  // Releasing or obsoleting a BOM is a decision, not an edit — the route
+  // requires ECO_APPROVE for both. Hiding the menu items keeps the client
+  // from offering a transition that would 403.
+  const canApprove = can(PERMISSIONS.ECO_APPROVE);
   const canShare = can(PERMISSIONS.SHARE_CREATE);
   const { clearRef, counts: notificationCounts } = useNotifications();
 
@@ -670,16 +674,18 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                         }
                       />
                       <DropdownMenuContent align="end" className="w-auto min-w-44">
-                        {(BOM_STATUS_FLOW[selectedBomData.status] || []).map((s) => (
-                          <DropdownMenuItem
-                            key={s}
-                            onClick={() => handleStatusChange(selectedBomId, s)}
-                            className="gap-2"
-                          >
-                            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span>Move to {statusLabels[s] || s}</span>
-                          </DropdownMenuItem>
-                        ))}
+                        {(BOM_STATUS_FLOW[selectedBomData.status] || [])
+                          .filter((s) => canApprove || (s !== "RELEASED" && s !== "OBSOLETE"))
+                          .map((s) => (
+                            <DropdownMenuItem
+                              key={s}
+                              onClick={() => handleStatusChange(selectedBomId, s)}
+                              className="gap-2"
+                            >
+                              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
+                              <span>Move to {statusLabels[s] || s}</span>
+                            </DropdownMenuItem>
+                          ))}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}

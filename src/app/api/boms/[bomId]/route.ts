@@ -1,5 +1,5 @@
-import { withTenant, badRequest, notFound } from "@/lib/api-route";
-import { PERMISSIONS } from "@/lib/permissions";
+import { withTenant, badRequest, notFound, forbidden } from "@/lib/api-route";
+import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
@@ -36,9 +36,36 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) =
   return attachThumbnailUrl(db.storage, bom);
 });
 
+/**
+ * BOM statuses that put a structure into, or out of, effect.
+ *
+ * These require ECO_APPROVE on top of the FILE_EDIT the route declares —
+ * the same split the ECO route makes between editing and deciding.
+ *
+ * Before this, releasing a BOM took three PUTs from anyone holding
+ * `file.edit`, with no approval, no second person and no change order. The
+ * DRAFT → IN_REVIEW → APPROVED → RELEASED flow existed and nothing enforced
+ * any of it, so the two middle states were decoration.
+ *
+ * The asymmetry is what settles it rather than any theory about BOMs. In
+ * this same tenant a *drawing* cannot reach Released without the "Approve &
+ * Release" transition, its workflow, and a member of the Approvers group
+ * signing it. The bill of materials that drives what gets purchased needed
+ * less than the drawing did.
+ *
+ * OBSOLETE is included because taking a released structure out of effect is
+ * as consequential as putting one in.
+ *
+ * Deliberately NOT done: requiring that a release go through an ECO. First
+ * release of a new BOM legitimately has no change order behind it — there
+ * are 26 imported BOMs waiting on exactly that — and `revise` already
+ * carries an optional `ecoId` for the case that does.
+ */
+const GOVERNED_BOM_STATUSES = new Set(["RELEASED", "OBSOLETE"]);
+
 export const PUT = withTenant(
   { permission: PERMISSIONS.FILE_EDIT, body: UpdateBomSchema, params: ParamsSchema },
-  async ({ db, tenantUser, params, body }) => {
+  async ({ db, tenantUser, params, body, permissions }) => {
     const { bomId } = params;
 
     const { data: existing } = await db
@@ -66,6 +93,18 @@ export const PUT = withTenant(
           `Cannot change status from ${existing.status} to ${body.status}. Allowed: ${allowed.join(", ") || "none"}`
         );
       }
+      // Putting a structure into or out of effect is a decision, not an
+      // edit. See GOVERNED_BOM_STATUSES above.
+      if (
+        GOVERNED_BOM_STATUSES.has(body.status) &&
+        !hasPermission(permissions, PERMISSIONS.ECO_APPROVE)
+      ) {
+        throw forbidden(
+          `Moving a BOM to ${body.status} requires the "Approve ECOs" permission. ` +
+            `Ask an approver to release it.`
+        );
+      }
+
       updates.status = body.status;
       changes.status = `${existing.status} → ${body.status}`;
     }
