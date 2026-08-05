@@ -224,6 +224,61 @@ export interface PartSummary {
   isSubAssembly: boolean;
 }
 
+/**
+ * Punctuation- and case-insensitive key for a part number, used only to spot
+ * near-miss references. `NANO1000S Casting-Components` and
+ * `NANO-1000S Casting-Components` collapse to the same key.
+ */
+function loosely(partNumber: string): string {
+  return partNumber.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+export interface NearMissLink {
+  /** The BOM containing the suspect line. */
+  bomPartNumber: string;
+  /** The part number as written on the line. */
+  itemPartNumber: string;
+  /** The BOM name it almost certainly meant. */
+  probableBom: string;
+  sourceLine: number;
+}
+
+/**
+ * Lines that reference something *almost* named like one of the file's BOMs.
+ *
+ * A sub-assembly link is made by exact name match, so a single typo silently
+ * demotes an assembly to a leaf part: the line creates a phantom part, and
+ * the BOM it should have pointed at is left orphaned at the top level. That
+ * is not hypothetical — the NANO-1000S build list has exactly one instance
+ * (`NANO1000S Casting-Components`, missing the hyphen), and without this
+ * check the import reproduces the mistake faithfully and invisibly.
+ *
+ * Deliberately conservative: only punctuation, whitespace and case are
+ * ignored. Edit-distance matching would flag genuinely distinct part numbers
+ * in a scheme where `N1S-P-005` and `N1S-P-006` are different parts.
+ */
+export function findNearMissLinks(parsed: ParsedBomFile): NearMissLink[] {
+  const bomByLooseKey = new Map<string, string>();
+  for (const bom of parsed.boms) bomByLooseKey.set(loosely(bom.partNumber), bom.partNumber);
+  const exactNames = new Set(parsed.boms.map((b) => b.partNumber));
+
+  const out: NearMissLink[] = [];
+  for (const bom of parsed.boms) {
+    for (const item of bom.items) {
+      if (exactNames.has(item.partNumber)) continue; // links correctly
+      const probable = bomByLooseKey.get(loosely(item.partNumber));
+      if (!probable || probable === item.partNumber) continue;
+      out.push({
+        bomPartNumber: bom.partNumber,
+        itemPartNumber: item.sourcePartNumber,
+        probableBom: probable,
+        sourceLine: item.sourceLine,
+      });
+    }
+  }
+  return out;
+}
+
 export function collectParts(parsed: ParsedBomFile): Map<string, PartSummary> {
   const bomNumbers = new Set(parsed.boms.map((b) => b.partNumber));
   const parts = new Map<string, PartSummary>();

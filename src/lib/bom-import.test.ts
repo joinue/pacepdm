@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseBuildList, collectParts, splitRevision } from "./bom-import";
+import { parseBuildList, collectParts, splitRevision, findNearMissLinks } from "./bom-import";
 
 /**
  * Tested against the real archive file rather than a hand-written sample.
@@ -177,5 +177,45 @@ describe("parseBuildList — malformed input", () => {
   it("defaults a missing unit to EA", () => {
     const csv = `${header}BOM,ASSY-1,Assembly One,TRUE,1\nItem,Add X,Raw Good,X,1,\n`;
     expect(parseBuildList(csv).boms[0].items[0].unit).toBe("EA");
+  });
+});
+
+describe("findNearMissLinks", () => {
+  it("catches the hyphen typo in the NANO-1000S archive", () => {
+    // Line 4 references `NANO1000S Casting-Components` while the BOM on line
+    // 39 is `NANO-1000S Casting-Components`. Without this check the casting
+    // group imports as an orphan and the reference becomes a phantom part.
+    const misses = findNearMissLinks(parseBuildList(FIXTURE));
+    expect(misses).toEqual([
+      {
+        bomPartNumber: "NANO-1000S",
+        itemPartNumber: "NANO1000S Casting-Components",
+        probableBom: "NANO-1000S Casting-Components",
+        sourceLine: 4,
+      },
+    ]);
+  });
+
+  it("ignores lines that link correctly", () => {
+    const csv =
+      "Flag,Description,Type,Part,Quantity,UOM\n" +
+      "BOM,TOP-1,Top,TRUE,1\n" +
+      "Item,Create TOP-1,Finished Good,TOP-1,1,ea\n" +
+      "Item,Add SUB-1,Raw Good,SUB-1,1,ea\n" +
+      "BOM,SUB-1,Sub,TRUE,1\n" +
+      "Item,Create SUB-1,Finished Good,SUB-1,1,ea\n" +
+      "Item,Add LEAF,Raw Good,LEAF,1,ea\n";
+    expect(findNearMissLinks(parseBuildList(csv))).toEqual([]);
+  });
+
+  it("does not flag genuinely different part numbers in a dense scheme", () => {
+    // N1S-P-005 and N1S-P-006 are distinct parts, not a typo for each other.
+    // Only punctuation and case are ignored — never a differing digit.
+    const csv =
+      "Flag,Description,Type,Part,Quantity,UOM\n" +
+      "BOM,N1S-P-005,Part five,TRUE,1\n" +
+      "Item,Create N1S-P-005,Finished Good,N1S-P-005,1,ea\n" +
+      "Item,Add N1S-P-006,Raw Good,N1S-P-006,1,ea\n";
+    expect(findNearMissLinks(parseBuildList(csv))).toEqual([]);
   });
 });

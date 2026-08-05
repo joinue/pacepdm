@@ -367,13 +367,27 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         </Card>
       ) : (
         <div className="flex gap-4 flex-col lg:flex-row">
-          {/* BOM list sidebar */}
-          <div className="lg:w-56 shrink-0 space-y-1">
+          {/*
+            The list is a narrow sidebar only when it is standing beside a
+            selected BOM. With nothing selected there is no detail pane to
+            leave room for, so a fixed 14rem column would truncate every name
+            while most of the page sat empty — which is exactly what happened
+            once imported BOM names ran to 48 characters. Browse mode gets the
+            full width as a grid; picking a BOM collapses it back.
+          */}
+          <div
+            className={
+              selectedBomId
+                ? "lg:w-64 shrink-0 space-y-1"
+                : "flex-1 min-w-0 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+            }
+          >
             {boms.map((bom) => {
               const unread = bomUnread[bom.id] || 0;
               return (
                 <button
                   key={bom.id}
+                  title={bom.name}
                   className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
                     selectedBomId === bom.id
                       ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
@@ -381,8 +395,17 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                   }`}
                   onClick={() => selectBom(bom.id)}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <p className="text-sm truncate flex-1">{bom.name}</p>
+                  <div className="flex items-start gap-1.5 min-w-0">
+                    {/* Sidebar has one line to give; the grid can afford two,
+                        which fits every name in the NANO-1000S build list
+                        without a tooltip. `title` covers the rest either way. */}
+                    <p
+                      className={`text-sm flex-1 min-w-0 ${
+                        selectedBomId ? "truncate" : "line-clamp-2 break-words"
+                      }`}
+                    >
+                      {bom.name}
+                    </p>
                     {unread > 0 && (
                       <span
                         aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}

@@ -2,7 +2,7 @@ import { v4 as uuid } from "uuid";
 import { withTenant, badRequest } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { parseBuildList, collectParts, type ParsedBom } from "@/lib/bom-import";
+import { parseBuildList, collectParts, findNearMissLinks, type ParsedBom } from "@/lib/bom-import";
 
 /**
  * POST /api/boms/import
@@ -262,6 +262,18 @@ export const POST = withTenant(
         entityId: bomId,
         details: { name: bom.partNumber, revision: bom.revision, itemCount: rows.length },
       });
+    }
+
+    // A typo in a part number silently demotes a sub-assembly to a leaf and
+    // orphans the BOM it should have linked to. Surfaced as a warning rather
+    // than a hard failure: the rest of the file is fine, and only a human can
+    // say whether it is a typo or two genuinely different parts.
+    for (const miss of findNearMissLinks(parsed)) {
+      summary.warnings.push(
+        `Line ${miss.sourceLine}: ${miss.bomPartNumber} references "${miss.itemPartNumber}", ` +
+          `which does not match any BOM — did it mean "${miss.probableBom}"? ` +
+          `It imported as a leaf part, and "${miss.probableBom}" is not linked to anything.`
+      );
     }
 
     // A line pointing at a BOM that was skipped as a duplicate has a null
