@@ -1,5 +1,5 @@
-import { withTenant, badRequest, notFound } from "@/lib/api-route";
-import { PERMISSIONS } from "@/lib/permissions";
+import { withTenant, badRequest, notFound, forbidden } from "@/lib/api-route";
+import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
@@ -65,9 +65,33 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) =
   return eco;
 });
 
+/**
+ * Transitions that decide an ECO's fate rather than move it along.
+ *
+ * These require ECO_APPROVE on top of the ECO_EDIT the route already
+ * declares. Without that second check the permission was dead: it is
+ * defined in PERMISSION_INFO, granted to Admin and Manager in
+ * DEFAULT_ROLES, asserted in permissions.test.ts — and read by nothing, so
+ * anyone who could edit an ECO could also approve it.
+ *
+ * That mattered more than a missing check usually does. `findWorkflowForTrigger`
+ * falls through to a direct status update when no workflow is assigned to
+ * the trigger, and no tenant is seeded with an ECO workflow — the seeded
+ * assignment covers a file transition (`ecoTrigger: null`). So the approval
+ * gate was not merely unenforced, it was absent: one Engineer could take an
+ * ECO DRAFT → SUBMITTED → IN_REVIEW → APPROVED alone, then implement it,
+ * which releases parts, freezes files and (since migration 049) releases the
+ * BOM revisions it carries.
+ *
+ * It also undercut the reasoning migration 049 was written on — that
+ * releasing a BOM straight from DRAFT is safe because "the ECO's approval is
+ * the review". That is only true if approving an ECO means something.
+ */
+const DECISION_STATUSES = new Set(["APPROVED", "REJECTED"]);
+
 export const PUT = withTenant(
   { permission: PERMISSIONS.ECO_EDIT, body: UpdateEcoSchema, params: ParamsSchema },
-  async ({ db, tenantUser, params, body }) => {
+  async ({ db, tenantUser, params, body, permissions }) => {
     const { ecoId } = params;
     const {
       status,
@@ -153,6 +177,18 @@ export const PUT = withTenant(
       if (!validNext.includes(status)) {
         throw badRequest(
           `Cannot transition from ${eco.status} to ${status}. Valid: ${validNext.join(", ") || "none"}`
+        );
+      }
+
+      // Deciding an ECO is a different act from editing one. See
+      // DECISION_STATUSES above for why this was missing and what it let
+      // through. Checked here rather than declared in the route options
+      // because it depends on the target status, which the wrapper cannot
+      // see — this is the documented exception, not a hand-rolled gate.
+      if (DECISION_STATUSES.has(status) && !hasPermission(permissions, PERMISSIONS.ECO_APPROVE)) {
+        throw forbidden(
+          `Moving an ECO to ${status} requires the "Approve ECOs" permission. ` +
+            `Ask an approver to decide it.`
         );
       }
 

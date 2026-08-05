@@ -260,7 +260,14 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // ─── Derived state ───────────────────────────────────────────────────
   const selectedEco = ecos.find((e) => e.id === selectedEcoId) || null;
   const selectionMissing = !loading && selectedEcoId !== null && !selectedEco;
-  const transitions = selectedEco ? VALID_TRANSITIONS[selectedEco.status] || [] : [];
+  // Deciding an ECO needs ECO_APPROVE; editing one does not. Hiding the
+  // button is a UX affordance only — the route enforces it — but without
+  // this an Engineer sees "Approve", clicks it, and gets a 403 for a
+  // control they were shown.
+  const canApprove = can(PERMISSIONS.ECO_APPROVE);
+  const transitions = (selectedEco ? VALID_TRANSITIONS[selectedEco.status] || [] : []).filter(
+    (t) => canApprove || (t.status !== "APPROVED" && t.status !== "REJECTED")
+  );
   const canDelete = selectedEco && DELETABLE_STATUSES.includes(selectedEco.status);
 
   // ─── ECO-level mutations ─────────────────────────────────────────────
