@@ -22,7 +22,8 @@
     "debug-thumbnail": "tsx scripts/debug-thumbnail.ts",
     "postinstall": "node scripts/copy-occt-wasm.mjs",
     "prepare": "husky",
-    "lint:plans": "node scripts/lint-plans.mjs"
+    "lint:plans": "node scripts/lint-plans.mjs",
+    "probe:schema": "node scripts/schema-probe.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

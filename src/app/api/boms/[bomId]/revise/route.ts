@@ -151,13 +151,30 @@ export const POST = withTenant(
         id: uuid(),
         ecoId: body.ecoId,
         bomId: newBomId,
+        // NOT NULL, and omitting it failed every call with 23502. A revision
+        // of an existing BOM is a MODIFY; the row is created by revising, so
+        // there is no case here where it is an ADD or a REMOVE.
+        changeType: "MODIFY",
         fromRevision: source.revision,
         toRevision: revision,
-        createdAt: now,
+        // No `createdAt` — `eco_items` has no such column, and writing it
+        // failed every call with PGRST204 before the NOT NULL above was
+        // even reached. Both were masked by the soft-warning path below.
       });
       // A bad ECO id should not cost the caller the revision they just
       // created, so this is reported rather than thrown.
+      //
+      // But log it as an error too. This branch was written for "the user
+      // typed a bad ECO id" and instead absorbed two schema faults that made
+      // it fire on *every* call — a 23514 CHECK violation, then a PGRST204
+      // and a 23502 — for a day, while the response still read as a mild
+      // note. A soft failure path needs something that notices when it stops
+      // being rare, and a server-side error log is the cheapest version.
       if (error) {
+        console.error(
+          `[boms/${params.bomId}/revise] could not link revision ${newBomId} ` +
+            `to ECO ${body.ecoId}: ${error.code ?? "?"} ${error.message}`
+        );
         return {
           id: newBomId,
           name: source.name,
