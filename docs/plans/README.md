@@ -29,6 +29,7 @@ A plan with no `plan-metrics` block fails too — if a plan genuinely makes no n
 
 Available metrics live in `METRICS` at the top of [`../../scripts/lint-plans.mjs`](../../scripts/lint-plans.mjs). Add one there when a plan needs to assert something new; an undeclared metric name is an error, not a silent pass.
 
-| Plan                                             | Status                                                                  |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| [`codebase-hardening.md`](codebase-hardening.md) | In progress — the route wrapper, primitive adoption, and debt burn-down |
+| Plan                                               | Status                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| [`codebase-hardening.md`](codebase-hardening.md)   | In progress — the route wrapper, primitive adoption, and debt burn-down  |
+| [`cad-erp-integration.md`](cad-erp-integration.md) | Not started — SolidWorks and NetSuite seams; two decisions gate the rest |

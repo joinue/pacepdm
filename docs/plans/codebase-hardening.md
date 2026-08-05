@@ -17,6 +17,33 @@ component-tests: 1
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
 > prose below, then run `npm run lint:plans -- --update`.
 
+## Read this before picking up the queue below
+
+The deployment target is now known: **PACE Technologies, internally, single
+tenant** — the BOM of record and change-control system for our equipment line,
+with SolidWorks upstream and NetSuite downstream. That was not the assumption
+this plan was written under, and it reorders the priorities below.
+
+- **Item 1 (finish the route wrapper) is no longer the highest-value work.** Its
+  value is tenant-isolation correctness by construction, and with one tenant a
+  missing `tenantId` filter cannot leak to anyone. Still worth doing — it is
+  what makes the routes readable and testable — but it is hygiene now, not
+  urgency. The same goes for the RLS lockdown, share links, and SSO.
+- **Trash / undelete is promoted to the top.** For a file vault it was a
+  nuisance. For the BOM of record it is data loss on the thing the company runs
+  on, with recovery only via hand-written SQL. See
+  [Product gaps](#product-gaps-found-along-the-way).
+- **Two operational items now rank above everything in the queue:** a separate
+  development database, and verified backups. Both are in
+  [Do these first](#do-these-first-not-code) as items 4 and 5.
+- **The SolidWorks and NetSuite seams have their own plan** →
+  [`cad-erp-integration.md`](cad-erp-integration.md). Its two "decide before
+  loading real data" items get harder with every part entered, so they should be
+  settled before this queue is resumed.
+
+Suggested order: undelete → dev database → verify backups → BOM import (in the
+integration plan) → then back to item 1 below.
+
 The foundations are in and pushed to `main` (`9695e8d`). What remains is volume, not design: every outstanding item is mechanical, has a counter that can only go down, and can be picked up and put down without losing your place.
 
 **Read [`../ENGINEERING.md`](../ENGINEERING.md) and [`../../AGENTS.md`](../../AGENTS.md) first if you are coming to this cold.**
@@ -88,13 +115,23 @@ Note the follow-on: once 012 _is_ applied, `folder-access.ts` fails **closed** o
 git push origin --delete master
 ```
 
+**4. Stand up a separate Supabase project for development.** `.env.local`
+points at the live project, so dev and prod are the same database and
+`npm run dev` edits real BOMs. That was survivable while the data was test
+data. Once the equipment line is in there, there is no accident buffer at all.
+
+**5. Confirm backups exist and that a restore works.** Nothing in this repo
+addresses Supabase backup posture. For the BOM of record that matters more than
+every counter in the table above combined — and an untested restore is not a
+backup. Do the restore once, into the dev project from item 4.
+
 ---
 
 ## The work queue
 
 ### 1. Finish the route wrapper — 70 routes
 
-Highest value: it is what makes tenant isolation correct by construction rather than by review.
+Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 
 ```bash
 node scripts/lint-conventions.mjs --list unwrapped-route

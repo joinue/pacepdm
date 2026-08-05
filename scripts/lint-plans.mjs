@@ -86,6 +86,7 @@ const tokens = (rule) => () => (tokenCounts ??= lintCounts("lint-tokens.mjs"))[r
 
 const isRoute = (p) => p.replace(/\\/g, "/").endsWith("/route.ts");
 const isTsx = (p) => p.endsWith(".tsx");
+const isMigration = (p) => /migration-\d+.*\.sql$/.test(p.replace(/\\/g, "/"));
 
 const METRICS = {
   "routes-total": () => countFiles(join(ROOT, "src/app/api"), isRoute),
@@ -99,6 +100,18 @@ const METRICS = {
     (tokens("arbitrary-px")() || 0) + (tokens("raw-palette")() || 0) + (tokens("hex-color")() || 0),
   "component-tests": () => countFiles(join(ROOT, "src"), (p) => p.endsWith(".test.tsx")),
   "pages-with-pageheader": () => grepCountFiles(join(ROOT, "src/app"), /\bPageHeader\b/, isTsx),
+
+  // ── Integration gates (docs/plans/cad-erp-integration.md) ──
+  // Unlike the debt counters above, these start at 0 and go UP: each is a
+  // capability that does not exist yet and whose absence the plan asserts.
+  /** BOM CSV import — the SolidWorks handoff. 0 until the route exists. */
+  "bom-import-route": () =>
+    countFiles(join(ROOT, "src/app/api/boms"), (p) =>
+      p.replace(/\\/g, "/").endsWith("/import/route.ts")
+    ),
+  /** Migrations declaring an ERP `externalId` column. 0 until we add one. */
+  "erp-external-id": () =>
+    grepCountFiles(join(ROOT, "supabase/migrations"), /\bexternalId\b/, isMigration),
 };
 
 // ─── Scan ───────────────────────────────────────────────────────────────────
