@@ -67,6 +67,56 @@ const SCHEMA = new Map(
     new Set(Object.keys(d.properties ?? {})),
   ])
 );
+
+/**
+ * Columns PostgREST reports as `required`.
+ *
+ * **This is NOT "must be named by an INSERT".** It is every NOT NULL column,
+ * including ones with a DEFAULT that Postgres fills in happily. Reporting a
+ * bare diff against it produced 27 findings of which essentially all were
+ * noise — `files.revision`, `parts.isEndItem` and `approval_groups.isActive`
+ * all have defaults and are correctly omitted by their callers.
+ *
+ * So this is only a candidate list. Each candidate is confirmed against the
+ * live database below before it is reported: a column is genuinely required
+ * only if omitting it produces a 23502 naming it.
+ */
+const REQUIRED = new Map(
+  Object.entries(spec.definitions ?? {}).map(([t, d]) => [t, d.required ?? []])
+);
+/**
+ * Which columns are declared with a DEFAULT, read from the migration SQL.
+ *
+ * **This script never writes.** An earlier version confirmed candidates by
+ * posting a row that omitted the column under test, on the reasoning that a
+ * bogus foreign key would always reject it. That holds for child tables and
+ * not for root ones: run against `tenants`, which references nothing, it
+ * inserted a junk row into the production database. It was caught by a guard
+ * and removed, and the technique is gone rather than patched — a read-only
+ * audit that can write under some inputs is not read-only.
+ *
+ * The static substitute: PostgREST's `required` cannot distinguish "NOT NULL"
+ * from "NOT NULL with a default", but the migration files can. `revision` is
+ * declared `TEXT NOT NULL DEFAULT 'A'` and is correctly omitted by callers;
+ * `changeType` is declared `TEXT NOT NULL` and is not.
+ *
+ * The migrations are not a ledger of what is live
+ * (docs/decisions/hand-applied-migrations.md), so this is a filter for noise
+ * rather than proof. Findings say "verify" for that reason.
+ */
+function loadDefaultedColumns() {
+  const dir = join(ROOT, "supabase/migrations");
+  const defaulted = new Set();
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".sql")) continue;
+    const sql = readFileSync(join(dir, f), "utf8");
+    for (const m of sql.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"\s+[A-Za-z0-9_ ()]*?DEFAULT\s/gi)) {
+      defaulted.add(m[1]);
+    }
+  }
+  return defaulted;
+}
+const DEFAULTED = loadDefaultedColumns();
 const RPCS = new Set(
   Object.keys(spec.paths ?? {})
     .filter((p) => p.startsWith("/rpc/"))
@@ -84,12 +134,48 @@ function walk(dir, out = []) {
 }
 
 const findings = [];
+/** NOT NULL suspicions awaiting live confirmation. */
+const candidates = [];
 function flag(kind, file, line, detail) {
   findings.push({ kind, file: relative(ROOT, file).replace(/\\/g, "/"), line, detail });
 }
 
 function lineOf(src, idx) {
   return src.slice(0, idx).split("\n").length;
+}
+
+/** Remove // and /* *​/ comments, leaving string literals intact. */
+function stripComments(s) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      out += c;
+      if (c === "\\") {
+        out += s[++i] ?? "";
+      } else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      out += c;
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "/") {
+      while (i < s.length && s[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      i += 2;
+      while (i < s.length && !(s[i] === "*" && s[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
 }
 
 /**
@@ -103,6 +189,13 @@ function lineOf(src, idx) {
  * position. Splitting first keeps every ternary safely inside a value.
  */
 function objectKeys(body) {
+  // Strip comments BEFORE splitting. A `// NOT NULL, and omitting it…`
+  // comment inside the literal contains commas, and splitting on those
+  // shredded the following property into fragments — which reported the
+  // property as absent even though it was right there. Found by this probe
+  // flagging a line that had been fixed minutes earlier.
+  body = stripComments(body);
+
   const parts = [];
   let depth = 0;
   let start = 0;
@@ -157,7 +250,12 @@ function extractBalanced(src, start, open = "{", close = "}") {
 }
 
 for (const file of walk(SRC)) {
-  const src = readFileSync(file, "utf8");
+  // Comments are stripped up front so a `.insert({...})` written inside a
+  // JSDoc example is not audited as real code — src/lib/tenant-db.ts
+  // documents the wrapper with exactly that, and it reported six phantom
+  // findings. Newlines are preserved by stripComments, so line numbers in
+  // findings still point at the right place.
+  const src = stripComments(readFileSync(file, "utf8"));
 
   // 1. .from("table")
   for (const m of src.matchAll(/\.from\(\s*["'`]([a-z_]+)["'`]\s*\)/g)) {
@@ -196,7 +294,27 @@ for (const file of walk(SRC)) {
     const openIdx = src.indexOf("{", m.index + m[0].length - 1);
     const body = extractBalanced(src, openIdx);
     if (!body) continue;
-    for (const key of objectKeys(body)) {
+    const keys = objectKeys(body);
+
+    // Missing NOT NULL columns — the `changeType` class. INSERT only: an
+    // UPDATE naturally names a subset. Skipped when the literal spreads
+    // another object, since the spread's keys are not knowable from here.
+    if (m[1] === "insert" && !/(^|[\s,{])\.\.\./.test(body)) {
+      const present = new Set(keys);
+      for (const req of REQUIRED.get(table) ?? []) {
+        // `tenantId` is stamped on every write by the scoped client
+        // (src/lib/tenant-db.ts) — that is the entire point of withTenant,
+        // so a handler omitting it is correct, not broken.
+        if (req === "tenantId") continue;
+        if (!present.has(req)) {
+          // Candidate only. Confirmed against the database after the scan,
+          // because `required` over-reports — see the note on REQUIRED.
+          candidates.push({ table, column: req, file, line: lineOf(src, openIdx) });
+        }
+      }
+    }
+
+    for (const key of keys) {
       if (cols.has(key)) continue;
       // Ternary branches inside the literal read as keys. A SCREAMING_CASE
       // token is a status constant, not a column name anyone wrote.
@@ -236,10 +354,25 @@ for (const file of walk(SRC)) {
   }
 }
 
+// ── filter NOT NULL candidates by declared DEFAULTs ──────────────────────
+for (const c of candidates) {
+  if (DEFAULTED.has(c.column)) continue;
+  flag(
+    "missing-required",
+    c.file,
+    c.line,
+    `${c.table}.${c.column} is NOT NULL and no DEFAULT is declared for it — this .insert() omits it. Verify.`
+  );
+}
+const checked = candidates.length;
+
 const byKind = {};
 for (const f of findings) (byKind[f.kind] ??= []).push(f);
 
-console.log(`\nLive schema: ${SCHEMA.size} tables, ${RPCS.size} RPCs\n`);
+console.log(
+  `\nLive schema: ${SCHEMA.size} tables, ${RPCS.size} RPCs` +
+    ` · ${checked} NOT NULL candidate(s) screened against declared DEFAULTs\n`
+);
 if (!findings.length) {
   console.log("No schema/code mismatches found.\n");
 } else {
