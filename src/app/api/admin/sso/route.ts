@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import {
+  getApiTenantUser,
+  hasPermission,
+  permissionsExceedingActor,
+  PERMISSIONS,
+} from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { generateVerificationToken, verificationRecordName } from "@/lib/sso-admin";
@@ -86,12 +91,32 @@ export async function POST(request: NextRequest) {
     const db = getServiceClient();
     const { data: role } = await db
       .from("roles")
-      .select("id, name")
+      .select("id, name, permissions")
       .eq("id", parsed.data.jitRoleId)
       .eq("tenantId", tenantUser.tenantId)
       .maybeSingle();
     if (!role) {
       return NextResponse.json({ error: "Invalid role for this workspace" }, { status: 400 });
+    }
+
+    // Privilege ceiling. `jitRoleId` is the role every future SSO user from
+    // this domain is provisioned into (src/lib/sso-jit.ts writes it straight
+    // onto the new tenant_users row), so setting it is assigning a role — and
+    // takes the same guard as inviting a user or editing a role.
+    //
+    // Not reachable on the seeded roles, since only "*" carries
+    // ADMIN_SETTINGS today. It becomes reachable the moment a tenant makes a
+    // custom role with ADMIN_SETTINGS and less than everything else, which is
+    // an ordinary thing to want.
+    const jitRolePerms = Array.isArray(role.permissions) ? (role.permissions as string[]) : [];
+    const excess = permissionsExceedingActor(jitRolePerms, permissions);
+    if (excess.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot provision SSO users into a role with permissions you don't hold: ${excess.join(", ")}`,
+        },
+        { status: 403 }
+      );
     }
 
     const now = new Date().toISOString();

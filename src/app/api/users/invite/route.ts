@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import {
+  getApiTenantUser,
+  hasPermission,
+  permissionsExceedingActor,
+  PERMISSIONS,
+} from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { createClient } from "@supabase/supabase-js";
@@ -65,13 +70,32 @@ export async function POST(request: NextRequest) {
     // Verify role belongs to tenant
     const { data: role } = await db
       .from("roles")
-      .select("id")
+      .select("id, permissions")
       .eq("id", roleId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
 
     if (!role) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+
+    // Privilege ceiling. Inviting someone into a role is assigning them one,
+    // so it takes the same guard as changing an existing user's role in
+    // users/[userId] — which had it while this route did not.
+    //
+    // The gap was reachable: ADMIN_USERS gates this route, and the seeded
+    // Manager role holds ADMIN_USERS without holding "*". A Manager could
+    // therefore invite an address they control as an Admin and come back
+    // through the front door with permissions they were never granted.
+    const newRolePerms = Array.isArray(role.permissions) ? (role.permissions as string[]) : [];
+    const excess = permissionsExceedingActor(newRolePerms, permissions);
+    if (excess.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot invite someone into a role with permissions you don't hold: ${excess.join(", ")}`,
+        },
+        { status: 403 }
+      );
     }
 
     // Create auth user + send invite email via Supabase Admin API

@@ -11,11 +11,12 @@ FK, the index, the picker and the API all existed and agreed with each other,
 and every insert had still been rejected for a day by a CHECK constraint
 nobody re-read.
 
-Five findings across five workflows. Every one was invisible to
+Six findings across seven areas. Every one was invisible to
 `npm run check`.
 
-**Read this before adding features.** Four of the five were governance or
-correctness holes in the change-control story — the thing this product is for.
+**Read this before adding features.** Five of the six were governance or
+correctness holes — in the change-control story this product exists for, or in
+who is allowed to weaken it.
 
 ---
 
@@ -97,6 +98,26 @@ empty. Postgres refused the delete. The route discarded the error, returned
 The audit log is what the compliance story rests on. A false entry in it is
 worse than the failed delete.
 
+### 6. Inviting a user had no privilege ceiling
+
+`permissionsExceedingActor` is the guard that stops anyone handing out a role
+more powerful than their own. `users/[userId]` called it on role _changes_.
+`users/invite` assigns a role too — to a user who does not exist yet — and did
+not. Neither did `admin/sso`, where `jitRoleId` is the role every future SSO
+user from a domain is provisioned into.
+
+The invite gap was reachable on the seeded roles rather than only in theory:
+`ADMIN_USERS` gates the route, and **Manager holds `ADMIN_USERS` without
+holding `*`**. A Manager could invite an address they control as an Admin and
+return through the front door with permissions nobody granted them.
+
+The SSO gap needs a custom role carrying `ADMIN_SETTINGS` and less than
+everything else — not the seeded set, but an ordinary thing for a tenant to
+want.
+
+Both now call the guard. The pattern is the same as finding 2: **a rule
+applied to one of two paths that need it.**
+
 ---
 
 ## What this says about the codebase
@@ -116,6 +137,11 @@ is worth turning into one.
 **Unresolved narration in shipped code is a defect marker.** Finding 4's
 author wrote down that they had not solved the problem, in the function, and
 it shipped.
+
+**A rule applied to one of two paths is the most common shape here.** Findings
+2 and 6 are both this: the guard existed, was correct, and covered one caller.
+When you add a guard, grep for every route that does the same _act_, not the
+same _thing_.
 
 ---
 
@@ -158,12 +184,19 @@ by directory reported `audit.view` as unenforced when its gate is a
 
 ### 3. Audit what this pass did not reach
 
-Covered: file lifecycle, ECO, BOM, approvals engine, folders/ACLs/trash.
+Covered: file lifecycle, ECO, BOM, approvals engine, folders/ACLs/trash,
+SSO/JIT provisioning, and cron authentication.
+
+`withCron` came through clean — constant-time bearer compare, and a missing
+`CRON_SECRET` is a 401 rather than a skipped check. SSO/JIT itself is careful:
+domains must be `status='active'`, the adoption path rewrites `authUserId` on
+the existing row so history stays attached, and races resolve through
+`ON CONFLICT`. Finding 6 is in the admin route that configures it, not the
+provisioning.
 
 Not covered: parts and vendors beyond their schema, the search page, metadata
-fields, saved searches, SSO/JIT provisioning, the cron reminder job, and
-notification delivery. The first four are lower stakes; **SSO and cron are
-not** — both run without a browser session, and neither has been exercised.
+fields, saved searches, and notification delivery. All lower stakes than what
+is above, but none of them have been walked.
 
 ### 4. Self-approval is still permitted
 
