@@ -25,12 +25,16 @@ const CreateBomSchema = z.object({
 export const GET = withTenant({}, async ({ db }) => {
   const { data } = await db
     .from("boms")
-    .select("*")
+    .select("*, part:parts!boms_partId_fkey(id, partNumber, isEndItem)")
     .is("deletedAt", null)
     .order("createdAt", { ascending: false })
     .limit(500);
 
-  const boms = (data ?? []) as unknown as Array<{ id: string; name: string }>;
+  const boms = (data ?? []) as unknown as Array<{
+    id: string;
+    name: string;
+    part: { id: string; partNumber: string; isEndItem: boolean } | null;
+  }>;
   if (boms.length === 0) return [];
 
   // `bom_items` has no tenantId, so it is queried by the parent ids we just
@@ -74,9 +78,19 @@ export const GET = withTenant({}, async ({ db }) => {
   return boms.map((b) => {
     const parents = usedIn.get(b.id) ?? [];
     const nearMiss = parents.length === 0 ? unlinkedRefs.get(looseKey(b.name)) : undefined;
+    // Supabase returns a to-one embed as an object or a single-element array
+    // depending on how it infers the FK; normalise before reading it.
+    const part = Array.isArray(b.part) ? (b.part[0] ?? null) : b.part;
     return {
       ...b,
+      part,
       usedIn: parents,
+      /**
+       * Declared on the part, never inferred from structure. A BOM is an end
+       * item because someone said so, and it stays one wherever it sits.
+       * See docs/decisions/bom-structure.md.
+       */
+      isEndItem: part?.isEndItem === true,
       // Set only when this BOM has no parents but something references a
       // name that differs from it only in punctuation or case.
       orphanHint: nearMiss && nearMiss !== b.name ? nearMiss : null,

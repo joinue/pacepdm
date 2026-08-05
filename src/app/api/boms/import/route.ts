@@ -199,6 +199,10 @@ export const POST = withTenant(
         revision: bom.revision || "A",
         status: "DRAFT",
         fileId: null,
+        // The item this BOM describes. Migration 044 made the importer's
+        // name-equals-part-number convention an actual relationship, which
+        // is what lets `parts.isEndItem` reach the BOM list.
+        partId: partIdByNumber.get(bom.partNumber) ?? null,
         createdById: tenantUser.id,
         createdAt: now,
         updatedAt: now,

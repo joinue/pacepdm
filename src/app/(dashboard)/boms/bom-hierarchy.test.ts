@@ -9,7 +9,12 @@ import type { BOM } from "./types";
  * the bad data that already exists — rather than a two-node toy.
  */
 
-function bom(name: string, usedIn: string[] = [], orphanHint: string | null = null): BOM {
+function bom(
+  name: string,
+  usedIn: string[] = [],
+  orphanHint: string | null = null,
+  isEndItem = false
+): BOM {
   return {
     id: `id-${name}`,
     name,
@@ -18,6 +23,7 @@ function bom(name: string, usedIn: string[] = [], orphanHint: string | null = nu
     createdAt: "2026-08-05T00:00:00Z",
     usedIn: usedIn.map((n) => ({ id: `id-${n}`, name: n })),
     orphanHint,
+    isEndItem,
   };
 }
 
@@ -116,7 +122,65 @@ describe("buildBomTree", () => {
   });
 
   it("handles an empty list", () => {
-    expect(buildBomTree([])).toEqual({ roots: [], orphans: [], subAssemblyCount: 0 });
+    expect(buildBomTree([])).toEqual({
+      products: [],
+      topLevel: [],
+      roots: [],
+      orphans: [],
+      subAssemblyCount: 0,
+    });
+  });
+});
+
+/**
+ * Designation is declared on the part and structure is derived from
+ * `linkedBomId`; the two are independent. These are the cases where they
+ * disagree — which is the whole reason they are separate fields.
+ */
+describe("buildBomTree — end items are orthogonal to structure", () => {
+  it("keeps an unmarked, unreferenced BOM out of products", () => {
+    // A draft nobody has linked yet is top level but not a product. The old
+    // label claimed the second from the first.
+    const tree = buildBomTree([bom("Scratch BOM")]);
+    expect(names(tree.products)).toEqual([]);
+    expect(names(tree.topLevel)).toEqual(["Scratch BOM"]);
+  });
+
+  it("lists a marked BOM as a product even though nothing references it", () => {
+    const tree = buildBomTree([bom("NANO-1000S", [], null, true)]);
+    expect(names(tree.products)).toEqual(["NANO-1000S"]);
+    expect(names(tree.topLevel)).toEqual([]);
+  });
+
+  it("shows a sub-assembly you also sell in BOTH places", () => {
+    // The spare-parts case: N1S-A-SA ships inside the machine and is sold on
+    // its own. Two true statements, so it appears twice.
+    const spindle = bom("N1S-A-SA", ["NANO-1000S"], null, true);
+    const tree = buildBomTree([bom("NANO-1000S", [], null, true), spindle]);
+
+    expect(names(tree.products)).toEqual(["N1S-A-SA", "NANO-1000S"]);
+    // ...and still nested under the machine that uses it.
+    const machine = tree.products.find((n) => n.bom.name === "NANO-1000S")!;
+    expect(names(machine.children)).toEqual(["N1S-A-SA"]);
+    // Counted once as a sub-assembly, because it is one BOM.
+    expect(tree.subAssemblyCount).toBe(1);
+  });
+
+  it("does not double-count a marked root in `roots`", () => {
+    const tree = buildBomTree([bom("NANO-1000S", [], null, true)]);
+    expect(tree.roots).toHaveLength(1);
+  });
+
+  it("puts products before undesignated top-level BOMs", () => {
+    const tree = buildBomTree([bom("Zzz Draft"), bom("NANO-1000S", [], null, true)]);
+    expect(names(tree.roots)).toEqual(["NANO-1000S", "Zzz Draft"]);
+  });
+
+  it("only flags an orphan among undesignated roots", () => {
+    // A deliberately-marked product is not a broken link, even if some line
+    // near-misses its name.
+    const marked = bom("NANO-1000S Casting-Components", [], "NANO1000S Casting-C", true);
+    expect(buildBomTree([marked]).orphans).toEqual([]);
   });
 });
 

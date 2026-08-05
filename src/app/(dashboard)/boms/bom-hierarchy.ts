@@ -26,7 +26,21 @@ export interface BomTreeNode {
 }
 
 export interface BomTree {
-  /** Referenced by no other BOM: products, and anything not yet linked up. */
+  /**
+   * Declared end items — someone marked the part as sold or shipped on its
+   * own. Shown at the top regardless of structure, so a sub-assembly you
+   * also sell appears here AND nested under every machine that uses it.
+   * Both statements are true.
+   */
+  products: BomTreeNode[];
+  /**
+   * Unreferenced BOMs nobody has designated: new drafts, work in progress,
+   * and anything not yet linked into a parent. Deliberately not called
+   * "products" — being unused is not the same as being sellable, and the
+   * old label claimed the second from the first.
+   */
+  topLevel: BomTreeNode[];
+  /** `products` followed by `topLevel` — what the page actually renders. */
   roots: BomTreeNode[];
   /**
    * Roots that look like a link broken by a typo rather than a real product
@@ -96,11 +110,20 @@ export function buildBomTree(boms: BOM[]): BomTree {
     };
   };
 
-  const rootNodes = roots.map((b) => build(b, 0, new Set())).sort(byName);
+  // A declared end item is shown at the top even when it is also somebody's
+  // child. That is the whole point of keeping designation separate from
+  // structure: a spare you sell is both.
+  const endItems = boms.filter((b) => b.isEndItem);
+  const structuralRoots = roots.filter((b) => !b.isEndItem);
+
+  const products = endItems.map((b) => build(b, 0, new Set())).sort(byName);
+  const topLevel = structuralRoots.map((b) => build(b, 0, new Set())).sort(byName);
 
   return {
-    roots: rootNodes,
-    orphans: roots.filter((b) => !!b.orphanHint),
+    products,
+    topLevel,
+    roots: [...products, ...topLevel],
+    orphans: structuralRoots.filter((b) => !!b.orphanHint),
     subAssemblyCount: subAssemblies.size,
   };
 }

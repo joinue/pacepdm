@@ -44,6 +44,7 @@ import {
   Download,
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import type { Part, PartDetail } from "./parts-types";
 import { CATEGORIES, categoryVariants } from "./parts-types";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -135,6 +136,29 @@ export default function PartsPage() {
     setPartWhereUsed(null);
     router.replace("/parts", { scroll: false });
   }, [router]);
+
+  /**
+   * Designate the part as an end item, or take the designation away. Written
+   * to the part rather than to any BOM: the fact is about the item, and a
+   * part can be sellable without having a bill of materials at all — the
+   * polishing wheels sold with the NANO-1000S are exactly that.
+   */
+  const handleToggleEndItem = useCallback(
+    async (isEndItem: boolean) => {
+      if (!selectedPartId) return;
+      try {
+        await fetchJson(`/api/parts/${selectedPartId}`, {
+          method: "PUT",
+          body: { isEndItem },
+        });
+        setDetail((prev) => (prev ? { ...prev, isEndItem } : prev));
+        toast.success(isEndItem ? "Marked as an end item" : "No longer an end item");
+      } catch (err) {
+        toast.error(errorMessage(err));
+      }
+    },
+    [selectedPartId]
+  );
 
   const loadPartDetail = useCallback(async (partId: string) => {
     setSelectedPartId(partId);
@@ -562,6 +586,7 @@ export default function PartsPage() {
                   onDeleteVendorLink={handleDeleteVendorLink}
                   onPreviewFile={setPreviewFile}
                   onNavigatePartDetail={loadPartDetail}
+                  onToggleEndItem={handleToggleEndItem}
                 />
               </ErrorBoundary>
             </SheetContent>

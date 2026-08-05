@@ -458,8 +458,15 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
             className={selectedBomId ? "lg:w-64 shrink-0 space-y-2" : "flex-1 min-w-0 space-y-2"}
           >
             <div className="flex items-center justify-between gap-2">
+              {/* Two sections, because they answer different questions.
+                  "Products" is declared — someone marked the part an end
+                  item. "Top level" is derived — nothing references it yet.
+                  A draft BOM is the second and not the first, and the old
+                  single "Products" label claimed otherwise. */}
               <SectionLabel>
-                {tree.roots.length === 1 ? "Product" : "Products"}
+                {tree.products.length > 0
+                  ? `${tree.products.length} product${tree.products.length === 1 ? "" : "s"}`
+                  : "Top level"}
                 {tree.subAssemblyCount > 0 && ` · ${tree.subAssemblyCount} sub-assemblies`}
               </SectionLabel>
               {tree.subAssemblyCount > 0 && (
@@ -473,6 +480,13 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                 </Button>
               )}
             </div>
+
+            {tree.products.length > 0 && tree.topLevel.length > 0 && (
+              <p className="text-3xs text-muted-foreground pt-1">
+                Products are parts marked as end items. Anything below is unreferenced but not
+                designated.
+              </p>
+            )}
 
             {visibleRows(tree.roots, expandedBoms).map((node) => (
               <BomTreeRow

@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { PartWhereUsed } from "@/lib/where-used";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, X, FileText, Building2, ImageIcon, Upload, Loader2 } from "lucide-react";
 import type { PartDetail, PartVendorLink } from "../parts-types";
 import { CATEGORIES, categoryVariants } from "../parts-types";
@@ -23,6 +24,8 @@ interface PartDetailPanelProps {
   onDeleteVendorLink: (linkId: string) => void;
   onPreviewFile: (file: { id: string; name: string }) => void;
   onNavigatePartDetail: (partId: string) => void;
+  /** Declare/undeclare the part as an end item. */
+  onToggleEndItem: (isEndItem: boolean) => void;
 }
 
 export function PartDetailPanel({
@@ -37,6 +40,7 @@ export function PartDetailPanel({
   onDeleteVendorLink,
   onPreviewFile,
   onNavigatePartDetail,
+  onToggleEndItem,
 }: PartDetailPanelProps) {
   const router = useRouter();
 
@@ -88,6 +92,28 @@ export function PartDetailPanel({
         {detail.description && (
           <p className="text-sm text-muted-foreground">{detail.description}</p>
         )}
+
+        {/*
+          End item designation. Deliberately declared here rather than
+          inferred from whether anything uses the part: a spare you sell is
+          both a component and a product, and no arrangement of BOM rows can
+          tell you which parts you sell. See
+          docs/decisions/bom-structure.md.
+        */}
+        <label className="flex items-start gap-2.5 rounded-md border border-border/60 p-2.5 cursor-pointer hover:bg-foreground/5">
+          <Checkbox
+            checked={detail.isEndItem === true}
+            onCheckedChange={(checked) => onToggleEndItem(checked === true)}
+            className="mt-0.5"
+          />
+          <span className="min-w-0">
+            <span className="text-sm block">End item</span>
+            <span className="text-xs text-muted-foreground block">
+              Sold or shipped on its own. Its BOM is listed as a product, even when the part is also
+              used inside something else.
+            </span>
+          </span>
+        </label>
 
         {/* Properties */}
         <div className="grid grid-cols-2 gap-y-2 text-sm">

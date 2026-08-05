@@ -20,6 +20,11 @@ const UpdatePartSchema = z.object({
   currency: z.string().optional(),
   unit: z.string().optional(),
   notes: optionalString,
+  /**
+   * Designates the part as something sold or shipped on its own. Independent
+   * of where it sits in any BOM — see docs/decisions/bom-structure.md.
+   */
+  isEndItem: z.boolean().optional(),
 });
 
 export async function GET(

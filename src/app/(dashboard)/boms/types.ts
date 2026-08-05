@@ -22,6 +22,15 @@ export interface BOM {
    * broken by a typo. Holds the misspelt reference as written.
    */
   orphanHint?: string | null;
+  /** The part this BOM describes, if it has been linked to one. */
+  part?: { id: string; partNumber: string; isEndItem: boolean } | null;
+  /**
+   * Declared on the part, never derived from structure: this BOM describes
+   * something sold or shipped on its own. Orthogonal to `usedIn` — a
+   * sub-assembly you also sell as a spare is both nested and an end item.
+   * See docs/decisions/bom-structure.md.
+   */
+  isEndItem?: boolean;
 }
 
 export interface BOMItem {

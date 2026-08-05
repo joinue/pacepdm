@@ -149,6 +149,13 @@ to be resolved to a part before the BOM can leave `DRAFT`. Enforce it in the
 person who can fix it. _Partly closed: `POST /api/boms/import` always resolves
 `partId`, so imported BOMs are already clean. Hand-entered ones are not._
 
+**2a. End items are already modelled, and map straight across.** Migration
+044 added `parts.isEndItem` — declared, never inferred — which is the same
+concept as NetSuite's _Available for Sale_ and Windchill's _End Item_. When
+the push is built, that field decides what NetSuite should see as a sellable
+item, independently of where the part sits in any BOM. See
+[`../decisions/bom-structure.md`](../decisions/bom-structure.md).
+
 **2b. Configure-to-order options do not exist in NetSuite's eyes either.**
 Migration 043 added `bom_items.optionGroup` so the NANO-1000S can carry its
 110V and 220V parts without the rollup charging for both. An ERP push has to

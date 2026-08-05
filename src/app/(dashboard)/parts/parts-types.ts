@@ -23,6 +23,12 @@ export interface Part {
 }
 
 export interface PartDetail extends Part {
+  /**
+   * Declared, not derived: this part is sold or shipped on its own. It says
+   * nothing about where the part sits in any BOM — a spare can be both a
+   * component and an end item. See docs/decisions/bom-structure.md.
+   */
+  isEndItem?: boolean;
   vendors: PartVendorLink[];
   files: {
     id: string;
