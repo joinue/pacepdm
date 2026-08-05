@@ -9,6 +9,19 @@ export interface BOM {
   revision: string;
   status: string;
   createdAt: string;
+  /**
+   * BOMs that reference this one as a sub-assembly, derived by the list
+   * endpoint from `bom_items.linkedBomId`. Empty means top-level. Absent on
+   * responses from endpoints other than `GET /api/boms` — treat undefined as
+   * "unknown", not as "top-level".
+   */
+  usedIn?: { id: string; name: string }[];
+  /**
+   * Set when this BOM has no parents but some line references a name that
+   * differs from it only in punctuation or case — i.e. a sub-assembly link
+   * broken by a typo. Holds the misspelt reference as written.
+   */
+  orphanHint?: string | null;
 }
 
 export interface BOMItem {

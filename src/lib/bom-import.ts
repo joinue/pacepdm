@@ -228,10 +228,17 @@ export interface PartSummary {
  * Punctuation- and case-insensitive key for a part number, used only to spot
  * near-miss references. `NANO1000S Casting-Components` and
  * `NANO-1000S Casting-Components` collapse to the same key.
+ *
+ * Exported because the same rule has to hold in two places: the importer,
+ * which catches a typo as the file lands, and `GET /api/boms`, which catches
+ * one already sitting in the database. Two implementations of "nearly the
+ * same name" would eventually disagree.
  */
-function loosely(partNumber: string): string {
+export function looseKey(partNumber: string): string {
   return partNumber.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
+
+const loosely = looseKey;
 
 export interface NearMissLink {
   /** The BOM containing the suspect line. */

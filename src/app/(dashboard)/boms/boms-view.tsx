@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import {
   X,
   ArrowRight,
   Link as LinkIcon,
+  TriangleAlert,
 } from "lucide-react";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { toast } from "sonner";
@@ -46,6 +47,8 @@ import { BomItemsTable } from "./components/bom-items-table";
 import { BomRollupPanel } from "./components/bom-rollup-panel";
 import { BomBaselinesPanel } from "./components/bom-baselines-panel";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionLabel } from "@/components/ui/section-label";
+import { groupBoms } from "./bom-hierarchy";
 import { PageContainer } from "@/components/ui/page-container";
 
 /**
@@ -97,6 +100,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
   }, [notificationCounts.byCategory.boms]);
 
   const [boms, setBoms] = useState<BOM[]>([]);
+  // Products vs sub-assemblies, derived from `usedIn` — which the list
+  // endpoint computes from `bom_items.linkedBomId`. The split therefore
+  // follows the real structure and cannot drift from it.
+  const groups = useMemo(() => groupBoms(boms), [boms]);
   const [items, setItems] = useState<BOMItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -368,60 +375,41 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
       ) : (
         <div className="flex gap-4 flex-col lg:flex-row">
           {/*
-            The list is a narrow sidebar only when it is standing beside a
-            selected BOM. With nothing selected there is no detail pane to
-            leave room for, so a fixed 14rem column would truncate every name
-            while most of the page sat empty — which is exactly what happened
-            once imported BOM names ran to 48 characters. Browse mode gets the
-            full width as a grid; picking a BOM collapses it back.
+            Two things the flat list got wrong once a real product landed.
+
+            Layout: it was a fixed 14rem sidebar whether or not anything was
+            selected, so browsing truncated every name while most of the page
+            sat empty. Browse mode now takes the full width; selecting a BOM
+            collapses it back to the sidebar it needs to be.
+
+            Structure: 26 rows rendered identically when 25 of them are
+            children of one machine. Products come first, sub-assemblies are
+            grouped under their parent, and a link broken by a typo is called
+            out rather than sitting among the products looking deliberate.
           */}
           <div
-            className={
-              selectedBomId
-                ? "lg:w-64 shrink-0 space-y-1"
-                : "flex-1 min-w-0 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
-            }
+            className={selectedBomId ? "lg:w-64 shrink-0 space-y-3" : "flex-1 min-w-0 space-y-4"}
           >
-            {boms.map((bom) => {
-              const unread = bomUnread[bom.id] || 0;
-              return (
-                <button
-                  key={bom.id}
-                  title={bom.name}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
-                    selectedBomId === bom.id
-                      ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
-                      : "bg-card border-border/60 text-foreground hover:border-foreground/20 hover:bg-foreground/5"
-                  }`}
-                  onClick={() => selectBom(bom.id)}
-                >
-                  <div className="flex items-start gap-1.5 min-w-0">
-                    {/* Sidebar has one line to give; the grid can afford two,
-                        which fits every name in the NANO-1000S build list
-                        without a tooltip. `title` covers the rest either way. */}
-                    <p
-                      className={`text-sm flex-1 min-w-0 ${
-                        selectedBomId ? "truncate" : "line-clamp-2 break-words"
-                      }`}
-                    >
-                      {bom.name}
-                    </p>
-                    {unread > 0 && (
-                      <span
-                        aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
-                        className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
-                      >
-                        {unread > 9 ? "9+" : unread}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
-                    <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
-                  </div>
-                </button>
-              );
-            })}
+            <BomGroupSection
+              label={groups.topLevel.length === 1 ? "Product" : "Products"}
+              boms={groups.topLevel}
+              compact={!!selectedBomId}
+              selectedBomId={selectedBomId}
+              bomUnread={bomUnread}
+              onSelect={selectBom}
+            />
+            {groups.subAssemblies.length > 0 && (
+              <BomGroupSection
+                label="Sub-assemblies"
+                count={groups.subAssemblies.length}
+                boms={groups.subAssemblies}
+                compact={!!selectedBomId}
+                selectedBomId={selectedBomId}
+                bomUnread={bomUnread}
+                onSelect={selectBom}
+                showParent
+              />
+            )}
           </div>
 
           {/* Selection points at a BOM that no longer exists */}
@@ -658,5 +646,105 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         />
       )}
     </PageContainer>
+  );
+}
+
+/**
+ * One labelled group of BOM cards. Extracted because products and
+ * sub-assemblies render identically apart from their heading and the parent
+ * hint — duplicating the card markup twice in a 630-line file is how the two
+ * copies drift.
+ */
+function BomGroupSection({
+  label,
+  count,
+  boms,
+  compact,
+  selectedBomId,
+  bomUnread,
+  onSelect,
+  showParent = false,
+}: {
+  label: string;
+  count?: number;
+  boms: BOM[];
+  /** True when standing beside a selected BOM, i.e. in the narrow sidebar. */
+  compact: boolean;
+  selectedBomId: string | null;
+  bomUnread: Record<string, number>;
+  onSelect: (id: string) => void;
+  showParent?: boolean;
+}) {
+  if (boms.length === 0) return null;
+
+  return (
+    <section className="space-y-1">
+      <SectionLabel>
+        {label}
+        {count !== undefined && ` (${count})`}
+      </SectionLabel>
+      <div
+        className={compact ? "space-y-1" : "grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"}
+      >
+        {boms.map((bom) => {
+          const unread = bomUnread[bom.id] || 0;
+          const parent = bom.usedIn?.[0];
+          const extraParents = (bom.usedIn?.length ?? 0) - 1;
+          return (
+            <button
+              key={bom.id}
+              title={bom.name}
+              className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
+                selectedBomId === bom.id
+                  ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
+                  : "bg-card border-border/60 text-foreground hover:border-foreground/20 hover:bg-foreground/5"
+              }`}
+              onClick={() => onSelect(bom.id)}
+            >
+              <div className="flex items-start gap-1.5 min-w-0">
+                {/* The sidebar has one line to give; browse mode can afford
+                    two, which fits every name in the NANO-1000S build list
+                    without needing the tooltip. */}
+                <p
+                  className={`text-sm flex-1 min-w-0 ${compact ? "truncate" : "line-clamp-2 break-words"}`}
+                >
+                  {bom.name}
+                </p>
+                {unread > 0 && (
+                  <span
+                    aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
+                    className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
+                  >
+                    {unread > 9 ? "9+" : unread}
+                  </span>
+                )}
+              </div>
+              {showParent && parent && (
+                <p className="text-3xs text-muted-foreground truncate mt-0.5">
+                  in {parent.name}
+                  {extraParents > 0 && ` +${extraParents} more`}
+                </p>
+              )}
+              {/* A top-level BOM that something meant to reference but
+                  misspelt. Without this it sits among the products looking
+                  deliberate — which is how NANO-1000S Casting-Components
+                  read after the first import. */}
+              {bom.orphanHint && (
+                <p className="text-3xs text-warning mt-0.5 flex items-start gap-1">
+                  <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
+                  <span className="min-w-0">
+                    Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
+                  </span>
+                </p>
+              )}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
+                <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
