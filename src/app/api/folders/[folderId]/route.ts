@@ -152,25 +152,57 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot delete root folder" }, { status: 400 });
     }
 
-    // Check for contents
-    const { count: fileCount } = await db
+    // Check for contents.
+    //
+    // Counted WITHOUT the `deletedAt IS NULL` filter this used to carry.
+    // `files_folderId_fkey` is ON DELETE RESTRICT, so a trashed file still
+    // pins its folder — the folder looked empty to this check, Postgres
+    // refused the delete, and (see below) the route reported success anyway.
+    const { count: liveFileCount } = await db
       .from("files")
       .select("*", { count: "exact", head: true })
       .eq("folderId", folderId)
       .is("deletedAt", null);
+    const { count: allFileCount } = await db
+      .from("files")
+      .select("*", { count: "exact", head: true })
+      .eq("folderId", folderId);
     const { count: childCount } = await db
       .from("folders")
       .select("*", { count: "exact", head: true })
       .eq("parentId", folderId);
 
-    if ((fileCount && fileCount > 0) || (childCount && childCount > 0)) {
+    if ((liveFileCount && liveFileCount > 0) || (childCount && childCount > 0)) {
       return NextResponse.json(
         { error: "Folder is not empty. Move or delete contents first." },
         { status: 409 }
       );
     }
 
-    await db.from("folders").delete().eq("id", folderId);
+    const trashedCount = (allFileCount ?? 0) - (liveFileCount ?? 0);
+    if (trashedCount > 0) {
+      return NextResponse.json(
+        {
+          error:
+            `This folder still holds ${trashedCount} deleted file${trashedCount === 1 ? "" : "s"} ` +
+            `in the trash. Restore or permanently remove ${trashedCount === 1 ? "it" : "them"} ` +
+            `before deleting the folder.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    // The error was previously discarded. A RESTRICT violation therefore
+    // returned success to the caller AND wrote an audit row recording a
+    // deletion that never happened — the audit log is what the compliance
+    // story rests on, so a false entry in it is worse than the failure.
+    const { error: deleteError } = await db.from("folders").delete().eq("id", folderId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete folder: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

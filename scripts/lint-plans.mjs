@@ -96,6 +96,7 @@ const METRICS = {
   "raw-fetch": conventions("raw-fetch"),
   "generic-error-toast": conventions("generic-error-toast"),
   "swallowed-error": conventions("swallowed-error"),
+  "unchecked-delete": conventions("unchecked-delete"),
   "token-violations": () =>
     (tokens("arbitrary-px")() || 0) + (tokens("raw-palette")() || 0) + (tokens("hex-color")() || 0),
   "component-tests": () => countFiles(join(ROOT, "src"), (p) => p.endsWith(".test.tsx")),

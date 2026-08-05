@@ -75,7 +75,14 @@ export const DELETE = withTenant(
       throw conflict("Cannot delete a role that has users assigned to it");
     }
 
-    await db.from("roles").delete().eq("id", params.roleId);
+    // The count above is the real guard, but `tenant_users_roleId_fkey` is
+    // ON DELETE RESTRICT and a user could be assigned in the gap between the
+    // two statements. Without checking the error, that race would report
+    // success and audit-log a deletion of a role that still exists.
+    const { error: deleteError } = await db.from("roles").delete().eq("id", params.roleId);
+    if (deleteError) {
+      throw conflict(`Could not delete role: ${deleteError.message}`);
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

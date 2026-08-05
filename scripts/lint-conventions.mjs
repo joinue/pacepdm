@@ -139,6 +139,23 @@ const RULES = [
       ),
   },
   {
+    id: "unchecked-delete",
+    message:
+      "delete() result is discarded — a RESTRICT violation then reports success and audit-logs a deletion that never happened",
+    applies: (path) => path.includes("/api/") || path.includes("/lib/"),
+    // `await db.from("x").delete()...` with nothing destructured off it.
+    // Found via folders/[folderId]: files_folderId_fkey is ON DELETE
+    // RESTRICT, so a trashed file pinned its folder, Postgres refused the
+    // delete, and the route returned {success:true} and wrote a
+    // `folder.delete` audit row anyway. The audit log is what the compliance
+    // story rests on, so a false entry in it is worse than the failed delete.
+    //
+    // Matches only the discarded form: `const { error } = await db...` and
+    // `const { error: e } = await db...` both bind the result and pass.
+    find: (source) =>
+      matchAll(source, /(?<!=\s)(?<!\w)await\s+db\s*\.from\([^)]*\)\s*\.delete\s*\(/g),
+  },
+  {
     id: "swallowed-error",
     message: "empty catch — a swallowed error becomes a spinner that never stops",
     applies: () => true,
