@@ -806,7 +806,7 @@ function BomTreeRow({
           onClick={onToggle}
           aria-expanded={expanded}
           aria-label={`${expanded ? "Collapse" : "Expand"} ${bom.name}`}
-          className="shrink-0 px-1 rounded hover:bg-foreground/5 text-muted-foreground"
+          className="w-6 shrink-0 flex items-center justify-center rounded hover:bg-foreground/5 text-muted-foreground"
         >
           {expanded ? (
             <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
@@ -815,7 +815,7 @@ function BomTreeRow({
           )}
         </button>
       ) : (
-        <span className="w-[1.375rem] shrink-0" aria-hidden="true" />
+        <span className="w-6 shrink-0" aria-hidden="true" />
       )}
 
       <button
@@ -827,61 +827,91 @@ function BomTreeRow({
         }`}
         onClick={() => onSelect(bom.id)}
       >
-        <div className="flex items-start gap-1.5 min-w-0">
-          <p
-            className={`text-sm flex-1 min-w-0 ${compact ? "truncate" : "line-clamp-2 break-words"}`}
-          >
-            {bom.name}
-          </p>
-          {unread > 0 && (
-            <span
-              aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
-              className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
-            >
-              {unread > 9 ? "9+" : unread}
-            </span>
-          )}
-        </div>
+        {/*
+          Two layouts, because the two contexts have opposite problems.
 
-        {/* A top-level BOM that something meant to reference but misspelt.
-            Without this it sits among the products looking deliberate, which
-            is how NANO-1000S Casting-Components read after the first import.
-            The fix is offered here because a warning with no remedy just
-            moves the work. */}
-        {bom.orphanHint && (
-          <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5">
-            <p className="text-3xs text-warning flex items-start gap-1">
-              <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
-              <span className="min-w-0">
-                Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
-              </span>
-            </p>
-            {canEdit && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1.5 h-6 text-3xs"
-                disabled={relinkingId === bom.id}
-                onClick={(e) => {
-                  // The card navigates; repairing is a different intent.
-                  e.stopPropagation();
-                  onRelink(bom);
-                }}
-              >
-                {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
-              </Button>
+          Sidebar: 14rem for a 48-character name, so everything stacks.
+
+          Full width: a row is ~1500px, and stacking left-aligned content
+          leaves the card looking empty for most of its length. It reads as a
+          list row instead — name on the left, the facts you scan down a
+          column on the right, aligned across rows.
+        */}
+        <div className={compact ? "space-y-1" : "flex items-center justify-between gap-6 min-w-0"}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-1.5 min-w-0">
+              <p className={`text-sm min-w-0 ${compact ? "truncate flex-1" : "truncate"}`}>
+                {bom.name}
+              </p>
+              {unread > 0 && (
+                <span
+                  aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
+                  className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
+                >
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+            </div>
+
+            {/* A top-level BOM that something meant to reference but
+                misspelt. Without this it sits among the products looking
+                deliberate, which is how NANO-1000S Casting-Components read
+                after the first import. The fix is offered here because a
+                warning with no remedy just moves the work. */}
+            {bom.orphanHint && (
+              <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5 max-w-xl">
+                <p className="text-3xs text-warning flex items-start gap-1">
+                  <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
+                  <span className="min-w-0">
+                    Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
+                  </span>
+                </p>
+                {canEdit && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-1.5 h-6 text-3xs"
+                    disabled={relinkingId === bom.id}
+                    onClick={(e) => {
+                      // The card navigates; repairing is a different intent.
+                      e.stopPropagation();
+                      onRelink(bom);
+                    }}
+                  >
+                    {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
+                  </Button>
+                )}
+              </div>
             )}
           </div>
-        )}
 
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
-          <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
-          {hasChildren && !expanded && (
-            <span className="text-3xs text-muted-foreground">
-              · {descendantCount} sub-assembl{descendantCount === 1 ? "y" : "ies"}
+          {/* Fixed-width columns so the values line up down the list rather
+              than shifting with each name's length. */}
+          <div
+            className={
+              compact
+                ? "flex items-center gap-1.5"
+                : "flex items-center gap-6 shrink-0 text-xs text-muted-foreground"
+            }
+          >
+            {!compact && (
+              <span className="w-32 text-right tabular-nums">
+                {hasChildren
+                  ? `${descendantCount} sub-assembl${descendantCount === 1 ? "y" : "ies"}`
+                  : "—"}
+              </span>
+            )}
+            <span className={compact ? "text-3xs text-muted-foreground" : "w-14 text-right"}>
+              Rev {bom.revision}
             </span>
-          )}
+            <StatusBadge
+              status={bom.status}
+              kind="bom"
+              className={
+                compact ? "text-4xs px-1.5 py-0" : "text-4xs px-1.5 py-0 w-20 justify-center"
+              }
+            />
+          </div>
         </div>
       </button>
 
