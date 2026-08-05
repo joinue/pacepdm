@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,17 +17,6 @@ import {
 import { Plus, X, Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { VendorSearchResult } from "../parts-types";
-
-function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback(
-    (...args: Parameters<T>) => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => fn(...args), delay);
-    },
-    [fn, delay]
-  ) as T;
-}
 
 interface AddVendorDialogProps {
   open: boolean;
@@ -45,8 +36,29 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [selectedVendorName, setSelectedVendorName] = useState("");
   const [vendorSearch, setVendorSearch] = useState("");
-  const [vendorResults, setVendorResults] = useState<VendorSearchResult[]>([]);
-  const [vendorSearching, setVendorSearching] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(vendorSearch), 250);
+    return () => clearTimeout(id);
+  }, [vendorSearch]);
+
+  // The debounced query drives the URL and `useFetch` does the rest — which
+  // matters more here than on a page: a typeahead fires a request per pause,
+  // and the hook aborts the superseded one instead of letting a slow early
+  // response land on top of a fast later one.
+  //
+  // Null URL (no query, or a vendor already chosen) means no request at all.
+  const searchUrl =
+    !selectedVendorId && debouncedSearch.trim().length > 0
+      ? `/api/vendors?q=${encodeURIComponent(debouncedSearch.trim())}`
+      : null;
+
+  const { data: vendorData, loading: vendorSearching } = useFetch<VendorSearchResult[]>(searchUrl);
+
+  // `useFetch` keeps the last payload when the URL goes null, so the results
+  // are gated on the same condition that built the URL rather than on `data`.
+  const vendorResults = searchUrl ? (vendorData ?? []).slice(0, 8) : [];
 
   function reset() {
     setVendorForm({
@@ -59,83 +71,57 @@ export function AddVendorDialog({ open, onOpenChange, partId, onAdded }: AddVend
     setSelectedVendorId(null);
     setSelectedVendorName("");
     setVendorSearch("");
-    setVendorResults([]);
+    setDebouncedSearch("");
   }
-
-  const doVendorSearch = useCallback(async (q: string) => {
-    if (q.length < 1) {
-      setVendorResults([]);
-      setVendorSearching(false);
-      return;
-    }
-    setVendorSearching(true);
-    try {
-      const res = await fetch(`/api/vendors?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setVendorResults(Array.isArray(data) ? data.slice(0, 8) : []);
-    } catch {
-      setVendorResults([]);
-    }
-    setVendorSearching(false);
-  }, []);
-
-  const debouncedVendorSearch = useDebounce(doVendorSearch, 250);
 
   function handleSearchInput(q: string) {
     setVendorSearch(q);
     setSelectedVendorId(null);
-    debouncedVendorSearch(q);
   }
 
   function selectVendor(v: VendorSearchResult) {
     setSelectedVendorId(v.id);
     setSelectedVendorName(v.name);
     setVendorSearch(v.name);
-    setVendorResults([]);
   }
 
   async function handleCreateInlineVendor() {
     const name = vendorSearch.trim();
     if (!name) return;
-    const res = await fetch(`/api/vendors`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      const created = await fetchJson<VendorSearchResult>("/api/vendors", {
+        method: "POST",
+        body: { name },
+      });
+      selectVendor({ id: created.id, name: created.name });
+      toast.success(`Created vendor "${created.name}"`);
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    const created = await res.json();
-    selectVendor({ id: created.id, name: created.name });
-    toast.success(`Created vendor "${created.name}"`);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedVendorId) return;
-    const res = await fetch(`/api/parts/${partId}/vendors`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        vendorId: selectedVendorId,
-        vendorPartNumber: vendorForm.vendorPartNumber,
-        unitCost: vendorForm.unitCost ? parseFloat(vendorForm.unitCost) : null,
-        leadTimeDays: vendorForm.leadTimeDays ? parseInt(vendorForm.leadTimeDays) : null,
-        isPrimary: vendorForm.isPrimary,
-        notes: vendorForm.notes,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/parts/${partId}/vendors`, {
+        method: "POST",
+        body: {
+          vendorId: selectedVendorId,
+          vendorPartNumber: vendorForm.vendorPartNumber,
+          unitCost: vendorForm.unitCost ? parseFloat(vendorForm.unitCost) : null,
+          leadTimeDays: vendorForm.leadTimeDays ? parseInt(vendorForm.leadTimeDays) : null,
+          isPrimary: vendorForm.isPrimary,
+          notes: vendorForm.notes,
+        },
+      });
+      toast.success("Vendor added");
+      onOpenChange(false);
+      reset();
+      onAdded();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Vendor added");
-    onOpenChange(false);
-    reset();
-    onAdded();
   }
 
   return (

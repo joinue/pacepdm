@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { fetchJson, errorMessage } from "@/lib/api-client";
-import type { FolderItem, TransitionOption } from "@/components/vault/vault-types";
+import type { FileItem, FolderItem, TransitionOption } from "@/components/vault/vault-types";
 
 interface DialogTarget {
   id: string;
@@ -11,18 +11,32 @@ interface DialogTarget {
   type: "file" | "folder";
 }
 
+/** Applies a local edit and returns the rollback for the failure path. */
+type Rollback = () => void;
+
 interface UseFileActionsOptions {
   refresh: () => void;
   selectedFile: string | null;
   onSelectedFileDeleted: () => void;
   rootFolderId: string;
+  /** The signed-in user, used to render an optimistic check-out locally. */
+  currentUser: { id: string; fullName: string | null };
+  patchFile: (fileId: string, patch: Partial<FileItem>) => Rollback;
+  removeFile: (fileId: string) => Rollback;
+  patchFolder: (folderId: string, patch: Partial<FolderItem>) => Rollback;
+  removeFolder: (folderId: string) => Rollback;
 }
 
 /**
  * Single-file mutations and the dialog state that drives them.
  *
- * Each action follows the same shape: open dialog → user confirms →
- * call API via fetchJson → refresh list on success, surface error on failure.
+ * Each action follows the same shape: open dialog → user confirms → apply the
+ * expected result locally → call the API → reconcile with a refresh on
+ * success, roll the local edit back and surface the error on failure.
+ *
+ * The optimistic step matters because the alternative is two sequential
+ * round-trips (the mutation, then the refetch) before the row visibly
+ * changes, which is what made every vault action feel laggy.
  *
  * Dialogs (rename / delete / transition / move) live here because their state
  * is tightly coupled to the action handlers.
@@ -32,6 +46,11 @@ export function useFileActions({
   selectedFile,
   onSelectedFileDeleted,
   rootFolderId,
+  currentUser,
+  patchFile,
+  removeFile,
+  patchFolder,
+  removeFolder,
 }: UseFileActionsOptions) {
   // Rename
   const [renameTarget, setRenameTarget] = useState<DialogTarget | null>(null);
@@ -54,15 +73,21 @@ export function useFileActions({
 
   const handleCheckout = useCallback(
     async (fileId: string) => {
+      const rollback = patchFile(fileId, {
+        isCheckedOut: true,
+        checkedOutById: currentUser.id,
+        checkedOutBy: { fullName: currentUser.fullName ?? "You" },
+      });
       try {
         await fetchJson(`/api/files/${fileId}/checkout`, { method: "POST" });
         toast.success("File checked out");
         refresh();
       } catch (err) {
+        rollback();
         toast.error(errorMessage(err));
       }
     },
-    [refresh]
+    [refresh, patchFile, currentUser.id, currentUser.fullName]
   );
 
   const handleDownload = useCallback(async (fileId: string) => {
@@ -77,41 +102,62 @@ export function useFileActions({
 
   const handleRename = useCallback(async () => {
     if (!renameTarget || !newName.trim()) return;
-    const url =
-      renameTarget.type === "file"
-        ? `/api/files/${renameTarget.id}/rename`
-        : `/api/folders/${renameTarget.id}`;
+    const trimmed = newName.trim();
+    const isFile = renameTarget.type === "file";
+    const url = isFile ? `/api/files/${renameTarget.id}/rename` : `/api/folders/${renameTarget.id}`;
+
+    // Close the dialog and show the new name before the request resolves —
+    // the rollback restores both if the server rejects it.
+    const rollback = isFile
+      ? patchFile(renameTarget.id, { name: trimmed })
+      : patchFolder(renameTarget.id, { name: trimmed });
+    setRenameTarget(null);
+
     try {
-      await fetchJson(url, { method: "PUT", body: { name: newName.trim() } });
-      toast.success(`${renameTarget.type === "file" ? "File" : "Folder"} renamed`);
-      setRenameTarget(null);
+      await fetchJson(url, { method: "PUT", body: { name: trimmed } });
+      toast.success(`${isFile ? "File" : "Folder"} renamed`);
       refresh();
     } catch (err) {
+      rollback();
       toast.error(errorMessage(err));
     }
-  }, [renameTarget, newName, refresh]);
+  }, [renameTarget, newName, refresh, patchFile, patchFolder]);
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
-    const url =
-      deleteTarget.type === "file"
-        ? `/api/files/${deleteTarget.id}/delete`
-        : `/api/folders/${deleteTarget.id}`;
+    const isFile = deleteTarget.type === "file";
+    const url = isFile ? `/api/files/${deleteTarget.id}/delete` : `/api/folders/${deleteTarget.id}`;
+    const wasSelected = isFile && selectedFile === deleteTarget.id;
+
+    const rollback = isFile ? removeFile(deleteTarget.id) : removeFolder(deleteTarget.id);
+    setDeleteTarget(null);
+    if (wasSelected) onSelectedFileDeleted();
+
     try {
       await fetchJson(url, { method: "DELETE" });
-      toast.success(`${deleteTarget.type === "file" ? "File" : "Folder"} deleted`);
-      const wasSelected = deleteTarget.type === "file" && selectedFile === deleteTarget.id;
-      setDeleteTarget(null);
-      if (wasSelected) onSelectedFileDeleted();
+      toast.success(`${isFile ? "File" : "Folder"} deleted`);
       refresh();
     } catch (err) {
+      rollback();
       toast.error(errorMessage(err));
     }
-  }, [deleteTarget, selectedFile, onSelectedFileDeleted, refresh]);
+  }, [deleteTarget, selectedFile, onSelectedFileDeleted, refresh, removeFile, removeFolder]);
 
   const handleTransition = useCallback(
     async (transitionId: string) => {
       if (!transitionTarget) return;
+      const { fileId } = transitionTarget;
+
+      // The chosen transition already tells us the destination state, so the
+      // row can show it immediately. If the server comes back with
+      // `pendingApproval` the state did *not* change, and we swap the
+      // optimistic state for a PENDING badge instead.
+      const target = transitions.find((t) => t.id === transitionId);
+      const rollback = target
+        ? patchFile(fileId, { lifecycleState: target.toState.name })
+        : () => {};
+      setTransitionTarget(null);
+
       try {
         // Two possible response shapes: an immediate state change
         // ({ newState }) or a gated approval request ({ pendingApproval }).
@@ -120,24 +166,26 @@ export function useFileActions({
           newState?: string;
           pendingApproval?: boolean;
           message?: string;
-        }>(`/api/files/${transitionTarget.fileId}/transition`, {
+        }>(`/api/files/${fileId}/transition`, {
           method: "POST",
           body: { transitionId },
         });
         if (d.pendingApproval) {
+          rollback();
+          patchFile(fileId, { approvalStatus: "PENDING" });
           toast.success(d.message || "Approval requested — waiting for reviewers");
         } else if (d.newState) {
           toast.success(`State changed to ${d.newState}`);
         } else {
           toast.success("Transition submitted");
         }
-        setTransitionTarget(null);
         refresh();
       } catch (err) {
+        rollback();
         toast.error(errorMessage(err));
       }
     },
-    [transitionTarget, refresh]
+    [transitionTarget, transitions, refresh, patchFile]
   );
 
   const openTransitionDialog = useCallback(
@@ -176,18 +224,25 @@ export function useFileActions({
 
   const handleMove = useCallback(async () => {
     if (!moveTarget || !moveDestination) return;
+    const { id } = moveTarget;
+
+    // The file is leaving the folder we're looking at, so drop it from the
+    // list rather than patching it.
+    const rollback = removeFile(id);
+    setMoveTarget(null);
+
     try {
-      await fetchJson(`/api/files/${moveTarget.id}/move`, {
+      await fetchJson(`/api/files/${id}/move`, {
         method: "PUT",
         body: { folderId: moveDestination },
       });
       toast.success("File moved");
-      setMoveTarget(null);
       refresh();
     } catch (err) {
+      rollback();
       toast.error(errorMessage(err));
     }
-  }, [moveTarget, moveDestination, refresh]);
+  }, [moveTarget, moveDestination, refresh, removeFile]);
 
   return {
     // Rename

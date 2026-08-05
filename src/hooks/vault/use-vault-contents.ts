@@ -39,6 +39,23 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
 
   const loadAbortRef = useRef<AbortController | null>(null);
 
+  // Mirrors of the two lists, kept in step with every write below. The
+  // optimistic helpers need to read the *current* list synchronously, which
+  // state alone can't provide — a handler that fires twice in one tick would
+  // otherwise snapshot stale rows.
+  const filesRef = useRef<FileItem[]>([]);
+  const foldersRef = useRef<FolderItem[]>([]);
+
+  const commitFiles = useCallback((next: FileItem[]) => {
+    filesRef.current = next;
+    setFiles(next);
+  }, []);
+
+  const commitFolders = useCallback((next: FolderItem[]) => {
+    foldersRef.current = next;
+    setFolders(next);
+  }, []);
+
   const fetchForSource = useCallback(async (source: VaultContentSource, signal: AbortSignal) => {
     // A view that loads its own data — nothing for this hook to fetch.
     if (source.kind === "external") {
@@ -74,8 +91,8 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
           source,
           controller.signal
         );
-        setFolders(nextFolders);
-        setFiles(nextFiles);
+        commitFolders(nextFolders);
+        commitFiles(nextFiles);
       } catch (err) {
         if (isAbortError(err)) return;
         toast.error(errorMessage(err) || "Failed to load vault contents");
@@ -85,7 +102,7 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
         if (loadAbortRef.current === controller) setLoading(false);
       }
     },
-    [fetchForSource]
+    [fetchForSource, commitFiles, commitFolders]
   );
 
   // `refresh` always re-loads the current source — callers after mutations
@@ -94,6 +111,78 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
   const refresh = useCallback(
     () => load(sourceFromViewMode(viewMode, currentFolderId)),
     [load, viewMode, currentFolderId]
+  );
+
+  // ─── Optimistic edits ────────────────────────────────────────────────────
+  //
+  // Each helper applies the expected result of a mutation to the local list
+  // straight away and returns a rollback for the failure path. Rollbacks are
+  // deliberately row-scoped rather than whole-list snapshots: a realtime
+  // event or a concurrent refresh may have landed in between, and restoring
+  // a stale snapshot would clobber it.
+
+  const patchFile = useCallback(
+    (fileId: string, patch: Partial<FileItem>): (() => void) => {
+      const before = filesRef.current.find((f) => f.id === fileId);
+      if (!before) return () => {};
+
+      commitFiles(filesRef.current.map((f) => (f.id === fileId ? { ...f, ...patch } : f)));
+
+      return () => {
+        commitFiles(filesRef.current.map((f) => (f.id === fileId ? before : f)));
+      };
+    },
+    [commitFiles]
+  );
+
+  const removeFile = useCallback(
+    (fileId: string): (() => void) => {
+      const index = filesRef.current.findIndex((f) => f.id === fileId);
+      if (index === -1) return () => {};
+      const removed = filesRef.current[index];
+
+      commitFiles(filesRef.current.filter((f) => f.id !== fileId));
+
+      return () => {
+        // A refresh may already have restored the row; re-inserting would
+        // duplicate it.
+        if (filesRef.current.some((f) => f.id === fileId)) return;
+        const current = filesRef.current;
+        commitFiles([...current.slice(0, index), removed, ...current.slice(index)]);
+      };
+    },
+    [commitFiles]
+  );
+
+  const patchFolder = useCallback(
+    (folderId: string, patch: Partial<FolderItem>): (() => void) => {
+      const before = foldersRef.current.find((f) => f.id === folderId);
+      if (!before) return () => {};
+
+      commitFolders(foldersRef.current.map((f) => (f.id === folderId ? { ...f, ...patch } : f)));
+
+      return () => {
+        commitFolders(foldersRef.current.map((f) => (f.id === folderId ? before : f)));
+      };
+    },
+    [commitFolders]
+  );
+
+  const removeFolder = useCallback(
+    (folderId: string): (() => void) => {
+      const index = foldersRef.current.findIndex((f) => f.id === folderId);
+      if (index === -1) return () => {};
+      const removed = foldersRef.current[index];
+
+      commitFolders(foldersRef.current.filter((f) => f.id !== folderId));
+
+      return () => {
+        if (foldersRef.current.some((f) => f.id === folderId)) return;
+        const current = foldersRef.current;
+        commitFolders([...current.slice(0, index), removed, ...current.slice(index)]);
+      };
+    },
+    [commitFolders]
   );
 
   useEffect(() => {
@@ -110,6 +199,10 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
     files,
     loading,
     refresh,
+    patchFile,
+    removeFile,
+    patchFolder,
+    removeFolder,
   };
 }
 

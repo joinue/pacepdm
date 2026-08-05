@@ -30,7 +30,11 @@ export function VaultBrowser({
 }) {
   const user = useTenantUser();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const vault = useVaultBrowser({ rootFolderId, userId: user.id });
+  const vault = useVaultBrowser({
+    rootFolderId,
+    userId: user.id,
+    userFullName: user.fullName,
+  });
   const { can } = usePermissions();
   const { clearRef } = useNotifications();
 
@@ -45,15 +49,19 @@ export function VaultBrowser({
   // the current folder view. Scoped by tenantId so one tenant's writes
   // don't wake another tenant's clients. The hook debounces bursts so
   // a bulk-transition storm only triggers one refetch.
+  //
+  // `refreshFromRemote` (not `refresh`) so this tab's own writes, which
+  // already refreshed explicitly, don't trigger a second listing when
+  // Postgres replays them back to us.
   useRealtimeTable({
     table: "files",
     filter: `tenantId=eq.${user.tenantId}`,
-    onChange: vault.refresh,
+    onChange: vault.refreshFromRemote,
   });
   useRealtimeTable({
     table: "folders",
     filter: `tenantId=eq.${user.tenantId}`,
-    onChange: vault.refresh,
+    onChange: vault.refreshFromRemote,
   });
 
   // External file drop: detect files dragged from the desktop onto the vault

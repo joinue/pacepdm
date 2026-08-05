@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, optionalString } from "@/lib/validation";
+import { attachThumbnailUrl } from "@/lib/thumbnails";
 
 // Update is partial — any of these fields can be supplied. The schema
 // keeps the route from blindly trusting arbitrary keys.
@@ -142,19 +143,11 @@ export async function GET(
         return bT.localeCompare(aT);
       });
 
-    // Resolve the storage key into a short-lived signed URL so the
-    // frontend can continue to read `thumbnailUrl` directly. Mirrors
-    // the files module's pattern.
-    let thumbnailUrl: string | null = null;
-    const thumbKey = (part as { thumbnailKey: string | null }).thumbnailKey;
-    if (thumbKey) {
-      const { data: signed } = await db.storage.from("vault").createSignedUrl(thumbKey, 300);
-      thumbnailUrl = signed?.signedUrl || null;
-    }
-
+    // Resolve the storage key into a short-lived signed URL so the frontend
+    // can read `thumbnailUrl` directly. Shared with BOMs and vendors — see
+    // lib/thumbnails.ts.
     return NextResponse.json({
-      ...part,
-      thumbnailUrl,
+      ...(await attachThumbnailUrl(db.storage, part as { thumbnailKey?: string | null })),
       vendors: vendors || [],
       files: (partFiles || []).map((pf) => ({ ...pf, file: pf.file as unknown })),
       whereUsed,

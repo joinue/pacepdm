@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +110,15 @@ interface SavedSearch {
   userId: string;
 }
 
+/** Shape of GET /api/search — every bucket is optional and may be absent. */
+interface SearchResponse {
+  files?: FileResult[];
+  ecos?: ECOResult[];
+  parts?: PartResult[];
+  boms?: BOMResult[];
+  folders?: FolderResult[];
+}
+
 // This page used to keep its own copies of the status→tone maps, and they had
 // already drifted: a BOM in OBSOLETE rendered "error" here and "purple" on the
 // BOMs page. Every status now renders through <StatusBadge>, so there is
@@ -197,23 +209,17 @@ export default function SearchPage() {
   const [folders, setFolders] = useState<FolderResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const { data: savedSearchData, setData: setSavedSearchData } =
+    useFetch<SavedSearch[]>("/api/saved-searches");
+  const savedSearches = savedSearchData ?? [];
+  const setSavedSearches = (updater: (prev: SavedSearch[]) => SavedSearch[]) =>
+    setSavedSearchData((prev) => updater(prev ?? []));
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saving, setSaving] = useState(false);
   const router = useRouter();
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Load saved searches on mount
-  useEffect(() => {
-    fetch("/api/saved-searches")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setSavedSearches(data);
-      })
-      .catch(() => {});
-  }, []);
 
   const executeSearch = useCallback(
     async (q: string, type: string, category?: string, state?: string) => {
@@ -228,19 +234,21 @@ export default function SearchPage() {
       if (state) params.set("state", state);
 
       try {
-        const res = await fetch(`/api/search?${params}`);
-        const data = await res.json();
+        const data = await fetchJson<SearchResponse>(`/api/search?${params}`);
         setFiles(data.files || []);
         setEcos(data.ecos || []);
         setParts(data.parts || []);
         setBoms(data.boms || []);
         setFolders(data.folders || []);
-      } catch {
+      } catch (err) {
+        // Previously this silently rendered "no results" for a failed
+        // search, which is indistinguishable from a genuinely empty one.
         setFiles([]);
         setEcos([]);
         setParts([]);
         setBoms([]);
         setFolders([]);
+        toast.error(errorMessage(err) || "Search failed");
       }
       setLoading(false);
     },
@@ -326,40 +334,44 @@ export default function SearchPage() {
     if (!saveName.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/saved-searches", {
+      const saved = await fetchJson<SavedSearch>("/api/saved-searches", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name: saveName,
           filters: { q: query, type: searchType, category: categoryFilter, state: stateFilter },
           isShared: false,
-        }),
+        },
       });
-      const data = await res.json();
-      if (data.id) {
-        setSavedSearches((prev) => [...prev, data]);
-        setShowSaveDialog(false);
-        setSaveName("");
-      }
-    } catch {}
-    setSaving(false);
+      setSavedSearches((prev) => [...prev, saved]);
+      setShowSaveDialog(false);
+      setSaveName("");
+    } catch (err) {
+      toast.error(errorMessage(err) || "Failed to save search");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteSavedSearch(id: string) {
     try {
-      await fetch("/api/saved-searches", {
+      await fetchJson("/api/saved-searches", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ searchId: id }),
+        body: { searchId: id },
       });
       setSavedSearches((prev) => prev.filter((s) => s.id !== id));
-    } catch {}
+    } catch (err) {
+      toast.error(errorMessage(err) || "Failed to delete saved search");
+    }
   }
 
   async function handleDownload(fileId: string) {
-    const res = await fetch(`/api/files/${fileId}/download`);
-    const d = await res.json();
-    if (d.url) window.open(d.url, "_blank");
+    try {
+      const d = await fetchJson<{ url?: string }>(`/api/files/${fileId}/download`);
+      if (d.url) window.open(d.url, "_blank");
+      else toast.error("Failed to download — no URL returned");
+    } catch (err) {
+      toast.error(errorMessage(err) || "Failed to download");
+    }
   }
 
   const sortedFiles = sortResults(files, sortBy);

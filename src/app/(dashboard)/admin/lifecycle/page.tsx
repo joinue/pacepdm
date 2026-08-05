@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,8 +70,8 @@ interface Lifecycle {
 }
 
 export default function LifecyclePage() {
-  const [lifecycles, setLifecycles] = useState<Lifecycle[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, refetch } = useFetch<Lifecycle[]>("/api/lifecycle");
+  const lifecycles = data ?? [];
 
   // Create lifecycle
   const [showCreateLifecycle, setShowCreateLifecycle] = useState(false);
@@ -104,61 +106,39 @@ export default function LifecyclePage() {
     transitionName: string;
   } | null>(null);
 
-  const loadData = useCallback(async () => {
-    try {
-      const res = await fetch("/api/lifecycle");
-      const data = await res.json();
-      setLifecycles(Array.isArray(data) ? data : []);
-    } catch {
-      toast.error("Failed to load lifecycles");
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await loadData();
-    })();
-  }, [loadData]);
-
   // --- Lifecycle CRUD ---
 
   async function handleCreateLifecycle(e: React.FormEvent) {
     e.preventDefault();
     setCreatingLc(true);
-    const res = await fetch("/api/lifecycle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lcName, isDefault: lcIsDefault }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson("/api/lifecycle", {
+        method: "POST",
+        body: { name: lcName, isDefault: lcIsDefault },
+      });
+      toast.success("Lifecycle created");
+      setShowCreateLifecycle(false);
+      setLcName("");
+      setLcIsDefault(false);
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setCreatingLc(false);
-      return;
     }
-    toast.success("Lifecycle created");
-    setShowCreateLifecycle(false);
-    setLcName("");
-    setLcIsDefault(false);
-    setCreatingLc(false);
-    loadData();
   }
 
   async function handleDeleteLifecycle() {
     if (!deleteLifecycleId) return;
-    const res = await fetch(`/api/lifecycle/${deleteLifecycleId}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson(`/api/lifecycle/${deleteLifecycleId}`, { method: "DELETE" });
+      toast.success("Lifecycle deleted");
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setDeleteLifecycleId(null);
-      return;
     }
-    toast.success("Lifecycle deleted");
-    setDeleteLifecycleId(null);
-    loadData();
   }
 
   // --- State CRUD ---
@@ -166,46 +146,42 @@ export default function LifecyclePage() {
   async function handleAddState(e: React.FormEvent) {
     e.preventDefault();
     if (!addStateTo) return;
-    const res = await fetch(`/api/lifecycle/${addStateTo}/states`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: stateName,
-        color: stateColor,
-        isInitial: stateIsInitial,
-        isFinal: stateIsFinal,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/lifecycle/${addStateTo}/states`, {
+        method: "POST",
+        body: {
+          name: stateName,
+          color: stateColor,
+          isInitial: stateIsInitial,
+          isFinal: stateIsFinal,
+        },
+      });
+      toast.success("State added");
+      setAddStateTo(null);
+      setStateName("");
+      setStateColor("#6b7280");
+      setStateIsInitial(false);
+      setStateIsFinal(false);
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("State added");
-    setAddStateTo(null);
-    setStateName("");
-    setStateColor("#6b7280");
-    setStateIsInitial(false);
-    setStateIsFinal(false);
-    loadData();
   }
 
   async function handleDeleteState() {
     if (!deleteStateInfo) return;
-    const res = await fetch(`/api/lifecycle/${deleteStateInfo.lifecycleId}/states`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stateId: deleteStateInfo.stateId }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson(`/api/lifecycle/${deleteStateInfo.lifecycleId}/states`, {
+        method: "DELETE",
+        body: { stateId: deleteStateInfo.stateId },
+      });
+      toast.success("State deleted");
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setDeleteStateInfo(null);
-      return;
     }
-    toast.success("State deleted");
-    setDeleteStateInfo(null);
-    loadData();
   }
 
   // --- Transition CRUD ---
@@ -213,48 +189,42 @@ export default function LifecyclePage() {
   async function handleAddTransition(e: React.FormEvent) {
     e.preventDefault();
     if (!addTransitionTo) return;
-    const res = await fetch(`/api/lifecycle/${addTransitionTo}/transitions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fromStateId: transFromStateId,
-        toStateId: transToStateId,
-        name: transName,
-        requiresApproval: transRequiresApproval,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/lifecycle/${addTransitionTo}/transitions`, {
+        method: "POST",
+        body: {
+          fromStateId: transFromStateId,
+          toStateId: transToStateId,
+          name: transName,
+          requiresApproval: transRequiresApproval,
+        },
+      });
+      toast.success("Transition added");
+      setAddTransitionTo(null);
+      setTransFromStateId("");
+      setTransToStateId("");
+      setTransName("");
+      setTransRequiresApproval(false);
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Transition added");
-    setAddTransitionTo(null);
-    setTransFromStateId("");
-    setTransToStateId("");
-    setTransName("");
-    setTransRequiresApproval(false);
-    loadData();
   }
 
   async function handleDeleteTransition() {
     if (!deleteTransitionInfo) return;
-    const res = await fetch(`/api/lifecycle/${deleteTransitionInfo.lifecycleId}/transitions`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        transitionId: deleteTransitionInfo.transitionId,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson(`/api/lifecycle/${deleteTransitionInfo.lifecycleId}/transitions`, {
+        method: "DELETE",
+        body: { transitionId: deleteTransitionInfo.transitionId },
+      });
+      toast.success("Transition deleted");
+      refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setDeleteTransitionInfo(null);
-      return;
     }
-    toast.success("Transition deleted");
-    setDeleteTransitionInfo(null);
-    loadData();
   }
 
   // --- Helpers ---
@@ -270,6 +240,10 @@ export default function LifecyclePage() {
         <div className="w-5 h-5 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
       </div>
     );
+  }
+
+  if (error) {
+    return <p className="text-center py-8 text-destructive">{errorMessage(error)}</p>;
   }
 
   return (

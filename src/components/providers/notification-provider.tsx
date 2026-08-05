@@ -10,6 +10,7 @@ import {
   ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { useTenantUser } from "./tenant-provider";
 
 interface NotificationActor {
@@ -83,12 +84,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      const r = await fetch("/api/notifications?limit=20");
-      if (!r.ok) throw new Error(`GET /api/notifications ${r.status}`);
-      const data = (await r.json()) as NotificationListResponse;
+      const data = await fetchJson<NotificationListResponse>("/api/notifications?limit=20");
       setNotifications(data.items || []);
     } catch (err) {
-      console.error("[notifications] fetch failed", err);
+      // Deliberately not a toast: this runs on a timer and on tab focus, so
+      // surfacing every transient failure would nag. The badge going stale is
+      // the visible symptom, and the console carries the real message.
+      console.error("[notifications] fetch failed", errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -96,24 +98,24 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const fetchCounts = useCallback(async () => {
     try {
-      const r = await fetch("/api/notifications/counts");
-      if (!r.ok) throw new Error(`GET /api/notifications/counts ${r.status}`);
-      const data = (await r.json()) as NotificationCounts;
+      const data = await fetchJson<NotificationCounts>("/api/notifications/counts");
       setCounts(data);
       setUnreadCount(data.total);
     } catch (err) {
-      console.error("[notifications] counts fetch failed", err);
+      console.error("[notifications] counts fetch failed", errorMessage(err));
     }
   }, []);
 
+  // `/api/approvals/count` and not `/api/approvals` — this only ever needed a
+  // number, and the list endpoint returns full decision rows with three nested
+  // joins. It is called on mount, on focus, on every realtime decision event,
+  // and on a timer, so it was the app's heaviest read at its highest frequency.
   const fetchApprovalCount = useCallback(async () => {
     try {
-      const r = await fetch("/api/approvals");
-      if (!r.ok) throw new Error(`GET /api/approvals ${r.status}`);
-      const d = await r.json();
-      setPendingApprovalCount(Array.isArray(d) ? d.length : 0);
+      const { count } = await fetchJson<{ count: number }>("/api/approvals/count");
+      setPendingApprovalCount(count);
     } catch (err) {
-      console.error("[notifications] approval count failed", err);
+      console.error("[notifications] approval count failed", errorMessage(err));
     }
   }, []);
 
@@ -189,9 +191,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // Safety poll — catches dropped events and also serves as the sole
   // refresh mechanism while `degraded`. The effect re-runs when the
   // degraded flag flips, so the cadence adjusts automatically.
+  //
+  // The tick is skipped while the tab is hidden. Nothing is lost: the
+  // visibility handler below refetches the moment the user comes back, which
+  // is sooner than the next tick would have fired anyway. Without this, every
+  // background tab kept issuing two requests a minute forever — and a user
+  // with the app parked in a pinned tab all day is the normal case here.
   useEffect(() => {
     const interval = degraded ? DEGRADED_POLL_MS : HEALTHY_POLL_MS;
     const id = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       fetchCounts();
       fetchApprovalCount();
     }, interval);
@@ -220,12 +229,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const markRead = useCallback(
     async (notificationId: string) => {
       try {
-        const r = await fetch("/api/notifications", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notificationId }),
-        });
-        if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+        await fetchJson("/api/notifications", { method: "PUT", body: { notificationId } });
         setNotifications((prev) =>
           prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
         );
@@ -258,7 +262,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           };
         });
       } catch (err) {
-        console.error("[notifications] mark read failed", err);
+        console.error("[notifications] mark read failed", errorMessage(err));
       }
     },
     [notifications]
@@ -267,19 +271,14 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const clearRef = useCallback(
     async (refId: string) => {
       try {
-        const r = await fetch("/api/notifications", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clearRef: refId }),
-        });
-        if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+        await fetchJson("/api/notifications", { method: "PUT", body: { clearRef: refId } });
         // Refetch counts + list rather than trying to patch optimistically —
         // we don't know how many rows the server updated, and getting the
         // per-category bucket math wrong would leave a stale badge.
         fetchCounts();
         fetchNotifications();
       } catch (err) {
-        console.error("[notifications] clearRef failed", err);
+        console.error("[notifications] clearRef failed", errorMessage(err));
       }
     },
     [fetchCounts, fetchNotifications]
@@ -287,17 +286,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   const markAllRead = useCallback(async () => {
     try {
-      const r = await fetch("/api/notifications", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markAllRead: true }),
-      });
-      if (!r.ok) throw new Error(`PUT /api/notifications ${r.status}`);
+      await fetchJson("/api/notifications", { method: "PUT", body: { markAllRead: true } });
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
       setCounts(emptyCounts);
     } catch (err) {
-      console.error("[notifications] mark all read failed", err);
+      console.error("[notifications] mark all read failed", errorMessage(err));
     }
   }, []);
 

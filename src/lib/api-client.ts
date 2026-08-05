@@ -92,6 +92,61 @@ export async function fetchJson<T = unknown>(
 }
 
 /**
+ * Upload a file to a route that reads `multipart/form-data`.
+ *
+ * `fetchJson` cannot serve these: it JSON-encodes the body and sets a
+ * Content-Type, and a FormData body must be handed to fetch untouched so the
+ * browser can generate the multipart boundary. Error handling is identical —
+ * the server's message reaches the caller as an `ApiError`.
+ *
+ *   await uploadFile(`/api/boms/${bomId}/thumbnail`, file);
+ */
+export async function uploadFile<T = unknown>(
+  url: string,
+  file: File,
+  options: { field?: string; method?: string; extra?: Record<string, string> } = {}
+): Promise<T> {
+  const { field = "file", method = "POST", extra } = options;
+  const form = new FormData();
+  form.append(field, file);
+  for (const [key, value] of Object.entries(extra ?? {})) form.append(key, value);
+
+  let response: Response;
+  try {
+    response = await fetch(url, { method, body: form });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiError("Network error — check your connection", 0, err);
+  }
+
+  const text = await response.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      (data &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof (data as { error: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : null) ||
+      (typeof data === "string" && data) ||
+      response.statusText ||
+      `Upload failed with status ${response.status}`;
+    throw new ApiError(message, response.status, data);
+  }
+
+  return data as T;
+}
+
+/**
  * Convenience: extract user-facing error message from any thrown error.
  * Use in catch blocks to feed toast.error().
  */

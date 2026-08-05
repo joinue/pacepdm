@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,47 +76,39 @@ export function MetadataClient({ fields: initialFields }: { fields: Field[] }) {
         .filter(Boolean);
     }
 
-    const res = await fetch("/api/metadata-fields", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      const field = await fetchJson<Field>("/api/metadata-fields", {
+        method: "POST",
+        body,
+      });
+      setFields((prev) => [...prev, field]);
+      toast.success("Field created");
+      setShowCreate(false);
+      setName("");
+      setFieldType("TEXT");
+      setOptions("");
+      setIsRequired(false);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const field = await res.json();
-    setFields((prev) => [...prev, field]);
-    toast.success("Field created");
-    setShowCreate(false);
-    setName("");
-    setFieldType("TEXT");
-    setOptions("");
-    setIsRequired(false);
-    setLoading(false);
   }
 
   async function handleDelete() {
     if (!deleteId) return;
-    const res = await fetch("/api/metadata-fields", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fieldId: deleteId }),
-    });
-
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson("/api/metadata-fields", {
+        method: "DELETE",
+        body: { fieldId: deleteId },
+      });
+      setFields((prev) => prev.filter((f) => f.id !== deleteId));
+      toast.success("Field deleted");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setDeleteId(null);
     }
-
-    setFields((prev) => prev.filter((f) => f.id !== deleteId));
-    toast.success("Field deleted");
-    setDeleteId(null);
   }
 
   return (

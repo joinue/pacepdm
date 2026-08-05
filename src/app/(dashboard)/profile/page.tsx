@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,43 +59,34 @@ export default function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
 
-  const [prefs, setPrefs] = useState<EmailPrefs>(DEFAULT_PREFS);
-  const [prefsLoading, setPrefsLoading] = useState(true);
   const [savingPrefs, setSavingPrefs] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch("/api/profile/email-prefs");
-        if (!r.ok) throw new Error(`GET /api/profile/email-prefs ${r.status}`);
-        const data = (await r.json()) as { prefs: EmailPrefs };
-        if (!cancelled) setPrefs({ ...DEFAULT_PREFS, ...data.prefs });
-      } catch (err) {
-        console.error("[profile] load prefs failed", err);
-      } finally {
-        if (!cancelled) setPrefsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // The saved prefs are the source of truth; the checkboxes edit them in
+  // place through `setData` until the user saves.
+  const {
+    data: prefsData,
+    loading: prefsLoading,
+    error: prefsError,
+    setData: setPrefsData,
+  } = useFetch<{ prefs: EmailPrefs }>("/api/profile/email-prefs");
+
+  const prefs: EmailPrefs = { ...DEFAULT_PREFS, ...(prefsData?.prefs ?? {}) };
+
+  const setPrefs = (updater: (prev: EmailPrefs) => EmailPrefs) =>
+    setPrefsData((prev) => ({
+      prefs: updater({ ...DEFAULT_PREFS, ...(prev?.prefs ?? {}) }),
+    }));
 
   async function handleSavePrefs() {
     setSavingPrefs(true);
-    const r = await fetch("/api/profile/email-prefs", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(prefs),
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      toast.error(d.error || "Failed to save preferences");
-    } else {
+    try {
+      await fetchJson("/api/profile/email-prefs", { method: "PATCH", body: prefs });
       toast.success("Email preferences saved");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSavingPrefs(false);
     }
-    setSavingPrefs(false);
   }
 
   async function handleChangePassword(e: React.FormEvent) {
@@ -159,6 +152,8 @@ export default function ProfilePage() {
         <CardContent className="space-y-3">
           {prefsLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : prefsError ? (
+            <p className="text-sm text-destructive">{errorMessage(prefsError)}</p>
           ) : (
             <>
               {PREF_LABELS.map((p, i) => (

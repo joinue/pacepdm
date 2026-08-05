@@ -31,6 +31,7 @@ import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ApprovalTimeline } from "@/components/approvals/approval-timeline";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
 
@@ -185,25 +186,31 @@ export default function ApprovalsPage() {
   // Approvals is the one surface where staleness is a correctness bug,
   // not just an annoyance: two reviewers looking at the same queue will
   // collide if one claims an item and the other's list doesn't update.
+  // Both tabs depend on both tables, so every refresh here is a pair. The
+  // guard means a decision the user just submitted costs one pair rather than
+  // two: the explicit refresh below, and then the realtime replay of the same
+  // write.
+  const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+
+  const refreshApprovals = useCallback(() => {
+    markLocalWrite();
+    void fetchPending();
+    void fetchMyRequests();
+  }, [markLocalWrite, fetchPending, fetchMyRequests]);
+
+  const refreshFromRemote = useCallback(() => {
+    if (isEcho()) return;
+    void fetchPending();
+    void fetchMyRequests();
+  }, [isEcho, fetchPending, fetchMyRequests]);
+
   // Subscribing to `approval_decisions` (any change) and
   // `approval_requests` (status flips when a request completes) keeps
   // both tabs — "Pending" and "My Requests" — in sync across sessions.
   // No tenantId filter because neither table carries the column; RLS
   // and the server route already enforce scoping.
-  useRealtimeTable({
-    table: "approval_decisions",
-    onChange: () => {
-      void fetchPending();
-      void fetchMyRequests();
-    },
-  });
-  useRealtimeTable({
-    table: "approval_requests",
-    onChange: () => {
-      void fetchPending();
-      void fetchMyRequests();
-    },
-  });
+  useRealtimeTable({ table: "approval_decisions", onChange: refreshFromRemote });
+  useRealtimeTable({ table: "approval_requests", onChange: refreshFromRemote });
 
   async function loadRequestDetail(requestId: string) {
     setLoadingDetail(true);
@@ -226,20 +233,18 @@ export default function ApprovalsPage() {
       ? { rework: true, comment: comment.trim() }
       : { status: actionTarget.action, comment: comment.trim() || undefined };
 
-    const res = await fetch(`/api/approvals/${actionTarget.decision.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    let result: { requestComplete?: boolean };
+    try {
+      result = await fetchJson<{ requestComplete?: boolean }>(
+        `/api/approvals/${actionTarget.decision.id}`,
+        { method: "PUT", body }
+      );
+    } catch (err) {
+      toast.error(errorMessage(err));
       setSubmitting(false);
       return;
     }
 
-    const result = await res.json();
     toast.success(
       isRework
         ? "Rework requested — requester notified"
@@ -253,8 +258,7 @@ export default function ApprovalsPage() {
     setActionTarget(null);
     setComment("");
     setSubmitting(false);
-    fetchPending();
-    fetchMyRequests();
+    refreshApprovals();
   }
 
   async function handleRecall(requestId: string) {
@@ -264,8 +268,7 @@ export default function ApprovalsPage() {
         body: { requestId, action: "recall" },
       });
       toast.success("Request recalled");
-      fetchMyRequests();
-      fetchPending();
+      refreshApprovals();
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -278,8 +281,7 @@ export default function ApprovalsPage() {
         body: { requestId, action: "resubmit" },
       });
       toast.success("Resubmitted for approval");
-      fetchMyRequests();
-      fetchPending();
+      refreshApprovals();
     } catch (err) {
       toast.error(errorMessage(err));
     }

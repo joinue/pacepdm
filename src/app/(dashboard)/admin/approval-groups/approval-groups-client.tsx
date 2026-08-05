@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,7 +61,13 @@ interface ApprovalGroup {
 }
 
 export function ApprovalGroupsClient({ users }: { users: User[] }) {
-  const [groups, setGroups] = useState<ApprovalGroup[]>([]);
+  const {
+    data: groupData,
+    error,
+    refetch: loadGroups,
+  } = useFetch<ApprovalGroup[]>("/api/approval-groups");
+  const groups = useMemo(() => groupData ?? [], [groupData]);
+
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ApprovalGroup | null>(null);
   const [name, setName] = useState("");
@@ -68,20 +76,6 @@ export function ApprovalGroupsClient({ users }: { users: User[] }) {
   const [addMemberGroup, setAddMemberGroup] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-
-  const loadGroups = useCallback(async () => {
-    const res = await fetch("/api/approval-groups");
-    const data = await res.json();
-    setGroups(Array.isArray(data) ? data : []);
-  }, []);
-
-  useEffect(() => {
-    // Async IIFE keeps the effect body free of synchronous setState calls
-    // (the callback transitively updates state). See src/lib/README.md.
-    void (async () => {
-      await loadGroups();
-    })();
-  }, [loadGroups]);
 
   const { activeGroups, archivedGroups } = useMemo(
     () => ({
@@ -94,85 +88,78 @@ export function ApprovalGroupsClient({ users }: { users: User[] }) {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/approval-groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson("/api/approval-groups", {
+        method: "POST",
+        body: { name, description },
+      });
+      toast.success("Group created");
+      setShowCreate(false);
+      setName("");
+      setDescription("");
+      loadGroups();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setLoading(false);
-      return;
     }
-    toast.success("Group created");
-    setShowCreate(false);
-    setName("");
-    setDescription("");
-    setLoading(false);
-    loadGroups();
   }
 
   async function handleDelete() {
     if (!deleteTarget) return;
-    const res = await fetch(`/api/approval-groups/${deleteTarget.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      const result = await fetchJson<{ archived?: boolean }>(
+        `/api/approval-groups/${deleteTarget.id}`,
+        { method: "DELETE" }
+      );
+      toast.success(result.archived ? "Group archived" : "Group deleted");
+      setDeleteTarget(null);
+      loadGroups();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    const result = await res.json();
-    toast.success(result.archived ? "Group archived" : "Group deleted");
-    setDeleteTarget(null);
-    loadGroups();
   }
 
   async function handleRestore(groupId: string) {
-    const res = await fetch(`/api/approval-groups/${groupId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: true }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/approval-groups/${groupId}`, {
+        method: "PATCH",
+        body: { isActive: true },
+      });
+      toast.success("Group restored");
+      loadGroups();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Group restored");
-    loadGroups();
   }
 
   async function handleAddMember() {
     if (!addMemberGroup || !selectedUser) return;
-    const res = await fetch(`/api/approval-groups/${addMemberGroup}/members`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: selectedUser }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/approval-groups/${addMemberGroup}/members`, {
+        method: "POST",
+        body: { userId: selectedUser },
+      });
+      toast.success("Member added");
+      setAddMemberGroup(null);
+      setSelectedUser("");
+      loadGroups();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Member added");
-    setAddMemberGroup(null);
-    setSelectedUser("");
-    loadGroups();
   }
 
   async function handleRemoveMember(groupId: string, userId: string) {
-    const res = await fetch(`/api/approval-groups/${groupId}/members`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/approval-groups/${groupId}/members`, {
+        method: "DELETE",
+        body: { userId },
+      });
+      toast.success("Member removed");
+      loadGroups();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Member removed");
-    loadGroups();
   }
 
   function renderGroupCard(group: ApprovalGroup, archived = false) {
@@ -292,7 +279,13 @@ export function ApprovalGroupsClient({ users }: { users: User[] }) {
       />
 
       {/* Active groups */}
-      {activeGroups.length === 0 ? (
+      {error ? (
+        <Card>
+          <CardContent className="py-8 text-center text-destructive text-sm">
+            {errorMessage(error)}
+          </CardContent>
+        </Card>
+      ) : activeGroups.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />

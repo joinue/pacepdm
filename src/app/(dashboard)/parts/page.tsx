@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useFetch } from "@/hooks/use-fetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import type { PartWhereUsed } from "@/lib/where-used";
 import {
@@ -44,7 +46,7 @@ import {
   Download,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchJson, errorMessage } from "@/lib/api-client";
+import { fetchJson, errorMessage, uploadFile } from "@/lib/api-client";
 import type { Part, PartDetail } from "./parts-types";
 import { CATEGORIES, categoryVariants } from "./parts-types";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -55,21 +57,9 @@ import { AddVendorDialog } from "./components/add-vendor-dialog";
 import { LinkFileDialog } from "./components/link-file-dialog";
 import { FilePreviewDialog } from "./components/file-preview-dialog";
 import { ImportResultsDialog } from "./components/import-results-dialog";
+import { EntityThumbnail } from "@/components/ui/entity-thumbnail";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
-
-// --- Helpers ---
-
-function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback(
-    (...args: Parameters<T>) => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => fn(...args), delay);
-    },
-    [fn, delay]
-  ) as T;
-}
 
 // --- Component ---
 
@@ -79,10 +69,9 @@ export default function PartsPage() {
   /** Monotonic id for detail fetches; only the latest may write state. */
   const detailRequestSeq = useRef(0);
   const user = useTenantUser();
-  const [parts, setParts] = useState<Part[]>([]);
-  const [loading, setLoading] = useState(true);
   const [partNumberMode, setPartNumberMode] = useState<"AUTO" | "MANUAL">("AUTO");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
 
@@ -117,16 +106,36 @@ export default function PartsPage() {
 
   // --- Data loading ---
 
-  const loadParts = useCallback(async (q?: string, cat?: string, st?: string) => {
+  // Search and filters drive the URL, and the URL drives the fetch — so
+  // changing either is a single state update rather than a hand-sequenced
+  // reload, and switching filters quickly aborts the superseded request
+  // instead of racing it.
+  const partsUrl = useMemo(() => {
     const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (cat && cat !== "all") params.set("category", cat);
-    if (st && st !== "all") params.set("state", st);
-    const res = await fetch(`/api/parts?${params}`);
-    const data = await res.json();
-    setParts(Array.isArray(data) ? data : []);
-    setLoading(false);
-  }, []);
+    if (debouncedQuery) params.set("q", debouncedQuery);
+    if (categoryFilter !== "all") params.set("category", categoryFilter);
+    if (stateFilter !== "all") params.set("state", stateFilter);
+    const qs = params.toString();
+    return `/api/parts${qs ? `?${qs}` : ""}`;
+  }, [debouncedQuery, categoryFilter, stateFilter]);
+
+  const {
+    data: partsData,
+    loading,
+    error: partsError,
+    refetch: loadParts,
+  } = useFetch<Part[]>(partsUrl);
+  // Memoised because the deep-link effect below depends on it — a fresh []
+  // each render would re-run that effect forever.
+  const parts = useMemo(() => partsData ?? [], [partsData]);
+
+  // Realtime on `parts` replays this tab's own writes. Mutations reload
+  // through `reloadParts`, which marks the write so the echo is ignored.
+  const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+  const reloadParts = useCallback(() => {
+    markLocalWrite();
+    return loadParts();
+  }, [markLocalWrite, loadParts]);
 
   /**
    * Clearing the selection also clears the deep-link param, so closing the
@@ -202,18 +211,15 @@ export default function PartsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      await loadParts();
-    })();
-  }, [loadParts]);
-
   // Realtime
+  // Skip the replay of this tab's own writes — every mutation here already
+  // reloads explicitly, so acting on the echo would fetch the list twice.
   useRealtimeTable({
     table: "parts",
     filter: `tenantId=eq.${user.tenantId}`,
     onChange: () => {
-      void loadParts(searchQuery, categoryFilter, stateFilter);
+      if (isEcho()) return;
+      void loadParts();
       if (selectedPartId) void loadPartDetail(selectedPartId);
     },
   });
@@ -232,20 +238,14 @@ export default function PartsPage() {
     enabled: !!selectedPartId,
   });
 
-  // Fetch tenant part number mode
+  // Tenant part-number mode. A failure here is non-fatal — the form falls
+  // back to AUTO — so this read deliberately does not surface an error.
+  const { data: settingsData } = useFetch<{ settings?: { partNumberMode?: string } }>(
+    "/api/settings"
+  );
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/settings");
-        if (!res.ok) return;
-        const data = await res.json();
-        const mode = data?.settings?.partNumberMode;
-        if (mode === "MANUAL") setPartNumberMode("MANUAL");
-      } catch {
-        /* keep AUTO default */
-      }
-    })();
-  }, []);
+    if (settingsData?.settings?.partNumberMode === "MANUAL") setPartNumberMode("MANUAL");
+  }, [settingsData]);
 
   // Auto-select part from URL query param
   useEffect(() => {
@@ -257,19 +257,18 @@ export default function PartsPage() {
     })();
   }, [parts, searchParams, selectedPartId, loadPartDetail]);
 
-  const debouncedSearch = useDebounce((q: string) => {
-    loadParts(q, categoryFilter, stateFilter);
-  }, 300);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
 
   function handleSearchInput(q: string) {
     setSearchQuery(q);
-    debouncedSearch(q);
   }
 
   function handleFilterChange(cat: string, st: string) {
     setCategoryFilter(cat);
     setStateFilter(st);
-    loadParts(searchQuery, cat, st);
   }
 
   // --- Actions ---
@@ -285,58 +284,58 @@ export default function PartsPage() {
   }
 
   async function handleDeletePart(partId: string) {
-    const res = await fetch(`/api/parts/${partId}`, { method: "DELETE" });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/parts/${partId}`, { method: "DELETE" });
+      toast.success("Part deleted");
+      if (selectedPartId === partId) {
+        setSelectedPartId(null);
+        setDetail(null);
+        setPartWhereUsed(null);
+      }
+      reloadParts();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Part deleted");
-    if (selectedPartId === partId) {
-      setSelectedPartId(null);
-      setDetail(null);
-      setPartWhereUsed(null);
-    }
-    loadParts(searchQuery, categoryFilter, stateFilter);
   }
 
   async function handleDeleteVendorLink(linkId: string) {
     if (!selectedPartId) return;
-    await fetch(`/api/parts/${selectedPartId}/vendors`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vendorId: linkId }),
-    });
-    toast.success("Vendor removed");
-    loadPartDetail(selectedPartId);
+    try {
+      await fetchJson(`/api/parts/${selectedPartId}/vendors`, {
+        method: "DELETE",
+        body: { vendorId: linkId },
+      });
+      toast.success("Vendor removed");
+      loadPartDetail(selectedPartId);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleUnlinkFile(fileId: string) {
     if (!selectedPartId) return;
-    await fetch(`/api/parts/${selectedPartId}/files`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId }),
-    });
-    toast.success("File unlinked");
-    loadPartDetail(selectedPartId);
+    try {
+      await fetchJson(`/api/parts/${selectedPartId}/files`, {
+        method: "DELETE",
+        body: { fileId },
+      });
+      toast.success("File unlinked");
+      loadPartDetail(selectedPartId);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
-  async function handleThumbnailUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!selectedPartId || !e.target.files?.[0]) return;
-    const file = e.target.files[0];
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/parts/${selectedPartId}/thumbnail`, { method: "POST", body: fd });
-    if (res.ok) {
+  async function handleThumbnailUpload(file: File) {
+    if (!selectedPartId) return;
+    try {
+      await uploadFile(`/api/parts/${selectedPartId}/thumbnail`, file);
       toast.success("Thumbnail updated");
       loadPartDetail(selectedPartId);
-      loadParts(searchQuery, categoryFilter, stateFilter);
-    } else {
-      const d = await res.json().catch(() => ({}));
-      toast.error(d.error || "Thumbnail upload failed");
+      reloadParts();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    e.target.value = "";
   }
 
   function handleExportCsv() {
@@ -368,7 +367,7 @@ export default function PartsPage() {
       } else {
         toast.success(summary);
       }
-      loadParts(searchQuery, categoryFilter, stateFilter);
+      reloadParts();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -473,6 +472,12 @@ export default function PartsPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
         </div>
+      ) : partsError ? (
+        <Card>
+          <CardContent className="py-12 text-center text-destructive text-sm">
+            {errorMessage(partsError)}
+          </CardContent>
+        </Card>
       ) : (
         <div className="flex gap-4 flex-col lg:flex-row">
           {/* Parts table. Full width always now — the detail is a sheet. */}
@@ -510,18 +515,7 @@ export default function PartsPage() {
                         onClick={() => loadPartDetail(part.id)}
                       >
                         <TableCell>
-                          {part.thumbnailUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={part.thumbnailUrl}
-                              alt=""
-                              className="w-8 h-8 rounded object-cover"
-                            />
-                          ) : (
-                            <div className="w-8 h-8 rounded bg-muted flex items-center justify-center">
-                              <Package className="w-3.5 h-3.5 text-muted-foreground/40" />
-                            </div>
-                          )}
+                          <EntityThumbnail src={part.thumbnailUrl} kind="part" size="sm" />
                         </TableCell>
                         <TableCell className="font-mono text-sm">{part.partNumber}</TableCell>
                         <TableCell className="font-medium text-sm">{part.name}</TableCell>
@@ -630,7 +624,7 @@ export default function PartsPage() {
         editingPart={editingPart}
         partNumberMode={partNumberMode}
         onSaved={() => {
-          loadParts(searchQuery, categoryFilter, stateFilter);
+          reloadParts();
           if (editingPart && selectedPartId === editingPart.id) loadPartDetail(editingPart.id);
         }}
       />

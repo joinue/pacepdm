@@ -15,6 +15,8 @@ interface UseBulkActionsOptions {
   /** Vault root; folder download is disabled at the root to avoid
    *  accidentally pulling down everything. */
   rootFolderId: string;
+  /** Drops a row locally and returns the rollback for a failed delete. */
+  removeFile: (fileId: string) => () => void;
 }
 
 // Soft warning when an archive crosses 1 GiB. Just an informational toast —
@@ -63,6 +65,7 @@ export function useBulkActions({
   downloadSingle,
   currentFolderId,
   rootFolderId,
+  removeFile,
 }: UseBulkActionsOptions) {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
@@ -145,9 +148,20 @@ export function useBulkActions({
 
   const handleBulkDelete = useCallback(async () => {
     const ids = [...selectedFiles];
+
+    // Clear the rows and the confirm dialog up front. Each id keeps its own
+    // rollback so a partial failure only restores the rows that survived.
+    const rollbacks = new Map(ids.map((fid) => [fid, removeFile(fid)]));
+    clearSelection();
+    setShowBulkDeleteConfirm(false);
+
     const results = await Promise.allSettled(
       ids.map((fid) => fetchJson(`/api/files/${fid}/delete`, { method: "DELETE" }))
     );
+    results.forEach((result, i) => {
+      if (result.status === "rejected") rollbacks.get(ids[i])?.();
+    });
+
     const failed = results.filter((r) => r.status === "rejected").length;
     if (failed === 0) {
       toast.success(`${ids.length} file(s) deleted`);
@@ -156,10 +170,8 @@ export function useBulkActions({
     } else {
       toast.warning(`Deleted ${ids.length - failed} file(s), ${failed} failed`);
     }
-    clearSelection();
-    setShowBulkDeleteConfirm(false);
     refresh();
-  }, [selectedFiles, clearSelection, refresh]);
+  }, [selectedFiles, clearSelection, refresh, removeFile]);
 
   return {
     showBulkDeleteConfirm,

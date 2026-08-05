@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,19 +70,14 @@ export function SettingsClient({
     e.preventDefault();
     setSaving(true);
 
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, settings }),
-    });
-
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-    } else {
+    try {
+      await fetchJson("/api/settings", { method: "PUT", body: { name, settings } });
       toast.success("Settings saved.");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   return (

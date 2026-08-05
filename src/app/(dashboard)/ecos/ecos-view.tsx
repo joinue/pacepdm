@@ -272,7 +272,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // the Affected Items tab and opens the add-item dialog.
   async function handleEcoCreated(created: ECO) {
     justCreatedRef.current = created.id;
-    await loadEcos();
+    await refreshEcos();
     router.push(`/ecos/${created.id}`);
   }
 
@@ -317,7 +317,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         // "View release" link immediately, without waiting for a refetch.
         if (result.releaseId) setReleaseIdForSelected(result.releaseId);
         // Refresh the list so the derived selectedEco picks up the new status
-        await loadEcos();
+        await refreshEcos();
         return;
       }
 
@@ -334,7 +334,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
       } else {
         toast.success(`Status changed to ${newStatus.replace("_", " ")}`);
       }
-      await loadEcos();
+      await refreshEcos();
       void loadApproval(selectedEco.id);
     } catch (err) {
       toast.error(errorMessage(err));
@@ -348,7 +348,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // is always pulled from a single source of truth.
   function handleEcoUpdated(_updated: ECO) {
     void _updated;
-    loadEcos();
+    refreshEcos();
   }
 
   async function handleDelete() {
@@ -361,7 +361,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         clearSelection();
       }
       setDeleteTarget(null);
-      loadEcos();
+      refreshEcos();
     } catch (err) {
       toast.error(errorMessage(err));
       setDeleteTarget(null);
@@ -515,7 +515,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                 items={items}
                 loading={loadingItems}
                 onAddClick={() => setShowAddItem(true)}
-                onItemRemoved={() => loadItems(selectedEco.id)}
+                onItemRemoved={() => refreshItems(selectedEco.id)}
               />
             </TabsContent>
 
@@ -537,7 +537,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
           open={showAddItem}
           onOpenChange={setShowAddItem}
           ecoId={selectedEco.id}
-          onAdded={() => loadItems(selectedEco.id)}
+          onAdded={() => refreshItems(selectedEco.id)}
         />
       )}
 

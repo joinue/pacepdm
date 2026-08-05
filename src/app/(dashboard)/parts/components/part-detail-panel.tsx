@@ -8,7 +8,8 @@ import { Separator } from "@/components/ui/separator";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { PartWhereUsed } from "@/lib/where-used";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, X, FileText, Building2, ImageIcon, Upload, Loader2 } from "lucide-react";
+import { Plus, X, FileText, Building2, Loader2 } from "lucide-react";
+import { ThumbnailPicker } from "@/components/ui/entity-thumbnail";
 import type { PartDetail, PartVendorLink } from "../parts-types";
 import { CATEGORIES, categoryVariants } from "../parts-types";
 
@@ -17,7 +18,8 @@ interface PartDetailPanelProps {
   loading: boolean;
   partWhereUsed: PartWhereUsed | null;
   onClose: () => void;
-  onThumbnailUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  /** Called with the chosen image; the page owns the upload. */
+  onThumbnailUpload: (file: File) => void;
   onShowLinkFile: () => void;
   onShowAddVendor: () => void;
   onUnlinkFile: (fileId: string) => void;
@@ -57,20 +59,13 @@ export function PartDetailPanel({
       <div className="p-4 space-y-4">
         {/* Header with thumbnail */}
         <div className="flex items-start gap-3">
-          <label className="cursor-pointer shrink-0 group relative">
-            {detail.thumbnailUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={detail.thumbnailUrl} alt="" className="w-14 h-14 rounded-lg object-cover" />
-            ) : (
-              <div className="w-14 h-14 rounded-lg bg-muted flex items-center justify-center">
-                <ImageIcon className="w-5 h-5 text-muted-foreground/40" />
-              </div>
-            )}
-            <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Upload className="w-4 h-4 text-white" />
-            </div>
-            <input type="file" accept="image/*" className="hidden" onChange={onThumbnailUpload} />
-          </label>
+          <ThumbnailPicker
+            src={detail.thumbnailUrl}
+            kind="part"
+            size="md"
+            label={`Change image for ${detail.partNumber}`}
+            onSelect={onThumbnailUpload}
+          />
           <div className="min-w-0 flex-1">
             <p className="font-mono text-sm text-muted-foreground">{detail.partNumber}</p>
             <p className="font-semibold truncate">{detail.name}</p>

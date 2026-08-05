@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,16 +23,15 @@ import { Search, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { FILE_ROLE_LABELS } from "../parts-types";
 
-function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  return useCallback(
-    (...args: Parameters<T>) => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => fn(...args), delay);
-    },
-    [fn, delay]
-  ) as T;
+interface FileSearchResult {
+  id: string;
+  name: string;
+  partNumber: string | null;
+  lifecycleState: string;
 }
+
+/** `/api/search` returns buckets; older callers saw a bare array. */
+type FileSearchResponse = FileSearchResult[] | { files?: FileSearchResult[] };
 
 interface LinkFileDialogProps {
   open: boolean;
@@ -48,48 +49,41 @@ export function LinkFileDialog({
   onLinked,
 }: LinkFileDialogProps) {
   const [fileSearch, setFileSearch] = useState("");
-  const [fileResults, setFileResults] = useState<
-    { id: string; name: string; partNumber: string | null; lifecycleState: string }[]
-  >([]);
-  const [fileSearching, setFileSearching] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [fileRole, setFileRole] = useState("DRAWING");
 
-  const doFileSearch = useCallback(async (q: string) => {
-    if (q.length < 2) {
-      setFileResults([]);
-      setFileSearching(false);
-      return;
-    }
-    setFileSearching(true);
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      const files = Array.isArray(data) ? data : (data.files ?? []);
-      setFileResults(files.slice(0, 8));
-    } catch {
-      setFileResults([]);
-    }
-    setFileSearching(false);
-  }, []);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(fileSearch), 300);
+    return () => clearTimeout(id);
+  }, [fileSearch]);
 
-  const debouncedFileSearch = useDebounce(doFileSearch, 300);
+  // Two characters minimum, same as before — below that the search matches
+  // most of the vault and the result list is noise.
+  const searchUrl =
+    debouncedSearch.trim().length >= 2
+      ? `/api/search?q=${encodeURIComponent(debouncedSearch.trim())}`
+      : null;
+
+  const { data: searchData, loading: fileSearching } = useFetch<FileSearchResponse>(searchUrl);
+
+  const fileResults = !searchUrl
+    ? []
+    : (Array.isArray(searchData) ? searchData : (searchData?.files ?? [])).slice(0, 8);
 
   async function handleLinkFile(fileId: string) {
-    const res = await fetch(`/api/parts/${partId}/files`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId, role: fileRole, isPrimary: !hasExistingFiles }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/parts/${partId}/files`, {
+        method: "POST",
+        body: { fileId, role: fileRole, isPrimary: !hasExistingFiles },
+      });
+      toast.success("File linked");
+      onOpenChange(false);
+      setFileSearch("");
+      setDebouncedSearch("");
+      onLinked();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("File linked");
-    onOpenChange(false);
-    setFileSearch("");
-    setFileResults([]);
-    onLinked();
   }
 
   return (
@@ -99,7 +93,7 @@ export function LinkFileDialog({
         if (!o) {
           onOpenChange(false);
           setFileSearch("");
-          setFileResults([]);
+          setDebouncedSearch("");
         }
       }}
     >
@@ -130,10 +124,7 @@ export function LinkFileDialog({
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 value={fileSearch}
-                onChange={(e) => {
-                  setFileSearch(e.target.value);
-                  debouncedFileSearch(e.target.value);
-                }}
+                onChange={(e) => setFileSearch(e.target.value)}
                 placeholder="Search vault files..."
                 className="pl-8 h-8 text-sm"
               />

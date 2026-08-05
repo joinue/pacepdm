@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useFetch } from "@/hooks/use-fetch";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,10 +80,21 @@ const ECO_TRIGGERS = [
 ];
 
 export default function WorkflowsPage() {
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [groups, setGroups] = useState<ApprovalGroup[]>([]);
-  const [transitions, setTransitions] = useState<Transition[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Three independent reads. Only workflows (and the assignments hanging off
+  // them) change from this page — groups and transitions are reference data —
+  // so mutations refetch just that one list instead of all three.
+  const {
+    data: workflowData,
+    loading,
+    error,
+    refetch: refetchWorkflows,
+  } = useFetch<Workflow[]>("/api/workflows");
+  const { data: groupData } = useFetch<ApprovalGroup[]>("/api/approval-groups?activeOnly=true");
+  const { data: transitionData } = useFetch<Transition[]>("/api/lifecycle/transitions");
+
+  const workflows = workflowData ?? [];
+  const groups = groupData ?? [];
+  const transitions = transitionData ?? [];
 
   // Create workflow
   const [showCreate, setShowCreate] = useState(false);
@@ -102,104 +115,84 @@ export default function WorkflowsPage() {
   const [assignTransitionId, setAssignTransitionId] = useState("");
   const [assignEcoTrigger, setAssignEcoTrigger] = useState("");
 
-  const loadData = useCallback(async () => {
-    const [wfRes, gRes, tRes] = await Promise.all([
-      fetch("/api/workflows"),
-      fetch("/api/approval-groups?activeOnly=true"),
-      fetch("/api/lifecycle/transitions"),
-    ]);
-    const wfData = await wfRes.json();
-    const gData = await gRes.json();
-    const tData = await tRes.json();
-    setWorkflows(Array.isArray(wfData) ? wfData : []);
-    setGroups(Array.isArray(gData) ? gData : []);
-    setTransitions(Array.isArray(tData) ? tData : []);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await loadData();
-    })();
-  }, [loadData]);
-
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setCreating(true);
-    const res = await fetch("/api/workflows", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: wfName, description: wfDesc }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      await fetchJson("/api/workflows", {
+        method: "POST",
+        body: { name: wfName, description: wfDesc },
+      });
+      toast.success("Workflow created");
+      setShowCreate(false);
+      setWfName("");
+      setWfDesc("");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
       setCreating(false);
-      return;
     }
-    toast.success("Workflow created");
-    setShowCreate(false);
-    setWfName("");
-    setWfDesc("");
-    setCreating(false);
-    loadData();
   }
 
   async function handleDeleteWorkflow(id: string) {
-    const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/workflows/${id}`, { method: "DELETE" });
+      toast.success("Workflow deleted");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Workflow deleted");
-    loadData();
   }
 
   async function handleAddStep(e: React.FormEvent) {
     e.preventDefault();
     if (!addStepTo || !stepGroupId) return;
-    const res = await fetch(`/api/workflows/${addStepTo}/steps`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        groupId: stepGroupId,
-        approvalMode: stepMode,
-        signatureLabel: stepLabel || "Approved",
-        deadlineHours: stepDeadline ? parseInt(stepDeadline) : null,
-      }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson(`/api/workflows/${addStepTo}/steps`, {
+        method: "POST",
+        body: {
+          groupId: stepGroupId,
+          approvalMode: stepMode,
+          signatureLabel: stepLabel || "Approved",
+          deadlineHours: stepDeadline ? parseInt(stepDeadline) : null,
+        },
+      });
+      toast.success("Step added");
+      setAddStepTo(null);
+      setStepGroupId("");
+      setStepMode("ANY");
+      setStepLabel("Approved");
+      setStepDeadline("");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Step added");
-    setAddStepTo(null);
-    setStepGroupId("");
-    setStepMode("ANY");
-    setStepLabel("Approved");
-    setStepDeadline("");
-    loadData();
   }
 
   async function handleRemoveStep(workflowId: string, stepId: string) {
-    await fetch(`/api/workflows/${workflowId}/steps`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stepId }),
-    });
-    toast.success("Step removed");
-    loadData();
+    try {
+      await fetchJson(`/api/workflows/${workflowId}/steps`, {
+        method: "DELETE",
+        body: { stepId },
+      });
+      toast.success("Step removed");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleToggleActive(id: string, isActive: boolean) {
-    await fetch(`/api/workflows/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !isActive }),
-    });
-    loadData();
+    try {
+      await fetchJson(`/api/workflows/${id}`, {
+        method: "PUT",
+        body: { isActive: !isActive },
+      });
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   async function handleAddAssignment(e: React.FormEvent) {
@@ -215,32 +208,30 @@ export default function WorkflowsPage() {
       body.ecoTrigger = assignEcoTrigger;
     }
 
-    const res = await fetch("/api/workflows/assignments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
-      return;
+    try {
+      await fetchJson("/api/workflows/assignments", { method: "POST", body });
+      toast.success("Assignment added");
+      setAddAssignTo(null);
+      setAssignTransitionId("");
+      setAssignEcoTrigger("");
+      setAssignType("transition");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Assignment added");
-    setAddAssignTo(null);
-    setAssignTransitionId("");
-    setAssignEcoTrigger("");
-    setAssignType("transition");
-    loadData();
   }
 
   async function handleRemoveAssignment(assignmentId: string) {
-    await fetch("/api/workflows/assignments", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assignmentId }),
-    });
-    toast.success("Assignment removed");
-    loadData();
+    try {
+      await fetchJson("/api/workflows/assignments", {
+        method: "DELETE",
+        body: { assignmentId },
+      });
+      toast.success("Assignment removed");
+      refetchWorkflows();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
   }
 
   function getTransitionLabel(transitionId: string) {
@@ -260,6 +251,10 @@ export default function WorkflowsPage() {
         <div className="w-5 h-5 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
       </div>
     );
+
+  if (error) {
+    return <p className="text-center py-8 text-destructive">{errorMessage(error)}</p>;
+  }
 
   return (
     <PageContainer>

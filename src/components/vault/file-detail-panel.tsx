@@ -51,6 +51,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 import { WhereUsedSection } from "@/components/where-used-section";
 import type { FileWhereUsed } from "@/lib/where-used";
 import { CadViewer } from "@/components/vault/cad-viewer-lazy";
@@ -550,19 +551,31 @@ export function FileDetailPanel({
   // Filters are by id/fileId so only events for the currently-open
   // file wake this component. When the user navigates away (fileId
   // changes or panel unmounts), the channels tear down automatically.
+  // Mutations in this panel go through `refreshAfterWrite`, which marks the
+  // write so the realtime replay of it is ignored. Without that, a check-out
+  // from this panel re-fetched the file twice — once explicitly, once when
+  // Postgres echoed the row back to the subscription above.
+  const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+
+  const refreshAfterWrite = useCallback(() => {
+    markLocalWrite();
+    return refreshFile();
+  }, [markLocalWrite, refreshFile]);
+
+  const refreshFromRemote = useCallback(() => {
+    if (isEcho()) return;
+    void refreshFile();
+  }, [isEcho, refreshFile]);
+
   useRealtimeTable({
     table: "files",
     filter: `id=eq.${fileId}`,
-    onChange: () => {
-      void refreshFile();
-    },
+    onChange: refreshFromRemote,
   });
   useRealtimeTable({
     table: "file_versions",
     filter: `fileId=eq.${fileId}`,
-    onChange: () => {
-      void refreshFile();
-    },
+    onChange: refreshFromRemote,
   });
 
   async function handleSaveMetadata() {
@@ -619,7 +632,7 @@ export function FileDetailPanel({
     }
     const d = await res.json();
     toast.success(`Restored to version ${version} (now v${d.newVersion})`);
-    refreshFile();
+    refreshAfterWrite();
     onRefresh();
   }
 
@@ -631,7 +644,7 @@ export function FileDetailPanel({
       return;
     }
     toast.success("File checked out");
-    refreshFile();
+    refreshAfterWrite();
     onRefresh();
   }
 
@@ -652,7 +665,7 @@ export function FileDetailPanel({
       return;
     }
     toast.success("Checkout unlocked");
-    refreshFile();
+    refreshAfterWrite();
     onRefresh();
   }
 
@@ -688,7 +701,7 @@ export function FileDetailPanel({
     setShowLinkPart(false);
     setLinkPartSearch("");
     setLinkPartResults([]);
-    void refreshFile();
+    void refreshAfterWrite();
   }
 
   async function handleUnlinkPart(partId: string) {
@@ -703,7 +716,7 @@ export function FileDetailPanel({
       return;
     }
     toast.success("Part unlinked");
-    void refreshFile();
+    void refreshAfterWrite();
   }
 
   if (loading || !file) {
@@ -1199,7 +1212,7 @@ export function FileDetailPanel({
                 className="h-full"
                 shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
                 onCadThumbnailCaptured={() => {
-                  void refreshFile();
+                  void refreshAfterWrite();
                 }}
               />
             </div>
@@ -1247,7 +1260,7 @@ export function FileDetailPanel({
               className="min-h-[50vh]"
               shouldCaptureCadThumbnail={!file.thumbnailKey && !file.isFrozen}
               onCadThumbnailCaptured={() => {
-                void refreshFile();
+                void refreshAfterWrite();
               }}
             />
           </TabsContent>

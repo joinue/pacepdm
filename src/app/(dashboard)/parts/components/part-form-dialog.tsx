@@ -21,7 +21,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Search, X, FileText, ImageIcon, Loader2 } from "lucide-react";
+import { Upload, Search, X, FileText, Loader2 } from "lucide-react";
+import { ThumbnailPicker } from "@/components/ui/entity-thumbnail";
+import { fetchJson, uploadFile, errorMessage } from "@/lib/api-client";
 import { toast } from "sonner";
 import type { Part } from "../parts-types";
 import { CATEGORIES, FILE_ROLE_LABELS } from "../parts-types";
@@ -65,7 +67,6 @@ export function PartFormDialog({
   const [saving, setSaving] = useState(false);
 
   // Thumbnail state
-  const dialogThumbnailRef = useRef<HTMLInputElement>(null);
   const [dialogThumbnailFile, setDialogThumbnailFile] = useState<File | null>(null);
   const [dialogThumbnailPreview, setDialogThumbnailPreview] = useState<string | null>(null);
   const [dialogThumbnailExistingUrl, setDialogThumbnailExistingUrl] = useState<string | null>(null);
@@ -157,9 +158,7 @@ export function PartFormDialog({
 
   const debouncedAttachLinkSearch = useDebounce(doAttachLinkSearch, 300);
 
-  function handleThumbnailPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  function handleThumbnailPick(file: File) {
     if (dialogThumbnailPreview?.startsWith("blob:")) {
       URL.revokeObjectURL(dialogThumbnailPreview);
     }
@@ -210,27 +209,20 @@ export function PartFormDialog({
 
     const partData = await res.json();
 
-    // Thumbnail mutations
+    // Thumbnail mutations. Reported separately from the part save: the part
+    // itself is already written, so a failure here must not read as "nothing
+    // was saved".
     if (dialogThumbnailFile) {
       try {
-        const fd = new FormData();
-        fd.append("file", dialogThumbnailFile);
-        const tRes = await fetch(`/api/parts/${partData.id}/thumbnail`, {
-          method: "POST",
-          body: fd,
-        });
-        if (!tRes.ok) {
-          const d = await tRes.json().catch(() => ({}));
-          toast.error(d.error || "Thumbnail upload failed");
-        }
-      } catch {
-        toast.error("Thumbnail upload failed");
+        await uploadFile(`/api/parts/${partData.id}/thumbnail`, dialogThumbnailFile);
+      } catch (err) {
+        toast.error(`Part saved, but the image did not upload: ${errorMessage(err)}`);
       }
     } else if (editingPart && dialogThumbnailRemoved) {
       try {
-        await fetch(`/api/parts/${partData.id}/thumbnail`, { method: "DELETE" });
-      } catch {
-        /* non-fatal */
+        await fetchJson(`/api/parts/${partData.id}/thumbnail`, { method: "DELETE" });
+      } catch (err) {
+        toast.error(`Part saved, but the image was not removed: ${errorMessage(err)}`);
       }
     }
 
@@ -311,47 +303,20 @@ export function PartFormDialog({
           <div className="space-y-4 py-4">
             {/* Thumbnail */}
             <div className="flex items-start gap-3">
-              <label className="cursor-pointer shrink-0 group relative">
-                {previewSrc ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={previewSrc}
-                    alt=""
-                    className="w-16 h-16 rounded-lg object-cover border"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-lg bg-muted border border-dashed flex items-center justify-center">
-                    <ImageIcon className="w-5 h-5 text-muted-foreground/40" />
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Upload className="w-4 h-4 text-white" />
-                </div>
-                <input
-                  ref={dialogThumbnailRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleThumbnailPick}
-                />
-              </label>
+              <ThumbnailPicker
+                src={previewSrc}
+                kind="part"
+                size="lg"
+                label="Choose a part image"
+                onSelect={handleThumbnailPick}
+                onRemove={handleThumbnailRemove}
+              />
               <div className="flex-1 min-w-0 space-y-1">
                 <Label className="text-xs">Thumbnail</Label>
                 <p className="text-2xs text-muted-foreground">
                   Click the image to {previewSrc ? "replace" : "upload"}. Stored in Supabase Storage
                   on save.
                 </p>
-                {previewSrc && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={handleThumbnailRemove}
-                  >
-                    Remove
-                  </Button>
-                )}
               </div>
             </div>
 

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FolderOpen,
   FolderPlus,
   Upload,
   Download,
@@ -80,16 +81,13 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
                   Back to vault
                 </Button>
               </div>
-              <h2 className="text-xl sm:text-2xl font-bold mt-1">{flatMeta.title}</h2>
+              <h1 className="text-xl sm:text-2xl font-bold mt-1">{flatMeta.title}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                 {flatMeta.description}
               </p>
             </>
           ) : (
-            <>
-              <h2 className="text-xl sm:text-2xl font-bold">Vault</h2>
-              <VaultBreadcrumbs vault={vault} />
-            </>
+            <VaultBreadcrumbs vault={vault} />
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -209,11 +207,22 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
   );
 }
 
+/**
+ * The vault's page heading *is* its breadcrumb trail.
+ *
+ * The last crumb — the folder you're actually in — renders as the `<h1>`,
+ * prefixed with the same folder icon the listing rows use, and the ancestors
+ * lead into it as muted links at the same type size. At the vault root there
+ * is a single crumb, so the heading is just "Vault". A separate static title
+ * above the trail would only repeat what the last crumb already says.
+ */
 function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
-  // On narrow screens with deep nesting, collapse middle entries to ".." so the
-  // breadcrumb stays on one line. Always show root + last 2 levels at minimum.
+  // On narrow screens with deep nesting, collapse middle entries to "…" so the
+  // trail stays on one line. Always show root + last 2 levels at minimum. The
+  // threshold is one tighter than a body-copy breadcrumb's would be: these
+  // crumbs are heading-sized, so they run out of width sooner.
   const items = vault.breadcrumbs;
-  const collapsed = items.length > 4;
+  const collapsed = items.length > 3;
   const visible = collapsed
     ? [
         { ...items[0], _index: 0 },
@@ -224,13 +233,14 @@ function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
     : items.map((e, i) => ({ ...e, _index: i }));
 
   return (
-    <Breadcrumb className="mt-1 min-w-0">
-      <BreadcrumbList className="flex-nowrap overflow-hidden">
+    <Breadcrumb className="min-w-0">
+      <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xl sm:text-2xl">
         {visible.map((entry, i) => {
           const isEllipsis = entry.id === "ellipsis";
+          const isCurrent = i === visible.length - 1;
           return (
             <React.Fragment key={`${entry.id}-${i}`}>
-              {i > 0 && <BreadcrumbSeparator className="shrink-0" />}
+              {i > 0 && <BreadcrumbSeparator className="shrink-0 [&>svg]:size-5" />}
               <BreadcrumbItem
                 onDragOver={(e) => {
                   if (!isEllipsis && entry.id !== vault.currentFolderId)
@@ -244,11 +254,22 @@ function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
                 className={`${vault.dropTargetId === entry.id ? "ring-2 ring-primary rounded px-1" : ""} min-w-0`}
               >
                 {isEllipsis ? (
-                  <span className="text-xs sm:text-sm text-muted-foreground px-1">…</span>
+                  <span className="px-1 text-muted-foreground">…</span>
+                ) : isCurrent ? (
+                  <h1
+                    aria-current="page"
+                    className="flex min-w-0 items-center gap-2 font-bold text-foreground"
+                    title={entry.name}
+                  >
+                    {/* No icon at the root: "Vault" is the whole vault, not a
+                        folder inside it. */}
+                    {i > 0 && <FolderOpen className="w-5 h-5 shrink-0 text-info" />}
+                    <span className="truncate">{entry.name}</span>
+                  </h1>
                 ) : (
                   <BreadcrumbLink
                     onClick={() => vault.navigateToBreadcrumb(entry._index)}
-                    className="cursor-pointer text-xs sm:text-sm truncate block max-w-32 sm:max-w-48"
+                    className="block max-w-24 truncate cursor-pointer font-normal text-muted-foreground sm:max-w-40"
                     title={entry.name}
                   >
                     {entry.name}
