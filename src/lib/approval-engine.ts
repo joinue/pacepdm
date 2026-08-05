@@ -150,23 +150,67 @@ export async function startWorkflow(params: StartWorkflowParams) {
     }
   }
 
-  // Create decisions for ALL steps (but only activate step 1)
+  // Create decisions for every step (only step 1 starts active).
+  //
+  // **How many rows a step gets is what makes ALL and MAJORITY work.**
+  // A decision row can only ever record one decider — `processDecision`
+  // claims it with a compare-and-swap on `status = 'PENDING'` and stamps a
+  // single `deciderId`. So a step needing several approvers needs several
+  // rows, one per member of its group.
+  //
+  // With a single row per step regardless of mode (the previous shape),
+  // ALL deadlocked with two or more members and MAJORITY with three or
+  // more: the one row was claimed by the first approver, the step's
+  // "everyone has approved" test could never see a second decider, and no
+  // one else could act because the row was no longer PENDING. The request
+  // sat PENDING forever with no way out but a recall. Both modes are
+  // offered in Admin → Workflows, so the configuration was reachable.
+  //
+  // The approver set is frozen here rather than re-read when each decision
+  // lands. Someone added to the group mid-flight does not gain a vote on a
+  // request that was already out, and — more to the point — someone
+  // *removed* cannot leave an ALL step permanently one approval short.
   for (const step of steps as WorkflowStep[]) {
     const deadlineAt = step.deadlineHours
       ? new Date(Date.now() + step.deadlineHours * 3600000).toISOString()
       : null;
+    const isFirst = step.stepOrder === 1;
 
-    await db.from("approval_decisions").insert({
-      id: uuid(),
-      requestId,
-      groupId: step.groupId,
-      stepId: step.id,
-      signatureLabel: step.signatureLabel,
-      approvalMode: step.approvalMode,
-      deadlineAt: step.stepOrder === 1 ? deadlineAt : null, // Only set deadline for active step
-      status: step.stepOrder === 1 ? "PENDING" : "WAITING", // WAITING = not yet active
-      createdAt: now,
-    });
+    let seats = 1;
+    if (step.approvalMode === "ALL" || step.approvalMode === "MAJORITY") {
+      const { data: members } = await db
+        .from("approval_group_members")
+        .select("userId")
+        .eq("groupId", step.groupId);
+      seats = (members ?? []).length;
+
+      // An empty group cannot satisfy either mode. Failing here beats
+      // creating a request that can never complete — and the file or ECO
+      // stays in its current state instead of being stranded mid-flow.
+      if (seats === 0) {
+        return {
+          success: false,
+          error:
+            `Approval step ${step.stepOrder} ("${step.signatureLabel || "Approved"}") uses ` +
+            `${step.approvalMode} mode but its group has no members. Add members in ` +
+            `Admin → Approval Groups, or change the step to "Any one member".`,
+        };
+      }
+    }
+
+    for (let seat = 0; seat < seats; seat++) {
+      await db.from("approval_decisions").insert({
+        id: uuid(),
+        requestId,
+        groupId: step.groupId,
+        stepId: step.id,
+        signatureLabel: step.signatureLabel,
+        approvalMode: step.approvalMode,
+        deadlineAt: isFirst ? deadlineAt : null, // Only the active step is on the clock
+        status: isFirst ? "PENDING" : "WAITING", // WAITING = not yet active
+        createdAt: now,
+      });
+    }
   }
 
   // Log history
@@ -249,6 +293,21 @@ export async function processDecision({
   const request = decision.request;
   const requestId = decision.requestId;
 
+  // One vote per person per step. ALL and MAJORITY steps now hold one row
+  // per group member, and any member can claim any pending row — so without
+  // this, one approver could take two seats and satisfy a step alone, which
+  // is the exact thing those modes exist to prevent.
+  const { data: alreadyDecided } = await db
+    .from("approval_decisions")
+    .select("id")
+    .eq("requestId", requestId)
+    .eq("stepId", decision.stepId)
+    .eq("deciderId", userId)
+    .maybeSingle();
+  if (alreadyDecided) {
+    return { error: "You have already recorded a decision on this step" };
+  }
+
   // Atomic claim: compare-and-swap on `status = 'PENDING'`. Postgres
   // serializes UPDATEs on the same row, so if two ANY-mode approvers
   // click simultaneously the second one's UPDATE matches zero rows and
@@ -309,41 +368,24 @@ export async function processDecision({
     // One approval is enough
     stepResolved = true;
     stepApproved = true;
-  } else if (approvalMode === "ALL") {
-    // All members of the group must approve
-    const { data: groupMembers } = await db
-      .from("approval_group_members")
-      .select("userId")
-      .eq("groupId", decision.groupId);
-    const memberIds = (groupMembers || []).map((m) => m.userId);
-    const approvedBy = allStepDecisions
-      .filter((d) => d.status === "APPROVED")
-      .map((d) => d.deciderId);
-    stepApproved = memberIds.every((id) => approvedBy.includes(id));
-    stepResolved = stepApproved; // Only resolved when all have approved
-    // If not all approved yet, we need to create decisions for remaining members
-    // Actually, in "ALL" mode with a single decision row, we need multiple users to approve the same decision
-    // Let's track it differently: the decision stays PENDING until all group members have approved
-    // For now, we mark the decision back to PENDING if not everyone has weighed in
-    if (!stepResolved) {
-      // Decision recorded but step not done — keep the decision APPROVED but step continues
-      // We track individual approvals via history and check member count
-      const totalNeeded = memberIds.length;
-      const totalApproved = new Set(approvedBy).size;
-      if (totalApproved >= totalNeeded) {
-        stepResolved = true;
-        stepApproved = true;
-      }
-    }
-  } else if (approvalMode === "MAJORITY") {
-    const { data: groupMembers } = await db
-      .from("approval_group_members")
-      .select("userId")
-      .eq("groupId", decision.groupId);
-    const totalMembers = (groupMembers || []).length;
-    const approvedCount = allStepDecisions.filter((d) => d.status === "APPROVED").length;
-    const majority = Math.ceil(totalMembers / 2);
-    stepApproved = approvedCount >= majority;
+  } else if (approvalMode === "ALL" || approvalMode === "MAJORITY") {
+    // Both count distinct approvers against the seats this step was given
+    // when the workflow started — one per group member. Counting against
+    // *current* group membership instead would move the goalposts under a
+    // request already in flight: adding a member mid-approval would make a
+    // finished ALL step unfinished again.
+    //
+    // Distinct `deciderId` rather than row count, because the seats are
+    // interchangeable and nothing in the schema ties a row to a person. The
+    // one-vote-per-person guard above is what makes the two equivalent; this
+    // stays defensive in case a row is ever claimed another way.
+    const seats = allStepDecisions.length;
+    const approvers = new Set(
+      allStepDecisions.filter((d) => d.status === "APPROVED" && d.deciderId).map((d) => d.deciderId)
+    );
+    const needed = approvalMode === "ALL" ? seats : Math.ceil(seats / 2);
+
+    stepApproved = approvers.size >= needed;
     stepResolved = stepApproved;
   }
 

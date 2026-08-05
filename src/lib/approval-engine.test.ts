@@ -193,6 +193,10 @@ describe("startWorkflow", () => {
       error: null,
     };
 
+    // Step 2 is an ALL step, so it gets one decision row per group member.
+    // A single member keeps this test's arithmetic at one row per step.
+    tableResults["approval_group_members"] = { data: [{ userId: "qa-1" }], error: null };
+
     await startWorkflow(baseParams);
 
     const decisions = insertCalls.filter((c) => c.table === "approval_decisions");
@@ -482,5 +486,96 @@ describe("rejectForRework — tenant guard", () => {
 
     expect(result).toEqual({ error: "Decision not found" });
     expect(updateCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * Multi-approver modes.
+ *
+ * A decision row records exactly one decider — `processDecision` claims it
+ * with a compare-and-swap on `status = 'PENDING'` and stamps a single
+ * `deciderId`. So a step needing several approvers needs several rows.
+ *
+ * With one row per step regardless of mode, ALL deadlocked at two or more
+ * members and MAJORITY at three or more: the row was claimed by the first
+ * approver, the "everyone approved" test could never see a second decider,
+ * and nobody else could act because the row was no longer PENDING. The
+ * request sat PENDING with no exit but a recall. Both modes are selectable
+ * in Admin → Workflows, so it was reachable configuration rather than a
+ * theoretical shape.
+ */
+describe("startWorkflow — seats per approval mode", () => {
+  beforeEach(resetMockState);
+
+  function stepsWithMode(approvalMode: string) {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode,
+          signatureLabel: "Review",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Reviewers" },
+        },
+      ],
+      error: null,
+    };
+  }
+
+  it("gives an ANY step one seat regardless of group size", async () => {
+    stepsWithMode("ANY");
+    tableResults["approval_group_members"] = {
+      data: [{ userId: "u1" }, { userId: "u2" }, { userId: "u3" }],
+      error: null,
+    };
+
+    await startWorkflow(baseParams);
+
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(1);
+  });
+
+  it("gives an ALL step one seat per group member", async () => {
+    stepsWithMode("ALL");
+    tableResults["approval_group_members"] = {
+      data: [{ userId: "u1" }, { userId: "u2" }, { userId: "u3" }],
+      error: null,
+    };
+
+    await startWorkflow(baseParams);
+
+    const decisions = insertCalls.filter((c) => c.table === "approval_decisions");
+    expect(decisions).toHaveLength(3);
+    // All three are live immediately — this is one step, not three.
+    for (const d of decisions) {
+      expect((d.data as Record<string, unknown>).status).toBe("PENDING");
+      expect((d.data as Record<string, unknown>).stepId).toBe("step-1");
+    }
+  });
+
+  it("gives a MAJORITY step one seat per group member", async () => {
+    stepsWithMode("MAJORITY");
+    tableResults["approval_group_members"] = {
+      data: [{ userId: "u1" }, { userId: "u2" }, { userId: "u3" }],
+      error: null,
+    };
+
+    await startWorkflow(baseParams);
+
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(3);
+  });
+
+  it("refuses to start an ALL step whose group is empty", async () => {
+    // Better to fail here than to create a request nobody can ever finish,
+    // leaving the file or ECO stranded mid-transition.
+    stepsWithMode("ALL");
+    tableResults["approval_group_members"] = { data: [], error: null };
+
+    const result = await startWorkflow(baseParams);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no members");
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(0);
   });
 });
