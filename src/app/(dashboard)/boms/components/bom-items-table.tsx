@@ -290,7 +290,10 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
                     <ItemSourceCell
                       item={item}
                       onNavigateToVault={(fid) => router.push(`/vault?fileId=${fid}`)}
-                      onNavigateToParts={() => router.push("/parts")}
+                      // The parts page already supports ?partId= deep links;
+                      // this was throwing the id away and landing on the list.
+                      onNavigateToParts={(pid) => router.push(`/parts?partId=${pid}`)}
+                      onNavigateToBom={(bid) => router.push(`/boms/${bid}`)}
                     />
                   </TableCell>
 
@@ -391,19 +394,47 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
 }
 
 /**
- * Renders the "source" cell of a BOM item: a linked part, a sub-assembly,
- * a vault file, or a dash. Pulled out so the main row component stays
- * scannable.
+ * Renders the "source" cell of a BOM item: a sub-assembly, a linked part, a
+ * vault file, or a dash. Pulled out so the main row component stays
+ * scannable, and exported so the precedence below can be tested — it is the
+ * kind of rule that regresses silently.
+ *
+ * **Sub-assembly wins over part, and that ordering is the point.** An
+ * imported sub-assembly line carries both: `linkedBomId` for the structure
+ * and `partId` so the line resolves to a real item for the eventual ERP
+ * push. Checking `part` first — as this did — meant every one of the
+ * NANO-1000S's 22 sub-assembly lines rendered as an ordinary part and sent
+ * you to the parts list, with no way to open the assembly the line actually
+ * points at.
  */
-function ItemSourceCell({
+export function ItemSourceCell({
   item,
   onNavigateToVault,
   onNavigateToParts,
+  onNavigateToBom,
 }: {
   item: BOMItem;
   onNavigateToVault: (fileId: string) => void;
-  onNavigateToParts: () => void;
+  onNavigateToParts: (partId: string) => void;
+  onNavigateToBom: (bomId: string) => void;
 }) {
+  if (item.linkedBom) {
+    const linked = item.linkedBom;
+    return (
+      <div className="flex items-center gap-1.5">
+        <Package className="w-3 h-3 text-muted-foreground shrink-0" />
+        <button
+          className="text-xs hover:underline truncate max-w-28"
+          onClick={() => onNavigateToBom(linked.id)}
+          title={`Open ${linked.name} · Rev ${linked.revision}`}
+        >
+          {linked.name}
+        </button>
+        <span className="text-3xs font-mono text-muted-foreground">Rev {linked.revision}</span>
+        <StatusBadge status={linked.status} kind="bom" className="text-4xs px-1 py-0" />
+      </div>
+    );
+  }
   if (item.part) {
     const part = item.part;
     return (
@@ -411,23 +442,13 @@ function ItemSourceCell({
         <Cpu className="w-3 h-3 text-muted-foreground shrink-0" />
         <button
           className="text-xs hover:underline truncate max-w-28"
-          onClick={onNavigateToParts}
+          onClick={() => onNavigateToParts(part.id)}
           title={`${part.name} · Rev ${part.revision}`}
         >
           {part.partNumber}
         </button>
         <span className="text-3xs font-mono text-muted-foreground">Rev {part.revision}</span>
         <StatusBadge status={part.category} kind="bom" className="text-4xs px-1 py-0" />
-      </div>
-    );
-  }
-  if (item.linkedBom) {
-    const linked = item.linkedBom;
-    return (
-      <div className="flex items-center gap-1.5">
-        <Package className="w-3 h-3 text-muted-foreground shrink-0" />
-        <span className="text-xs truncate max-w-28">{linked.name}</span>
-        <StatusBadge status={linked.status} kind="bom" className="text-4xs px-1 py-0" />
       </div>
     );
   }

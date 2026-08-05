@@ -10,7 +10,7 @@ raw-fetch: 112
 generic-error-toast: 14
 swallowed-error: 11
 token-violations: 6
-component-tests: 2-->
+component-tests: 3-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -198,7 +198,9 @@ Do this **after** the route work. It touches import paths everywhere and would c
 
 The jsdom project is configured and working. Two reference files now: `src/components/ui/status-badge.test.tsx` for a pure presentational mapping, and `src/app/(dashboard)/boms/components/import-bom-dialog.test.tsx` for a stateful dialog — the latter is the better model for the list below, since it drives real interactions with `userEvent` and asserts on behaviour (nothing is POSTed before confirmation, the server's own error text reaches the user) rather than markup.
 
-Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing). Skip presentational primitives. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
+Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing). Skip presentational primitives.
+
+`item-source-cell.test.tsx` is a useful third pattern alongside the other two: the component is trivial to render but encodes a precedence rule (sub-assembly before part before file) whose breakage is invisible — it sent every sub-assembly line to the parts list for a day. Small pure-decision components inside big files are worth exporting purely so the decision can be pinned. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
 
 ### 5. Split the oversized files
 
