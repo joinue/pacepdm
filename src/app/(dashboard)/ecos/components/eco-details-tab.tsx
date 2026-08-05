@@ -20,6 +20,15 @@ import {
 import { Pencil } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import {
+  EFFECTIVITY_LABELS,
+  EFFECTIVITY_TYPES,
+  formatEffectivity,
+  fromDateInputValue,
+  toDateInputValue,
+  validateEffectivity,
+  type EffectivityType,
+} from "../effectivity";
+import {
   reasonLabels,
   changeTypeLabelsEco,
   costImpactLabels,
@@ -51,6 +60,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
   const [costImpact, setCostImpact] = useState(eco.costImpact || "");
   const [disposition, setDisposition] = useState(eco.disposition || "");
   const [effectivity, setEffectivity] = useState(eco.effectivity || "");
+  const [effectivityType, setEffectivityType] = useState<EffectivityType | "">(
+    eco.effectivityType || ""
+  );
+  const [effectiveFrom, setEffectiveFrom] = useState(toDateInputValue(eco.effectiveFrom));
+  const [effectiveSerial, setEffectiveSerial] = useState(eco.effectiveSerial || "");
 
   function startEditing() {
     setTitle(eco.title);
@@ -61,10 +75,25 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
     setCostImpact(eco.costImpact || "");
     setDisposition(eco.disposition || "");
     setEffectivity(eco.effectivity || "");
+    setEffectivityType(eco.effectivityType || "");
+    setEffectiveFrom(toDateInputValue(eco.effectiveFrom));
+    setEffectiveSerial(eco.effectiveSerial || "");
     setEditing(true);
   }
 
   async function handleSave() {
+    // Same two rules the API enforces, checked here so a missing date costs
+    // a message rather than a round trip.
+    const problem = validateEffectivity({
+      effectivityType: effectivityType || null,
+      effectiveFrom: fromDateInputValue(effectiveFrom),
+      effectiveSerial,
+    });
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+
     setSaving(true);
     try {
       const updated = await fetchJson<ECO>(`/api/ecos/${eco.id}`, {
@@ -78,6 +107,11 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
           costImpact: costImpact || null,
           disposition: disposition || null,
           effectivity: effectivity || null,
+          effectivityType: effectivityType || null,
+          // Only send the field the chosen type uses. Leaving a stale serial
+          // on a DATE ECO would make the row contradict itself.
+          effectiveFrom: effectivityType === "DATE" ? fromDateInputValue(effectiveFrom) : null,
+          effectiveSerial: effectivityType === "SERIAL" ? effectiveSerial.trim() || null : null,
         },
       });
       onUpdated(updated);
@@ -214,10 +248,46 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
             </div>
             <div className="space-y-2">
               <Label>Effectivity</Label>
+              <Select
+                value={effectivityType}
+                onValueChange={(v) => setEffectivityType((v as EffectivityType) ?? "")}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Not specified" />
+                </SelectTrigger>
+                <SelectContent>
+                  {EFFECTIVITY_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {EFFECTIVITY_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* Only the field the chosen type uses is shown — an empty
+                  serial box under a date ECO invites someone to fill it. */}
+              {effectivityType === "DATE" && (
+                <Input
+                  type="date"
+                  aria-label="Effective from"
+                  value={effectiveFrom}
+                  onChange={(e) => setEffectiveFrom(e.target.value)}
+                />
+              )}
+              {effectivityType === "SERIAL" && (
+                <Input
+                  aria-label="Effective from serial"
+                  value={effectiveSerial}
+                  onChange={(e) => setEffectiveSerial(e.target.value)}
+                  placeholder="e.g., SN-500"
+                />
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Effectivity notes</Label>
               <Input
                 value={effectivity}
                 onChange={(e) => setEffectivity(e.target.value)}
-                placeholder="e.g., Immediate, Next lot, SN 500+"
+                placeholder="e.g., after existing stock is consumed"
               />
             </div>
           </div>
@@ -287,8 +357,19 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
               )}
             </MetadataField>
             <MetadataField label="Effectivity">
-              {eco.effectivity ? (
-                <span className="text-sm">{eco.effectivity}</span>
+              {formatEffectivity(eco) || eco.effectivity ? (
+                <span className="text-sm">
+                  {formatEffectivity(eco)}
+                  {/* The note supplements the typed value rather than
+                      replacing it, and stands alone on older ECOs that only
+                      ever had prose. */}
+                  {eco.effectivity && (
+                    <span className="text-muted-foreground">
+                      {formatEffectivity(eco) ? " — " : ""}
+                      {eco.effectivity}
+                    </span>
+                  )}
+                </span>
               ) : (
                 <span className="text-sm text-muted-foreground/60 italic">Not set</span>
               )}
