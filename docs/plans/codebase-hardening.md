@@ -6,7 +6,7 @@
 routes-total: 106
 routes-wrapped: 37
 unwrapped-route: 324
-raw-fetch: 49
+raw-fetch: 44
 generic-error-toast: 8
 swallowed-error: 6
 token-violations: 6
@@ -91,7 +91,7 @@ npm run probe:rls                                      # live RLS posture
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
 | Routes on `withTenant`                | 0                | **37 / 106**                         | 106                                                   |
-| `raw-fetch` in client components      | 112              | **49**                               | 0                                                     |
+| `raw-fetch` in client components      | 112              | **48**                               | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                | 0                                                     |
 | Component tests                       | 0                | **6** files (57 stateful components) | the ones with real logic                              |
@@ -139,7 +139,7 @@ backup. Do the restore once, into the dev project from item 4.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 66 routes
+### 1. Finish the route wrapper — 69 routes
 
 > 70 → 66. Three of those four are new routes that were wrapped from the start
 > (the BOM and vendor thumbnail endpoints); one is a genuine conversion —
@@ -180,13 +180,19 @@ Things that will trip you up:
 - **Helpers that take a raw client** (`captureBomSnapshot`, `getFileWhereUsed`, `getReleaseById`) need `db.unscoped("reason")`. They scope by the `tenantId` you pass them.
 - **Add a case to `src/app/api/tenant-isolation.test.ts`** for any route that resolves a record by id. That file is the registry of what is proven safe.
 
-### 2. Adopt `useFetch` / `fetchJson` — 55 sites
+### 2. Adopt `useFetch` / `fetchJson` — 48 sites
 
 ```bash
 node scripts/lint-conventions.mjs --list raw-fetch
 ```
 
-Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `providers/notification-provider.tsx` (6), `parts/components/part-form-dialog.tsx` (6), `parts/components/add-vendor-dialog.tsx` (3).
+Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `parts/components/part-form-dialog.tsx` (6), `parts/components/add-vendor-dialog.tsx` (3).
+
+**These headings are prose, so `lint:plans` does not check them.** Only the
+`plan-metrics` block is verified; a count written into a heading drifts
+silently, and both of these had. Recompute from `npm run lint:plans` rather
+than trusting them — especially now, with a parallel effort burning this
+list down while you read it.
 
 **A perf pass on 2026-08-05 cleared the page-level reads.** `parts/page.tsx`,
 `vendors/page.tsx`, `search/page.tsx`, `profile/page.tsx`, `admin/roles`,
