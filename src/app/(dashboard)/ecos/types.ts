@@ -28,6 +28,7 @@ export interface ECOItem {
   // Exactly one of partId/fileId is set — XOR enforced in DB + API.
   partId: string | null;
   fileId: string | null;
+  bomId: string | null;
   changeType: string;
   reason: string | null;
   fromRevision: string | null;
@@ -46,6 +47,13 @@ export interface ECOItem {
     partNumber: string | null;
     lifecycleState: string;
     currentVersion: number;
+  } | null;
+  /** Set when the ECO governs a BOM revision as well as its item. */
+  bom: {
+    id: string;
+    name: string;
+    revision: string;
+    status: string;
   } | null;
 }
 

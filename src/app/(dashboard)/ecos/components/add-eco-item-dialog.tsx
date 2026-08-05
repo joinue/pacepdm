@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,9 +22,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Search, Loader2, X, FileText, Package } from "lucide-react";
+import { Search, Loader2, X, FileText, Package, Layers } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import type { SearchFile, SearchPart } from "../types";
+
+/** What the ECO item can point at. Mirrors the route's exactly-one rule. */
+type EcoItemTarget = "part" | "bom" | "file";
+
+/** The subset of a BOM the picker needs. */
+interface BomOption {
+  id: string;
+  name: string;
+  revision: string;
+  status: string;
+}
 
 interface AddEcoItemDialogProps {
   open: boolean;
@@ -35,10 +46,15 @@ interface AddEcoItemDialogProps {
 }
 
 /**
- * Adds an affected item to an ECO. Two tabs: "Part" (the recommended
- * path — a part carries revision metadata and cascades to all its linked
- * files on implement) and "File" (for loose documents not attached to
- * any part).
+ * Adds an affected item to an ECO. Three tabs:
+ *
+ *   Part — the recommended path. A part carries revision metadata and
+ *          cascades to all its linked files on implement.
+ *   BOM  — the structure. A change order governs an item AND its structure;
+ *          before migration 046 an ECO could carry the part revision but not
+ *          the BOM revision that went with it, which is most of what a change
+ *          order is for.
+ *   File — loose documents not attached to any part.
  *
  * Each picker debounces search (2-char min). After selection the user
  * picks a change type (ADD/MODIFY/REMOVE) and an optional reason. Part
@@ -46,13 +62,19 @@ interface AddEcoItemDialogProps {
  * the server auto-bumps A→B on implement.
  */
 export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoItemDialogProps) {
-  const [target, setTarget] = useState<"part" | "file">("part");
+  const [target, setTarget] = useState<EcoItemTarget>("part");
 
   const [partSearch, setPartSearch] = useState("");
   const [partResults, setPartResults] = useState<SearchPart[]>([]);
   const [searchingParts, setSearchingParts] = useState(false);
   const [selectedPart, setSelectedPart] = useState<SearchPart | null>(null);
   const [toRevision, setToRevision] = useState("");
+
+  // BOMs are few enough per tenant to list rather than search — the same
+  // reasoning as the sub-assembly picker in the BOM AddItemDialog.
+  const [boms, setBoms] = useState<BomOption[]>([]);
+  const [loadingBoms, setLoadingBoms] = useState(false);
+  const [selectedBom, setSelectedBom] = useState<BomOption | null>(null);
 
   const [fileSearch, setFileSearch] = useState("");
   const [fileResults, setFileResults] = useState<SearchFile[]>([]);
@@ -63,12 +85,38 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * BOMs are loaded once when the dialog opens rather than searched. A
+   * tenant has tens of them, not thousands, and the list endpoint already
+   * returns only current revisions — a superseded revision is not something
+   * you would attach a new change order to.
+   */
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoadingBoms(true);
+    fetchJson<BomOption[]>("/api/boms")
+      .then((data) => {
+        if (!cancelled) setBoms(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBoms(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   function reset() {
     setTarget("part");
     setPartSearch("");
     setPartResults([]);
     setSelectedPart(null);
     setToRevision("");
+    setSelectedBom(null);
     setFileSearch("");
     setFileResults([]);
     setSelectedFile(null);
@@ -117,7 +165,8 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
     }
   }
 
-  const canSubmit = target === "part" ? !!selectedPart : !!selectedFile;
+  const canSubmit =
+    target === "part" ? !!selectedPart : target === "bom" ? !!selectedBom : !!selectedFile;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -127,6 +176,12 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
       const body: Record<string, unknown> = { changeType, reason };
       if (target === "part" && selectedPart) {
         body.partId = selectedPart.id;
+        if (toRevision.trim()) body.toRevision = toRevision.trim();
+      } else if (target === "bom" && selectedBom) {
+        body.bomId = selectedBom.id;
+        // The server seeds fromRevision from the BOM itself; an explicit
+        // toRevision is only meaningful when the user is naming the revision
+        // this change will produce.
         if (toRevision.trim()) body.toRevision = toRevision.trim();
       } else if (target === "file" && selectedFile) {
         body.fileId = selectedFile.id;
@@ -154,11 +209,15 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
-            <Tabs value={target} onValueChange={(v) => setTarget(v as "part" | "file")}>
-              <TabsList className="grid w-full grid-cols-2">
+            <Tabs value={target} onValueChange={(v) => setTarget(v as EcoItemTarget)}>
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="part">
                   <Package className="w-3.5 h-3.5 mr-1.5" />
                   Part
+                </TabsTrigger>
+                <TabsTrigger value="bom">
+                  <Layers className="w-3.5 h-3.5 mr-1.5" />
+                  BOM
                 </TabsTrigger>
                 <TabsTrigger value="file">
                   <FileText className="w-3.5 h-3.5 mr-1.5" />
@@ -264,6 +323,75 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                   />
                   <p className="text-2xs text-muted-foreground">
                     If blank, the server bumps a single-letter revision on implement (e.g. A → B).
+                  </p>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="bom" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label>
+                    BOM <span className="text-destructive">*</span>
+                  </Label>
+                  {selectedBom ? (
+                    <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/20">
+                      <Layers className="w-5 h-5 text-primary shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{selectedBom.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Rev {selectedBom.revision} &middot; {selectedBom.status}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 shrink-0"
+                        onClick={() => setSelectedBom(null)}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ) : loadingBoms ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 py-3">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Loading BOMs...
+                    </div>
+                  ) : boms.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-3">
+                      No BOMs yet. Create one before adding it to an ECO.
+                    </p>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                      {boms.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2.5 text-sm hover:bg-muted/50 border-b last:border-0 flex items-center gap-3 transition-colors"
+                          onClick={() => setSelectedBom(b)}
+                        >
+                          <Layers className="w-4 h-4 text-muted-foreground shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate">{b.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Rev {b.revision} &middot; {b.status}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>New revision</Label>
+                  <Input
+                    value={toRevision}
+                    onChange={(e) => setToRevision(e.target.value)}
+                    placeholder="Leave blank to decide when the BOM is revised"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Recording the revision this change will produce. Creating it is a separate step
+                    — use <span className="font-medium">Create next revision</span> on the released
+                    BOM.
                   </p>
                 </div>
               </TabsContent>

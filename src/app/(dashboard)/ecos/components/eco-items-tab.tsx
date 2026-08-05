@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, Loader2, FileText, Trash2, Package, ArrowRight } from "lucide-react";
+import { Plus, Loader2, FileText, Trash2, Package, ArrowRight, Layers } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { changeTypeLabels } from "../constants";
 import type { ECOItem } from "../types";
@@ -83,6 +83,7 @@ export function EcoItemsTab({
                 variant: "info" as const,
               };
               const isPart = !!item.part;
+              const isBom = !!item.bom;
               return (
                 <div
                   key={item.id}
@@ -90,6 +91,8 @@ export function EcoItemsTab({
                 >
                   {isPart ? (
                     <Package className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                  ) : isBom ? (
+                    <Layers className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
                   ) : (
                     <FileText className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
                   )}
@@ -98,7 +101,7 @@ export function EcoItemsTab({
                       <span className="text-sm font-medium truncate">
                         {item.part
                           ? `${item.part.partNumber} — ${item.part.name}`
-                          : item.file?.name}
+                          : (item.bom?.name ?? item.file?.name)}
                       </span>
                       <Badge variant={ct.variant} className="text-3xs shrink-0">
                         {ct.label}
@@ -123,6 +126,28 @@ export function EcoItemsTab({
                             )}
                             {!item.toRevision && (
                               <span className="italic">(auto-bump on implement)</span>
+                            )}
+                          </span>
+                        </>
+                      ) : item.bom ? (
+                        <>
+                          <span>BOM</span>
+                          <span>&middot;</span>
+                          <span>{item.bom.status}</span>
+                          <span>&middot;</span>
+                          {/* Same from → to shape as a part. The revision is
+                              recorded here; creating it is a separate act on
+                              the BOM itself, so there is no auto-bump to
+                              promise. */}
+                          <span className="inline-flex items-center gap-1">
+                            Rev {item.fromRevision || item.bom.revision}
+                            {item.toRevision && (
+                              <>
+                                <ArrowRight className="w-3 h-3" />
+                                <span className="font-semibold text-foreground">
+                                  {item.toRevision}
+                                </span>
+                              </>
                             )}
                           </span>
                         </>

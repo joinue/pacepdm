@@ -56,6 +56,7 @@ type RawItem = {
   ecoId: string;
   partId: string | null;
   fileId: string | null;
+  bomId: string | null;
   changeType: string;
   reason: string | null;
   fromRevision: string | null;
@@ -78,6 +79,12 @@ type HydratedItem = RawItem & {
     lifecycleState: string;
     currentVersion: number;
   } | null;
+  bom: {
+    id: string;
+    name: string;
+    revision: string;
+    status: string;
+  } | null;
 };
 
 async function hydrateItems(
@@ -86,8 +93,9 @@ async function hydrateItems(
 ): Promise<HydratedItem[]> {
   const partIds = Array.from(new Set(rows.map((r) => r.partId).filter((v): v is string => !!v)));
   const fileIds = Array.from(new Set(rows.map((r) => r.fileId).filter((v): v is string => !!v)));
+  const bomIds = Array.from(new Set(rows.map((r) => r.bomId).filter((v): v is string => !!v)));
 
-  const [partsRes, filesRes] = await Promise.all([
+  const [partsRes, filesRes, bomsRes] = await Promise.all([
     partIds.length
       ? db
           .from("parts")
@@ -100,18 +108,24 @@ async function hydrateItems(
           .select("id, name, partNumber, lifecycleState, currentVersion")
           .in("id", fileIds)
       : Promise.resolve({ data: [] as HydratedItem["file"][], error: null }),
+    bomIds.length
+      ? db.from("boms").select("id, name, revision, status").in("id", bomIds)
+      : Promise.resolve({ data: [] as HydratedItem["bom"][], error: null }),
   ]);
 
   if (partsRes.error) throw partsRes.error;
   if (filesRes.error) throw filesRes.error;
+  if (bomsRes.error) throw bomsRes.error;
 
   const partById = new Map((partsRes.data ?? []).map((p) => [p!.id, p!] as const));
   const fileById = new Map((filesRes.data ?? []).map((f) => [f!.id, f!] as const));
+  const bomById = new Map((bomsRes.data ?? []).map((b) => [b!.id, b!] as const));
 
   return rows.map((r) => ({
     ...r,
     part: r.partId ? (partById.get(r.partId) ?? null) : null,
     file: r.fileId ? (fileById.get(r.fileId) ?? null) : null,
+    bom: r.bomId ? (bomById.get(r.bomId) ?? null) : null,
   }));
 }
 
@@ -268,7 +282,7 @@ export async function POST(
         fromRevision: seededFromRevision,
         toRevision: toRevision ?? null,
       })
-      .select("id, ecoId, partId, fileId, changeType, reason, fromRevision, toRevision")
+      .select("id, ecoId, partId, fileId, bomId, changeType, reason, fromRevision, toRevision")
       .single();
 
     if (error) throw error;
