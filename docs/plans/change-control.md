@@ -109,20 +109,29 @@ Two smaller things came with it:
   [`status-flows.ts`](../../src/lib/status-flows.ts) and pinned against the
   migration text by `status-flows.test.ts`, so the two copies cannot drift.
 
-### 2. No revision history in the UI
+### ~~2. No revision history in the UI~~ Shipped 2026-08-05
 
-A superseded revision is filtered out of `GET /api/boms` (correctly — it is
-not what you are working on) and there is no way to reach it except by URL.
-`previousRevisionId` and `supersededById` make the chain walkable; nothing
-walks it.
+`GET /api/boms/[bomId]/revisions` walks the lineage in both directions and
+returns the whole chain, so one response serves "what came before this" on a
+current revision and "what replaced this" on a superseded one. Rendered as a
+**Revision history** panel on the BOM detail, with the governing ECO on each
+step, and a banner on a superseded revision linking to its replacement.
 
-**This is now the top item.** With implement closing the loop, ECO
-implementation is what sets `supersededById` — so the chain fills up on its
-own from here, and nothing displays it.
+Three things worth knowing before touching it:
 
-Wants: a "Revision history" section on the BOM detail listing the chain with
-dates and the ECO that caused each step, and a badge on a superseded
-revision saying what replaced it.
+- **A superseded revision is not in `GET /api/boms`**, so the detail view
+  could not resolve one — it showed "This BOM no longer exists." The panel
+  would have linked exclusively to dead ends. `boms-view` now falls back to
+  the detail endpoint, which does not filter on `supersededById`, whenever
+  the selected id is absent from the list.
+- **Order comes from the links, not from `createdAt`.** Sorting by timestamp
+  ordered revisions arbitrarily when they shared a millisecond, which a bulk
+  import produces. The walk order is the ordering; a test pins it with every
+  `createdAt` identical.
+- **Both walks need a cycle guard.** This endpoint runs every time anyone
+  opens a BOM, so a corrupt `previousRevisionId` loop would spin against the
+  database on an ordinary page view. Guarded by a `seen` set, not just by the
+  iteration cap.
 
 ### 3. Effectivity is stored but never read
 

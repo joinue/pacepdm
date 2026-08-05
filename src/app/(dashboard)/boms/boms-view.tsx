@@ -50,6 +50,7 @@ import { AddItemDialog } from "./components/add-item-dialog";
 import { BomItemsTable } from "./components/bom-items-table";
 import { BomRollupPanel } from "./components/bom-rollup-panel";
 import { BomBaselinesPanel } from "./components/bom-baselines-panel";
+import { BomRevisionsPanel } from "./components/bom-revisions-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionLabel } from "@/components/ui/section-label";
 import {
@@ -434,14 +435,31 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
   // ─── Derived state ───────────────────────────────────────────────────
   const totalCost = items.reduce((sum, i) => sum + (i.unitCost || 0) * i.quantity, 0);
-  const selectedBomData = boms.find((b) => b.id === selectedBomId);
+  const fromList = boms.find((b) => b.id === selectedBomId);
+
+  // A superseded revision is deliberately absent from `GET /api/boms` — the
+  // list shows what you are working on. But it is still a real BOM with a
+  // real detail page, and the revision history links straight to it, so
+  // "not in the list" cannot mean "does not exist". The detail endpoint does
+  // not filter on `supersededById`, so it resolves what the list omits.
+  //
+  // Without this the feature is self-defeating: every link into history
+  // lands on "This BOM no longer exists."
+  const needsDirectFetch = !loading && selectedBomId !== null && !fromList;
+  const { data: directBom, loading: directLoading } = useFetch<BOM>(
+    needsDirectFetch ? `/api/boms/${selectedBomId}` : null
+  );
+
+  const selectedBomData = fromList ?? directBom ?? undefined;
   const isEditable =
     canEdit && (selectedBomData?.status === "DRAFT" || selectedBomData?.status === "IN_REVIEW");
 
   // The URL can point at a BOM that doesn't exist (stale bookmark, deleted
   // BOM, guessed id). Surface that once the list has loaded instead of
   // silently showing an empty detail panel.
-  const selectionMissing = !loading && selectedBomId !== null && !selectedBomData;
+  // Only after the direct fetch has also come back empty — otherwise a
+  // superseded revision flashes "no longer exists" before it resolves.
+  const selectionMissing = !loading && selectedBomId !== null && !selectedBomData && !directLoading;
 
   // Auto-generate next item number for the Add Item dialog
   function getNextItemNumber(): string {
@@ -653,6 +671,30 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                         {items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
                       </span>
                     </div>
+                    {/* A superseded revision is filtered out of the BOM list,
+                        so anyone looking at one arrived by direct link or from
+                        the revision history. Say so before they read the items
+                        as current. */}
+                    {selectedBomData.supersededById && (
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/boms/${selectedBomData.supersededById}`)}
+                        className="mt-2 flex w-full items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-left text-xs hover:bg-destructive/15"
+                      >
+                        <TriangleAlert
+                          className="w-3.5 h-3.5 shrink-0 text-destructive"
+                          aria-hidden="true"
+                        />
+                        <span>
+                          <span className="font-medium text-destructive">
+                            This revision has been superseded.
+                          </span>{" "}
+                          <span className="text-muted-foreground">
+                            Open the revision that replaced it.
+                          </span>
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -805,6 +847,14 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                   the user can see the "no baselines yet" hint and trigger
                   a manual snapshot before the first release. */}
               <BomBaselinesPanel bomId={selectedBomId} canCapture={canEdit} />
+
+              {/* Revision history — the lineage this BOM belongs to. Rendered
+                  for every BOM; the panel itself says "this is the first"
+                  rather than showing an empty section. */}
+              <div>
+                <SectionLabel>Revision history</SectionLabel>
+                <BomRevisionsPanel bomId={selectedBomId} />
+              </div>
             </div>
           )}
         </div>

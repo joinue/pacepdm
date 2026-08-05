@@ -3,8 +3,8 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 109
-routes-wrapped: 41
+routes-total: 110
+routes-wrapped: 42
 unwrapped-route: 319
 raw-fetch: 44
 generic-error-toast: 8
@@ -90,7 +90,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **41 / 109**                         | 109                                                   |
+| Routes on `withTenant`                | 0                | **42 / 110**                         | 110                                                   |
 | `raw-fetch` in client components      | 112              | **44**                               | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                | 0                                                     |
@@ -142,7 +142,7 @@ backup. Do the restore once, into the dev project from item 4.
 
 ### 1. Finish the route wrapper — 68 routes
 
-> 70 → 66 → 68 of 109. The count went _up_ because the supplier-access work
+> 70 → 66 → 68 of 110. The count went _up_ because the supplier-access work
 > added three new routes (`GET /api/releases`, `/api/parts/[partId]/zip`,
 > `/api/parts/[partId]/package`), all wrapped from the start. The genuine
 > conversion in that batch was **`/api/share-tokens`**, done because adding a
