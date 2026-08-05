@@ -1,4 +1,4 @@
-# Supplier access: shares resolve at view time, and only release released work
+# Supplier access: shares resolve at view time, and release released work by default
 
 **Status:** active
 **Applies to:** `share_tokens`, `src/lib/part-package.ts`, `src/lib/releases.ts`, `/api/public/share/*`
@@ -16,7 +16,10 @@ and they answer different questions:
 Never make a part share behave like a release, and never make a release
 behave like a part share. The opposite choices are the whole point.
 
-A part share contains **released files only**, always.
+A part share contains **released files only** unless the link explicitly opts
+in, and anything it lets through beyond that is stamped PRELIMINARY on every
+surface that renders it. See
+[Why there is a WIP opt-in anyway](#why-there-is-a-wip-opt-in-anyway-and-what-it-must-always-carry).
 
 ## Why a part share resolves at view time
 
