@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,19 +84,10 @@ export function UsersClient({
     setLoading(true);
 
     try {
-      const res = await fetch("/api/users/invite", {
+      const data = await fetchJson<{ alreadyExisted?: boolean; user: User }>("/api/users/invite", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, fullName, roleId }),
+        body: { email, fullName, roleId },
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.error || "Failed to invite user");
-        setLoading(false);
-        return;
-      }
 
       toast.success(
         data.alreadyExisted
@@ -111,10 +103,11 @@ export function UsersClient({
         },
       ]);
       resetAndClose();
-    } catch {
-      toast.error("Failed to invite user");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function resetAndClose() {
@@ -142,26 +135,20 @@ export function UsersClient({
 
   async function setActive(userId: string, isActive: boolean) {
     try {
-      const res = await fetch(`/api/users/${userId}`, {
+      const data = await fetchJson<{ releasedCheckouts?: number }>(`/api/users/${userId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive }),
+        body: { isActive },
       });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Failed to update user");
-        return;
-      }
       setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isActive } : u)));
-      if (!isActive && data.releasedCheckouts > 0) {
+      if (!isActive && (data.releasedCheckouts ?? 0) > 0) {
         toast.success(
           `User deactivated. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`
         );
       } else {
         toast.success(`User ${isActive ? "activated" : "deactivated"}`);
       }
-    } catch {
-      toast.error("Failed to update user");
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   }
 
@@ -169,15 +156,12 @@ export function UsersClient({
     if (!removeTarget) return;
     setRemoving(true);
     try {
-      const res = await fetch(`/api/users/${removeTarget.id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Failed to remove user");
-        setRemoving(false);
-        return;
-      }
+      const data = await fetchJson<{ releasedCheckouts?: number }>(
+        `/api/users/${removeTarget.id}`,
+        { method: "DELETE" }
+      );
       setUsers((prev) => prev.filter((u) => u.id !== removeTarget.id));
-      if (data.releasedCheckouts > 0) {
+      if ((data.releasedCheckouts ?? 0) > 0) {
         toast.success(
           `${removeTarget.fullName} removed. ${data.releasedCheckouts} checked-out file${data.releasedCheckouts === 1 ? "" : "s"} released.`
         );
@@ -185,10 +169,11 @@ export function UsersClient({
         toast.success(`${removeTarget.fullName} removed from workspace`);
       }
       setRemoveTarget(null);
-    } catch {
-      toast.error("Failed to remove user");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setRemoving(false);
     }
-    setRemoving(false);
   }
 
   async function changeRole(user: User, newRoleId: string) {
@@ -206,20 +191,13 @@ export function UsersClient({
     );
 
     try {
-      const res = await fetch(`/api/users/${user.id}`, {
+      await fetchJson(`/api/users/${user.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roleId: newRoleId }),
+        body: { roleId: newRoleId },
       });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || "Failed to change role");
-        setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u)));
-        return;
-      }
       toast.success(`${user.fullName} is now ${newRole.name}`);
-    } catch {
-      toast.error("Failed to change role");
+    } catch (err) {
+      toast.error(errorMessage(err));
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: previousRole } : u)));
     }
   }

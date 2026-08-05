@@ -14,6 +14,16 @@ export async function GET(request: NextRequest) {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // Read is gated the same as write (POST below). Both consumers — the
+    // approval-groups admin page and the workflow editor's group picker —
+    // already require ADMIN_SETTINGS, and the response carries every
+    // group's membership, which is a roster of who approves what.
+    const permissions = tenantUser.role.permissions as string[];
+    if (!hasPermission(permissions, PERMISSIONS.ADMIN_SETTINGS)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const db = getServiceClient();
 
     // The workflow editor's group picker passes activeOnly=true so

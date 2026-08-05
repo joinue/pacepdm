@@ -14,6 +14,16 @@ export async function GET() {
   try {
     const tenantUser = await getApiTenantUser();
     if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // Read is gated the same as write. The workflow builder is the only
+    // consumer, and it already requires ADMIN_SETTINGS to change anything;
+    // leaving the read open let any authenticated user enumerate the
+    // tenant's approval structure — who signs what, at which step.
+    const permissions = tenantUser.role.permissions as string[];
+    if (!hasPermission(permissions, PERMISSIONS.ADMIN_SETTINGS)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const db = getServiceClient();
 
     const { data: workflows } = await db

@@ -41,7 +41,6 @@ type NavItem = {
 
 type NavGroup = {
   label?: string;
-  adminOnly?: boolean;
   items: NavItem[];
 };
 
@@ -65,23 +64,64 @@ const navGroups: NavGroup[] = [
       { name: "Approvals", href: "/approvals", icon: CheckCircle, badge: "approvals" },
     ],
   },
+  // Every item here declares the permission its own page and API require.
+  //
+  // The group used to be gated as a whole on "holds any admin.* permission",
+  // with per-item permissions the exception. That had two failure modes once
+  // roles stopped being just Admin/Engineer/Viewer: a role holding audit.view
+  // and no admin.* permission could not reach the audit log at all (the only
+  // link to it lived inside a group they never saw), and a role holding one
+  // admin.* permission saw links to all eight admin pages, seven of which
+  // 403 on save. Gating each item and hiding the group when nothing in it
+  // survives fixes both.
   {
     label: "Admin",
-    adminOnly: true,
     items: [
-      { name: "Users", href: "/admin/users", icon: Users },
-      { name: "Roles", href: "/admin/roles", icon: KeyRound },
-      { name: "Workflows", href: "/admin/workflows", icon: Workflow },
-      { name: "Approval Groups", href: "/admin/approval-groups", icon: ShieldCheck },
-      { name: "SSO", href: "/admin/sso", icon: KeyRound },
-      { name: "Lifecycle", href: "/admin/lifecycle", icon: Tag },
-      { name: "Metadata", href: "/admin/metadata", icon: FileText },
+      { name: "Users", href: "/admin/users", icon: Users, permission: PERMISSIONS.ADMIN_USERS },
+      { name: "Roles", href: "/admin/roles", icon: KeyRound, permission: PERMISSIONS.ADMIN_ROLES },
+      {
+        name: "Workflows",
+        href: "/admin/workflows",
+        icon: Workflow,
+        permission: PERMISSIONS.ADMIN_SETTINGS,
+      },
+      {
+        name: "Approval Groups",
+        href: "/admin/approval-groups",
+        icon: ShieldCheck,
+        permission: PERMISSIONS.ADMIN_SETTINGS,
+      },
+      { name: "SSO", href: "/admin/sso", icon: KeyRound, permission: PERMISSIONS.ADMIN_SETTINGS },
+      {
+        name: "Lifecycle",
+        href: "/admin/lifecycle",
+        icon: Tag,
+        permission: PERMISSIONS.ADMIN_LIFECYCLE,
+      },
+      {
+        name: "Metadata",
+        href: "/admin/metadata",
+        icon: FileText,
+        permission: PERMISSIONS.ADMIN_METADATA,
+      },
       { name: "Audit Log", href: "/audit-log", icon: History, permission: PERMISSIONS.AUDIT_VIEW },
-      { name: "Settings", href: "/admin/settings", icon: Settings },
+      {
+        name: "Settings",
+        href: "/admin/settings",
+        icon: Settings,
+        permission: PERMISSIONS.ADMIN_SETTINGS,
+      },
       // Development aid, not a product surface: the primitive gallery. Hidden
       // in production so it does not read as a feature.
       ...(process.env.NODE_ENV === "development"
-        ? [{ name: "Kitchen sink", href: "/admin/kitchen-sink", icon: Palette }]
+        ? [
+            {
+              name: "Kitchen sink",
+              href: "/admin/kitchen-sink",
+              icon: Palette,
+              permission: PERMISSIONS.ADMIN_SETTINGS,
+            },
+          ]
         : []),
     ],
   },
@@ -115,11 +155,9 @@ export function Sidebar({
     if (kind === "approvals") return `${n} pending approval${n === 1 ? "" : "s"}`;
     return `${n} unread notification${n === 1 ? "" : "s"}`;
   }
-  const isAdmin =
-    user.permissions.includes("*") || user.permissions.some((p) => p.startsWith("admin."));
-
+  // A group appears only if something in it survived the per-item permission
+  // filter, so the Admin heading no longer renders above an empty list.
   const visibleGroups = navGroups
-    .filter((g) => !g.adminOnly || isAdmin)
     .map((g) => ({
       ...g,
       items: g.items.filter(

@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { hasPermission, PERMISSIONS, DEFAULT_ROLES } from "./permissions";
+import {
+  hasPermission,
+  permissionsExceedingActor,
+  PERMISSIONS,
+  PERMISSION_INFO,
+  SENSITIVE_PERMISSIONS,
+  DEFAULT_ROLES,
+} from "./permissions";
 
 describe("hasPermission", () => {
   it("returns true when user has the exact permission", () => {
@@ -111,5 +118,98 @@ describe("DEFAULT_ROLES", () => {
       expect(role.description).toBeTruthy();
       expect(typeof role.description).toBe("string");
     }
+  });
+
+  it("every permission a default role grants is a real permission", () => {
+    const known = new Set<string>([...Object.values(PERMISSIONS), "*"]);
+    for (const [name, role] of Object.entries(DEFAULT_ROLES)) {
+      for (const perm of role.permissions) {
+        expect(known.has(perm), `${name} grants unknown permission ${perm}`).toBe(true);
+      }
+    }
+  });
+});
+
+describe("Manager role", () => {
+  const manager = DEFAULT_ROLES.Manager.permissions;
+
+  it("is a strict superset of Engineer", () => {
+    for (const perm of DEFAULT_ROLES.Engineer.permissions) {
+      expect(manager).toContain(perm);
+    }
+    expect(manager.length).toBeGreaterThan(DEFAULT_ROLES.Engineer.permissions.length);
+  });
+
+  it("closes the permissions no default role held except through Admin's wildcard", () => {
+    // The gap that motivated the role. Each of these was declared in
+    // PERMISSIONS and reachable only by holding "*".
+    expect(manager).toContain(PERMISSIONS.FILE_DELETE);
+    expect(manager).toContain(PERMISSIONS.FOLDER_DELETE);
+    expect(manager).toContain(PERMISSIONS.FOLDER_MANAGE_ACCESS);
+    expect(manager).toContain(PERMISSIONS.AUDIT_VIEW);
+    expect(manager).toContain(PERMISSIONS.ECO_APPROVE);
+  });
+
+  it("cannot configure the workspace itself", () => {
+    expect(manager).not.toContain("*");
+    expect(manager).not.toContain(PERMISSIONS.ADMIN_ROLES);
+    expect(manager).not.toContain(PERMISSIONS.ADMIN_SETTINGS);
+    expect(manager).not.toContain(PERMISSIONS.ADMIN_LIFECYCLE);
+    expect(manager).not.toContain(PERMISSIONS.ADMIN_METADATA);
+  });
+
+  it("cannot bypass folder access lists", () => {
+    // Manager can grant folder access; seeing through every ACL regardless
+    // is a support/debug capability and stays with Admin.
+    expect(manager).toContain(PERMISSIONS.FOLDER_MANAGE_ACCESS);
+    expect(manager).not.toContain(PERMISSIONS.FOLDER_ACCESS_BYPASS);
+  });
+
+  it("manages users but cannot escalate anyone to Admin", () => {
+    // ADMIN_USERS is only safe because role assignment runs the same
+    // privilege ceiling as role authoring. A Manager assigning the Admin
+    // role must be rejected.
+    expect(manager).toContain(PERMISSIONS.ADMIN_USERS);
+    expect(permissionsExceedingActor(DEFAULT_ROLES.Admin.permissions, manager)).toEqual(["*"]);
+  });
+
+  it("can author no role stronger than itself", () => {
+    expect(permissionsExceedingActor(manager, manager)).toEqual([]);
+    expect(permissionsExceedingActor([PERMISSIONS.ADMIN_SETTINGS], manager)).toEqual([
+      PERMISSIONS.ADMIN_SETTINGS,
+    ]);
+  });
+
+  it("can reach the audit log without holding any other admin permission", () => {
+    // Regression guard for the sidebar: the audit log link lives in the
+    // Admin nav group, which used to render only for holders of an
+    // `admin.*` permission. audit.view alone must be enough.
+    expect(hasPermission(manager, PERMISSIONS.AUDIT_VIEW)).toBe(true);
+    expect(hasPermission([PERMISSIONS.AUDIT_VIEW], PERMISSIONS.AUDIT_VIEW)).toBe(true);
+  });
+});
+
+describe("PERMISSION_INFO", () => {
+  it("describes every permission", () => {
+    for (const value of Object.values(PERMISSIONS)) {
+      expect(PERMISSION_INFO[value], `missing copy for ${value}`).toBeDefined();
+      expect(PERMISSION_INFO[value].label).toBeTruthy();
+      expect(PERMISSION_INFO[value].description).toBeTruthy();
+    }
+  });
+
+  it("describes nothing that is not a permission", () => {
+    const known = new Set<string>(Object.values(PERMISSIONS));
+    for (const key of Object.keys(PERMISSION_INFO)) {
+      expect(known.has(key), `${key} is not a permission`).toBe(true);
+    }
+  });
+
+  it("marks only real permissions as sensitive", () => {
+    const known = new Set<string>(Object.values(PERMISSIONS));
+    for (const perm of SENSITIVE_PERMISSIONS) {
+      expect(known.has(perm)).toBe(true);
+    }
+    expect(SENSITIVE_PERMISSIONS).toContain(PERMISSIONS.FOLDER_ACCESS_BYPASS);
   });
 });
