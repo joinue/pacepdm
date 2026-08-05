@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useFetch } from "@/hooks/use-fetch";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,8 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
+import { EntityThumbnail, ThumbnailPicker } from "@/components/ui/entity-thumbnail";
+import { fetchJson, uploadFile, errorMessage } from "@/lib/api-client";
 
 interface Vendor {
   id: string;
@@ -64,6 +67,8 @@ interface Vendor {
   contactPhone: string | null;
   notes: string | null;
   partCount?: number;
+  /** Signed URL for the vendor's logo, or null. See src/lib/thumbnails.ts. */
+  thumbnailUrl?: string | null;
 }
 
 interface VendorPartLink {
@@ -91,9 +96,8 @@ const EMPTY_FORM = {
 };
 
 export default function VendorsPage() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
 
   // Edit dialog handles both create and update — `editingId` discriminates
   const [showDialog, setShowDialog] = useState(false);
@@ -101,49 +105,57 @@ export default function VendorsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // Detail sheet — shows contact info + parts linked to this vendor
-  const [detailVendor, setDetailVendor] = useState<VendorDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
+  // Logo chosen in the dialog. Held until save, because a vendor being created
+  // has no id to upload against yet — the same two-step the part form uses.
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoCleared, setLogoCleared] = useState(false);
 
-  const loadVendors = useCallback(async (q?: string) => {
-    const params = new URLSearchParams();
-    params.set("withCounts", "1");
-    if (q) params.set("q", q);
-    const res = await fetch(`/api/vendors?${params}`);
-    const data = await res.json();
-    setVendors(Array.isArray(data) ? data : []);
-    setLoading(false);
-  }, []);
+  // Detail sheet — shows contact info + parts linked to this vendor
+  const [detailVendorId, setDetailVendorId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   // Local debounce — keeps the search snappy without re-running on every
   // keystroke. 250ms matches the parts-page vendor picker for consistency.
-  // Also handles the initial load (searchQuery starts as "", which fetches
-  // all vendors), so a separate "load on mount" effect would be redundant.
+  // The debounced value feeds the fetch URL, so the initial load (empty
+  // query, all vendors) needs no separate effect.
   useEffect(() => {
-    const id = setTimeout(() => {
-      void loadVendors(searchQuery);
-    }, 250);
+    const id = setTimeout(() => setDebouncedQuery(searchQuery), 250);
     return () => clearTimeout(id);
-  }, [searchQuery, loadVendors]);
+  }, [searchQuery]);
 
-  async function openDetail(v: Vendor) {
+  const vendorsUrl = `/api/vendors?withCounts=1${
+    debouncedQuery ? `&q=${encodeURIComponent(debouncedQuery)}` : ""
+  }`;
+  const { data: vendorData, loading, error, refetch: loadVendors } = useFetch<Vendor[]>(vendorsUrl);
+  const vendors = vendorData ?? [];
+
+  // Detail is keyed off the selected id, so opening the sheet is a URL
+  // change rather than a hand-rolled fetch — and switching vendors quickly
+  // aborts the previous request instead of racing it.
+  const { data: detailVendor, loading: detailLoading } = useFetch<VendorDetail>(
+    detailVendorId ? `/api/vendors/${detailVendorId}` : null
+  );
+
+  function openDetail(v: Vendor) {
+    setDetailVendorId(v.id);
     setDetailOpen(true);
-    setDetailLoading(true);
-    setDetailVendor(null);
-    const res = await fetch(`/api/vendors/${v.id}`);
-    setDetailLoading(false);
-    if (!res.ok) {
-      toast.error("Failed to load vendor details");
-      setDetailOpen(false);
-      return;
-    }
-    setDetailVendor(await res.json());
   }
+
+  /** Drop any pending logo choice and release the object URL behind it. */
+  const resetLogo = useCallback((existingUrl: string | null = null) => {
+    setLogoFile(null);
+    setLogoPreview((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return existingUrl;
+    });
+    setLogoCleared(false);
+  }, []);
 
   function openCreate() {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    resetLogo();
     setShowDialog(true);
   }
 
@@ -157,6 +169,7 @@ export default function VendorsPage() {
       contactPhone: v.contactPhone ?? "",
       notes: v.notes ?? "",
     });
+    resetLogo(v.thumbnailUrl ?? null);
     setShowDialog(true);
   }
 
@@ -164,34 +177,49 @@ export default function VendorsPage() {
     e.preventDefault();
     if (!form.name.trim()) return;
     setSaving(true);
-    const url = editingId ? `/api/vendors/${editingId}` : `/api/vendors`;
-    const method = editingId ? "PUT" : "POST";
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error || "Failed to save vendor");
-      return;
+    try {
+      const vendor = await fetchJson<Vendor>(
+        editingId ? `/api/vendors/${editingId}` : "/api/vendors",
+        { method: editingId ? "PUT" : "POST", body: form }
+      );
+
+      // The logo is a second request against the saved vendor. A failure here
+      // is reported on its own — the vendor itself did save, and telling the
+      // user otherwise would send them back to re-enter the form.
+      if (logoFile) {
+        try {
+          await uploadFile(`/api/vendors/${vendor.id}/thumbnail`, logoFile);
+        } catch (err) {
+          toast.error(`Vendor saved, but the logo did not upload: ${errorMessage(err)}`);
+        }
+      } else if (editingId && logoCleared) {
+        try {
+          await fetchJson(`/api/vendors/${vendor.id}/thumbnail`, { method: "DELETE" });
+        } catch (err) {
+          toast.error(`Vendor saved, but the logo was not removed: ${errorMessage(err)}`);
+        }
+      }
+
+      toast.success(editingId ? "Vendor updated" : "Vendor created");
+      setShowDialog(false);
+      resetLogo();
+      void loadVendors();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSaving(false);
     }
-    toast.success(editingId ? "Vendor updated" : "Vendor created");
-    setShowDialog(false);
-    void loadVendors(searchQuery);
   }
 
   async function handleDelete(v: Vendor) {
     if (!confirm(`Delete vendor "${v.name}"? This cannot be undone.`)) return;
-    const res = await fetch(`/api/vendors/${v.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error || "Failed to delete vendor");
-      return;
+    try {
+      await fetchJson(`/api/vendors/${v.id}`, { method: "DELETE" });
+      toast.success("Vendor deleted");
+      void loadVendors();
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
-    toast.success("Vendor deleted");
-    void loadVendors(searchQuery);
   }
 
   return (
@@ -222,6 +250,12 @@ export default function VendorsPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-12 text-center text-destructive text-sm">
+            {errorMessage(error)}
+          </CardContent>
+        </Card>
       ) : vendors.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -250,8 +284,8 @@ export default function VendorsPage() {
                   onClick={() => openDetail(v)}
                 >
                   <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                    <div className="flex items-center gap-2.5">
+                      <EntityThumbnail src={v.thumbnailUrl} kind="vendor" size="sm" />
                       <span className="hover:underline">{v.name}</span>
                     </div>
                   </TableCell>
@@ -314,8 +348,8 @@ export default function VendorsPage() {
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
         <SheetContent className="w-full sm:max-w-xl flex flex-col overflow-hidden">
           <SheetHeader className="border-b">
-            <SheetTitle className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-muted-foreground" />
+            <SheetTitle className="flex items-center gap-2.5">
+              <EntityThumbnail src={detailVendor?.thumbnailUrl} kind="vendor" size="sm" />
               {detailVendor?.name || "Vendor"}
             </SheetTitle>
             <SheetDescription>Contact details and parts sourced from this vendor.</SheetDescription>
@@ -492,6 +526,37 @@ export default function VendorsPage() {
           </DialogHeader>
           <form onSubmit={handleSave}>
             <div className="space-y-4 py-4">
+              <div className="flex items-start gap-3">
+                <ThumbnailPicker
+                  src={logoPreview}
+                  kind="vendor"
+                  size="lg"
+                  label="Choose a vendor logo"
+                  onSelect={(file) => {
+                    setLogoFile(file);
+                    setLogoPreview((prev) => {
+                      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+                      return URL.createObjectURL(file);
+                    });
+                    setLogoCleared(false);
+                  }}
+                  onRemove={() => {
+                    setLogoFile(null);
+                    setLogoPreview((prev) => {
+                      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+                      return null;
+                    });
+                    setLogoCleared(true);
+                  }}
+                />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <Label className="text-xs">Logo</Label>
+                  <p className="text-2xs text-muted-foreground">
+                    Click the tile to {logoPreview ? "replace" : "upload"}. Saved when you save the
+                    vendor.
+                  </p>
+                </div>
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">Name</Label>
                 <Input

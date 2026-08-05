@@ -3,6 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, optionalString } from "@/lib/validation";
+import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 
 // Canonicalize vendor names so "Digi-Key", "digi-key", "Digi  Key " all
 // resolve to the same vendor. The DB unique index is exact-match on `name`,
@@ -33,13 +34,22 @@ export const GET = withTenant({ query: ListQuerySchema }, async ({ db, query }) 
     vendorQuery = vendorQuery.ilike("name", `%${query.q}%`);
   }
 
-  const { data: vendors } = await vendorQuery.limit(200);
+  const { data: vendorRows } = await vendorQuery.limit(200);
+  const rows = (vendorRows || []) as Array<{ id: string; thumbnailKey?: string | null }>;
+
+  // Logos are signed for the whole page in one pass — the list renders one per
+  // row and the picker shows them inline.
+  const thumbUrls = await signThumbnailUrls(
+    db.storage,
+    rows.map((v) => v.thumbnailKey)
+  );
+  const vendors = rows.map((v) => withThumbnailUrl(v, thumbUrls));
 
   // For the vendors list page we want a "used by N parts" badge. Doing this
   // as a second query (one in() call) is cheaper than a join because the
   // vendors page rarely has thousands of rows.
-  if (query.withCounts === "1" && vendors && vendors.length > 0) {
-    const ids = vendors.map((v: { id: string }) => v.id);
+  if (query.withCounts === "1" && vendors.length > 0) {
+    const ids = vendors.map((v) => v.id);
     // lint-conventions-allow: child-table-direct-query — `ids` come from the scoped
     // vendor query above, never from the request, so this cannot reach another tenant.
     const { data: links } = await db.from("part_vendors").select("vendorId").in("vendorId", ids);
@@ -47,10 +57,10 @@ export const GET = withTenant({ query: ListQuerySchema }, async ({ db, query }) 
     for (const row of links || []) {
       counts.set(row.vendorId, (counts.get(row.vendorId) || 0) + 1);
     }
-    return vendors.map((v: { id: string }) => ({ ...v, partCount: counts.get(v.id) || 0 }));
+    return vendors.map((v) => ({ ...v, partCount: counts.get(v.id) || 0 }));
   }
 
-  return vendors || [];
+  return vendors;
 });
 
 export const POST = withTenant(

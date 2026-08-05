@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString, optionalUuid } from "@/lib/validation";
 import { wouldCreateCycle, type RollupBom } from "@/lib/bom-rollup";
+import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 
 // ─── Mutation guard ───────────────────────────────────────────────────────
 //
@@ -222,37 +223,26 @@ export async function GET(
       // set the table reads partNumber/name/description/material/unit/
       // unitCost/revision/lifecycleState from the part itself.
       .select(
-        "*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, description, category, revision, lifecycleState, material, unit, unitCost, thumbnailKey), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status)"
+        "*, file:files!bom_items_fileId_fkey(id, name, partNumber, revision, lifecycleState), part:parts!bom_items_partId_fkey(id, partNumber, name, description, category, revision, lifecycleState, material, unit, unitCost, thumbnailKey), linkedBom:boms!bom_items_linkedBomId_fkey(id, name, revision, status, thumbnailKey)"
       )
       .eq("bomId", bomId)
       .order("sortOrder");
 
-    // Resolve part thumbnailKey -> signed URL (300s) so the BOM table can
-    // render previews. Frontend reads `part.thumbnailUrl`, mirroring the
-    // shape returned by the parts list/detail endpoints.
+    // Resolve thumbnailKey -> signed URL for both the linked part and the
+    // linked sub-assembly, so every kind of line can show a picture. The
+    // frontend reads `part.thumbnailUrl` / `linkedBom.thumbnailUrl`, mirroring
+    // the shape returned by the parts and BOM list endpoints.
+    type Linked = ({ thumbnailKey?: string | null } & Record<string, unknown>) | null;
     const rows = items || [];
-    const keys = Array.from(
-      new Set(
-        rows
-          .map((r) => (r.part as { thumbnailKey: string | null } | null)?.thumbnailKey)
-          .filter((k): k is string => !!k)
-      )
-    );
-    const urlByKey = new Map<string, string>();
-    if (keys.length > 0) {
-      await Promise.all(
-        keys.map(async (k) => {
-          const { data } = await db.storage.from("vault").createSignedUrl(k, 300);
-          if (data?.signedUrl) urlByKey.set(k, data.signedUrl);
-        })
-      );
-    }
-    const withThumbs = rows.map((r) => {
-      const part = r.part as ({ thumbnailKey: string | null } & Record<string, unknown>) | null;
-      if (!part) return r;
-      const key = part.thumbnailKey;
-      return { ...r, part: { ...part, thumbnailUrl: key ? urlByKey.get(key) || null : null } };
-    });
+    const urlByKey = await signThumbnailUrls(db.storage, [
+      ...rows.map((r) => (r.part as Linked)?.thumbnailKey),
+      ...rows.map((r) => (r.linkedBom as Linked)?.thumbnailKey),
+    ]);
+    const withThumbs = rows.map((r) => ({
+      ...r,
+      part: r.part ? withThumbnailUrl(r.part as Linked & object, urlByKey) : null,
+      linkedBom: r.linkedBom ? withThumbnailUrl(r.linkedBom as Linked & object, urlByKey) : null,
+    }));
 
     return NextResponse.json(withThumbs);
   } catch (err) {

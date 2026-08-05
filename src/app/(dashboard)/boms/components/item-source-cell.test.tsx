@@ -21,6 +21,7 @@ const linkedBom = {
   name: "NANO-1000S Casting-Components",
   revision: "A",
   status: "DRAFT",
+  thumbnailUrl: null,
 };
 
 const part = {

@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
 import { nextPartNumberSequence, formatPartNumber, readPartNumberSettings } from "@/lib/parts";
+import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 
 const CreatePartSchema = z.object({
   // Optional — when omitted and the tenant is in AUTO mode the server allocates
@@ -53,22 +54,16 @@ export async function GET(request: NextRequest) {
     }
 
     const { data } = await query.limit(200);
-    const rows = data || [];
+    const rows = (data || []) as Array<{ thumbnailKey?: string | null }>;
 
-    // Resolve thumbnailKey -> signed URL (300s, matches files module).
-    // Frontend continues to read `thumbnailUrl` so callers don't need to
-    // change shape. Storage object lives in the "vault" bucket under
-    // `{tenantId}/thumbnails/parts/`.
-    const withThumbs = await Promise.all(
-      rows.map(async (row) => {
-        const key = (row as { thumbnailKey: string | null }).thumbnailKey;
-        if (!key) return { ...row, thumbnailUrl: null };
-        const { data: signed } = await db.storage.from("vault").createSignedUrl(key, 300);
-        return { ...row, thumbnailUrl: signed?.signedUrl || null };
-      })
+    // Resolve thumbnailKey -> signed URL. The frontend reads `thumbnailUrl`;
+    // the storage layout and expiry live in lib/thumbnails.ts.
+    const urlByKey = await signThumbnailUrls(
+      db.storage,
+      rows.map((row) => row.thumbnailKey)
     );
 
-    return NextResponse.json(withThumbs);
+    return NextResponse.json(rows.map((row) => withThumbnailUrl(row, urlByKey)));
   } catch (err) {
     console.error("Failed to fetch parts:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch parts";

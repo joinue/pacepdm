@@ -10,39 +10,37 @@ import {
 } from "@/lib/thumbnails";
 
 /**
- * Part thumbnail. Converted from a hand-rolled handler onto `withTenant` and
- * the shared helpers in `src/lib/thumbnails.ts` when BOMs and vendors gained
- * the same capability — three copies of the upload rules was two too many.
+ * Vendor logo. Same contract as the BOM and part thumbnail endpoints — see
+ * `src/lib/thumbnails.ts` for the shared rules.
  */
 
-const ParamsSchema = z.object({ partId: uuid });
+const ParamsSchema = z.object({ vendorId: uuid });
 
 export const POST = withTenant(
   { permission: PERMISSIONS.FILE_EDIT, params: ParamsSchema },
   async ({ db, tenantUser, params, request }) => {
-    const { data: part } = await db
-      .from("parts")
-      .select("id, partNumber, thumbnailKey")
-      .eq("id", params.partId)
-      .is("deletedAt", null)
+    const { data: vendor } = await db
+      .from("vendors")
+      .select("id, name, thumbnailKey")
+      .eq("id", params.vendorId)
       .maybeSingle();
-    if (!part) throw notFound("Part not found");
+    if (!vendor) throw notFound("Vendor not found");
 
     const file = await readThumbnailUpload(request);
 
     const key = await storeThumbnail({
       storage: db.storage,
       tenantId: tenantUser.tenantId,
-      entity: "parts",
-      entityId: part.id,
+      entity: "vendors",
+      entityId: vendor.id,
       file,
-      previousKey: part.thumbnailKey,
+      previousKey: vendor.thumbnailKey,
     });
 
     const { error } = await db
-      .from("parts")
+      .from("vendors")
       .update({ thumbnailKey: key, updatedAt: new Date().toISOString() })
-      .eq("id", part.id);
+      .eq("id", vendor.id);
     if (error) {
       await removeThumbnail(db.storage, key);
       throw new Error(error.message);
@@ -51,10 +49,10 @@ export const POST = withTenant(
     await logAudit({
       tenantId: tenantUser.tenantId,
       userId: tenantUser.id,
-      action: "part.thumbnail.update",
-      entityType: "part",
-      entityId: part.id,
-      details: { partNumber: part.partNumber },
+      action: "vendor.thumbnail.update",
+      entityType: "vendor",
+      entityId: vendor.id,
+      details: { name: vendor.name },
     });
 
     return { thumbnailUrl: await signThumbnailUrl(db.storage, key) };
@@ -64,29 +62,28 @@ export const POST = withTenant(
 export const DELETE = withTenant(
   { permission: PERMISSIONS.FILE_EDIT, params: ParamsSchema },
   async ({ db, tenantUser, params }) => {
-    const { data: part } = await db
-      .from("parts")
-      .select("id, partNumber, thumbnailKey")
-      .eq("id", params.partId)
-      .is("deletedAt", null)
+    const { data: vendor } = await db
+      .from("vendors")
+      .select("id, name, thumbnailKey")
+      .eq("id", params.vendorId)
       .maybeSingle();
-    if (!part) throw notFound("Part not found");
+    if (!vendor) throw notFound("Vendor not found");
 
     const { error } = await db
-      .from("parts")
+      .from("vendors")
       .update({ thumbnailKey: null, updatedAt: new Date().toISOString() })
-      .eq("id", part.id);
+      .eq("id", vendor.id);
     if (error) throw new Error(error.message);
 
-    await removeThumbnail(db.storage, part.thumbnailKey);
+    await removeThumbnail(db.storage, vendor.thumbnailKey);
 
     await logAudit({
       tenantId: tenantUser.tenantId,
       userId: tenantUser.id,
-      action: "part.thumbnail.delete",
-      entityType: "part",
-      entityId: part.id,
-      details: { partNumber: part.partNumber },
+      action: "vendor.thumbnail.delete",
+      entityType: "vendor",
+      entityId: vendor.id,
+      details: { name: vendor.name },
     });
 
     return { thumbnailUrl: null };

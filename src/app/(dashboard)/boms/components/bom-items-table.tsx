@@ -27,6 +27,7 @@ import {
   Package,
 } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { EntityThumbnail, type ThumbnailKind } from "@/components/ui/entity-thumbnail";
 import { buildTree } from "../utils";
 import type { BOMItem } from "../types";
 
@@ -66,6 +67,11 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
     material: item.part?.material ?? item.material,
     unit: item.part?.unit ?? item.unit,
     unitCost: item.part?.unitCost ?? item.unitCost,
+    // Sub-assembly first, matching ItemSourceCell's precedence: a line that
+    // carries both a linkedBomId and a partId *is* the sub-assembly, and its
+    // own picture is the more useful of the two.
+    thumbnailUrl: item.linkedBom?.thumbnailUrl ?? item.part?.thumbnailUrl ?? null,
+    thumbnailKind: (item.linkedBom ? "bom" : "part") as ThumbnailKind,
   });
 
   function toggleCollapse(itemId: string) {
@@ -141,6 +147,9 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
       <Table>
         <TableHeader>
           <TableRow>
+            {/* Unlabelled: the pictures are the label. Same leading-image
+                column the parts list uses. */}
+            <TableHead className="w-10" />
             <TableHead className="w-16">Item #</TableHead>
             <TableHead>Name</TableHead>
             <TableHead>Part #</TableHead>
@@ -158,7 +167,7 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
           {items.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={isEditable ? 11 : 10}
+                colSpan={isEditable ? 12 : 11}
                 className="text-center py-12 text-muted-foreground"
               >
                 <Package className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -176,6 +185,17 @@ export function BomItemsTable({ items, bomId, isEditable, onItemsChanged }: BomI
 
               return (
                 <TableRow key={item.id} className={item.level > 0 ? "bg-muted/20" : ""}>
+                  {/* The line's picture — from the sub-assembly it points at,
+                      or from the linked part. Free-text lines get the
+                      placeholder tile, which keeps the column aligned. */}
+                  <TableCell>
+                    <EntityThumbnail
+                      src={display.thumbnailUrl}
+                      kind={display.thumbnailKind}
+                      size="sm"
+                    />
+                  </TableCell>
+
                   {/* Item # with tree indent */}
                   <TableCell className="font-mono text-xs">
                     <div

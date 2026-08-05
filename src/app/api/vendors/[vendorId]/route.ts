@@ -2,6 +2,7 @@ import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { z, optionalString, uuid } from "@/lib/validation";
+import { attachThumbnailUrl } from "@/lib/thumbnails";
 
 function normalizeVendorName(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
@@ -45,7 +46,7 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, tenantUser,
     return part && part.tenantId === tenantUser.tenantId;
   });
 
-  return { ...vendor, usedBy };
+  return { ...(await attachThumbnailUrl(db.storage, vendor)), usedBy };
 });
 
 export const PUT = withTenant(

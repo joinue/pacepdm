@@ -22,7 +22,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { badRequest, unprocessable, ApiFailure } from "@/lib/api-route";
+import { badRequest, unprocessable } from "@/lib/api-route";
 
 /** The bucket every thumbnail lives in — shared with the files module. */
 export const THUMBNAIL_BUCKET = "vault";
@@ -156,6 +156,21 @@ export async function signThumbnailUrls(
     })
   );
   return urlByKey;
+}
+
+/**
+ * Sign one row's key and hand back the row the client should see. The single-row
+ * counterpart to `signThumbnailUrls` + `withThumbnailUrl`.
+ */
+export async function attachThumbnailUrl<T extends { thumbnailKey?: string | null }>(
+  storage: Storage,
+  row: T
+): Promise<Omit<T, "thumbnailKey"> & { thumbnailUrl: string | null }> {
+  const { thumbnailKey, ...rest } = row;
+  return {
+    ...(rest as Omit<T, "thumbnailKey">),
+    thumbnailUrl: await signThumbnailUrl(storage, thumbnailKey),
+  };
 }
 
 /**
