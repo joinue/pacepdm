@@ -102,6 +102,7 @@ Trace one flow end to end before editing. A good one is **checking a file out of
 | ------------------------------------ | ---------------------------------------------------------- |
 | The rules, concisely                 | [`../AGENTS.md`](../AGENTS.md)                             |
 | The "why" behind a rule              | [`decisions/`](decisions/)                                 |
+| What to work on next                 | [`plans/`](plans/)                                         |
 | What a PDM term means                | [`GLOSSARY.md`](GLOSSARY.md)                               |
 | Every UI primitive, previewed        | `/admin/kitchen-sink` (admin-gated)                        |
 | The state machines                   | [`../src/lib/status-flows.ts`](../src/lib/status-flows.ts) |
