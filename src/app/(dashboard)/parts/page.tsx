@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,8 @@ import {
 import { toast } from "sonner";
 import type { Part, PartDetail } from "./parts-types";
 import { CATEGORIES, categoryVariants } from "./parts-types";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { PartDetailPanel } from "./components/part-detail-panel";
 import { PartFormDialog } from "./components/part-form-dialog";
 import { AddVendorDialog } from "./components/add-vendor-dialog";
@@ -72,6 +74,7 @@ function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: n
 
 export default function PartsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const user = useTenantUser();
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +124,17 @@ export default function PartsPage() {
     setParts(Array.isArray(data) ? data : []);
     setLoading(false);
   }, []);
+
+  /**
+   * Clearing the selection also clears the deep-link param, so closing the
+   * sheet and then reloading does not reopen it.
+   */
+  const closeDetail = useCallback(() => {
+    setSelectedPartId(null);
+    setDetail(null);
+    setPartWhereUsed(null);
+    router.replace("/parts", { scroll: false });
+  }, [router]);
 
   const loadPartDetail = useCallback(async (partId: string) => {
     setSelectedPartId(partId);
@@ -408,7 +422,7 @@ export default function PartsPage() {
         </div>
       ) : (
         <div className="flex gap-4 flex-col lg:flex-row">
-          {/* Parts table */}
+          {/* Parts table. Full width always now — the detail is a sheet. */}
           <div className="flex-1 min-w-0">
             {parts.length === 0 ? (
               <Card>
@@ -508,26 +522,50 @@ export default function PartsPage() {
             )}
           </div>
 
-          {/* Detail panel */}
-          {selectedPartId && (
-            <PartDetailPanel
-              detail={detail}
-              loading={loadingDetail}
-              partWhereUsed={partWhereUsed}
-              onClose={() => {
-                setSelectedPartId(null);
-                setDetail(null);
-                setPartWhereUsed(null);
-              }}
-              onThumbnailUpload={handleThumbnailUpload}
-              onShowLinkFile={() => setShowLinkFile(true)}
-              onShowAddVendor={() => setShowAddVendor(true)}
-              onUnlinkFile={handleUnlinkFile}
-              onDeleteVendorLink={handleDeleteVendorLink}
-              onPreviewFile={setPreviewFile}
-              onNavigatePartDetail={loadPartDetail}
-            />
-          )}
+          {/*
+            Detail is a slide-over rather than a column, for two reasons.
+
+            It was in document flow at the top of this row, so selecting a
+            part forty rows down rendered the panel above the viewport and
+            the page just looked blank. A sheet is anchored to the viewport,
+            so it opens where you are looking regardless of scroll.
+
+            And it was `lg:w-80` beside a full-width table — 20rem for a
+            header, revision, unit, files, vendors and where-used, with BOM
+            names truncated to "NANO-1000S Casting-C...". The sheet gives it
+            more than twice that.
+
+            The vault already uses Sheet for its mobile detail view, so this
+            is the app's existing answer to the same problem rather than a
+            new pattern.
+          */}
+          <Sheet
+            open={!!selectedPartId}
+            onOpenChange={(open) => {
+              if (!open) closeDetail();
+            }}
+          >
+            <SheetContent side="right" className="w-full p-0 sm:max-w-2xl!" showCloseButton={false}>
+              <SheetTitle className="sr-only">
+                {detail?.partNumber ? `Part ${detail.partNumber}` : "Part details"}
+              </SheetTitle>
+              <ErrorBoundary>
+                <PartDetailPanel
+                  detail={detail}
+                  loading={loadingDetail}
+                  partWhereUsed={partWhereUsed}
+                  onClose={closeDetail}
+                  onThumbnailUpload={handleThumbnailUpload}
+                  onShowLinkFile={() => setShowLinkFile(true)}
+                  onShowAddVendor={() => setShowAddVendor(true)}
+                  onUnlinkFile={handleUnlinkFile}
+                  onDeleteVendorLink={handleDeleteVendorLink}
+                  onPreviewFile={setPreviewFile}
+                  onNavigatePartDetail={loadPartDetail}
+                />
+              </ErrorBoundary>
+            </SheetContent>
+          </Sheet>
         </div>
       )}
 

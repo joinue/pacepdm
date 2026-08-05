@@ -42,16 +42,14 @@ export function PartDetailPanel({
 
   if (loading || !detail) {
     return (
-      <div className="lg:w-80 shrink-0 border rounded-lg bg-background">
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-        </div>
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="lg:w-80 shrink-0 border rounded-lg bg-background">
+    <div className="h-full overflow-y-auto">
       <div className="p-4 space-y-4">
         {/* Header with thumbnail */}
         <div className="flex items-start gap-3">
