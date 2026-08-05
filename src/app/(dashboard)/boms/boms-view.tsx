@@ -28,6 +28,7 @@ import {
   ArrowRight,
   Link as LinkIcon,
   TriangleAlert,
+  ChevronRight,
 } from "lucide-react";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { toast } from "sonner";
@@ -48,7 +49,17 @@ import { BomRollupPanel } from "./components/bom-rollup-panel";
 import { BomBaselinesPanel } from "./components/bom-baselines-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionLabel } from "@/components/ui/section-label";
-import { groupBoms } from "./bom-hierarchy";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { buildBomTree, visibleRows, type BomTreeNode } from "./bom-hierarchy";
 import { PageContainer } from "@/components/ui/page-container";
 
 /**
@@ -101,10 +112,14 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
   const [boms, setBoms] = useState<BOM[]>([]);
   const [relinkingId, setRelinkingId] = useState<string | null>(null);
-  // Products vs sub-assemblies, derived from `usedIn` — which the list
-  // endpoint computes from `bom_items.linkedBomId`. The split therefore
-  // follows the real structure and cannot drift from it.
-  const groups = useMemo(() => groupBoms(boms), [boms]);
+  // The BOM tree, derived from `usedIn` — which the list endpoint computes
+  // from `bom_items.linkedBomId`. The shape therefore follows the real
+  // structure and cannot drift from it.
+  const tree = useMemo(() => buildBomTree(boms), [boms]);
+  // Collapsed by default: one machine brings 25 sub-assemblies, and the
+  // point of the tree is that you only open the branch you care about.
+  const [expandedBoms, setExpandedBoms] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<BOM | null>(null);
   const [items, setItems] = useState<BOMItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -161,6 +176,27 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
     },
     [loadBoms]
   );
+
+  const toggleExpanded = useCallback((bomId: string) => {
+    setExpandedBoms((prev) => {
+      const next = new Set(prev);
+      if (next.has(bomId)) next.delete(bomId);
+      else next.add(bomId);
+      return next;
+    });
+  }, []);
+
+  /** Open every branch, or shut them all. One control, two states. */
+  const toggleExpandAll = useCallback(() => {
+    setExpandedBoms((prev) => (prev.size > 0 ? new Set() : new Set(boms.map((b) => b.id))));
+  }, [boms]);
+
+  /**
+   * Deleting is one click from the row now, so it goes through a confirm.
+   * Soft-delete means it is recoverable in the database, but there is no
+   * trash for BOMs yet, so from the UI it is one-way.
+   */
+  const requestDeleteBom = useCallback((bom: BOM) => setDeleteTarget(bom), []);
 
   const loadItems = useCallback(async (bomId: string) => {
     setLoadingItems(true);
@@ -419,34 +455,41 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
             out rather than sitting among the products looking deliberate.
           */}
           <div
-            className={selectedBomId ? "lg:w-64 shrink-0 space-y-3" : "flex-1 min-w-0 space-y-4"}
+            className={selectedBomId ? "lg:w-64 shrink-0 space-y-2" : "flex-1 min-w-0 space-y-2"}
           >
-            <BomGroupSection
-              label={groups.topLevel.length === 1 ? "Product" : "Products"}
-              boms={groups.topLevel}
-              compact={!!selectedBomId}
-              selectedBomId={selectedBomId}
-              bomUnread={bomUnread}
-              onSelect={selectBom}
-              canEdit={canEdit}
-              relinkingId={relinkingId}
-              onRelink={handleRelink}
-            />
-            {groups.subAssemblies.length > 0 && (
-              <BomGroupSection
-                label="Sub-assemblies"
-                count={groups.subAssemblies.length}
-                boms={groups.subAssemblies}
+            <div className="flex items-center justify-between gap-2">
+              <SectionLabel>
+                {tree.roots.length === 1 ? "Product" : "Products"}
+                {tree.subAssemblyCount > 0 && ` · ${tree.subAssemblyCount} sub-assemblies`}
+              </SectionLabel>
+              {tree.subAssemblyCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-3xs text-muted-foreground"
+                  onClick={toggleExpandAll}
+                >
+                  {expandedBoms.size > 0 ? "Collapse all" : "Expand all"}
+                </Button>
+              )}
+            </div>
+
+            {visibleRows(tree.roots, expandedBoms).map((node) => (
+              <BomTreeRow
+                key={`${node.bom.id}@${node.depth}`}
+                node={node}
                 compact={!!selectedBomId}
+                expanded={expandedBoms.has(node.bom.id)}
+                onToggle={() => toggleExpanded(node.bom.id)}
                 selectedBomId={selectedBomId}
-                bomUnread={bomUnread}
+                unread={bomUnread[node.bom.id] || 0}
                 onSelect={selectBom}
-                showParent
                 canEdit={canEdit}
                 relinkingId={relinkingId}
                 onRelink={handleRelink}
+                onDelete={requestDeleteBom}
               />
-            )}
+            ))}
           </div>
 
           {/* Selection points at a BOM that no longer exists */}
@@ -661,6 +704,35 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
         onCreated={handleBomCreated}
       />
       <ImportBomDialog open={showImport} onOpenChange={setShowImport} onImported={loadBoms} />
+
+      {/* Delete confirm. BOMs are soft-deleted in the database but there is
+          no trash for them yet — unlike files — so from here it is one-way,
+          and the copy says so rather than promising a recovery that does not
+          exist. */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete &ldquo;{deleteTarget?.name}&rdquo;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(deleteTarget?.usedIn?.length ?? 0) > 0
+                ? `This BOM is used as a sub-assembly in ${deleteTarget?.usedIn?.map((p) => p.name).join(", ")}. Those lines will be left pointing at nothing.`
+                : "Its items and history are kept, but it cannot be restored from the app."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteTarget) handleDeleteBom(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {selectedBomId && (
         <AddItemDialog
           open={showAddItem}
@@ -687,126 +759,162 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 }
 
 /**
- * One labelled group of BOM cards. Extracted because products and
- * sub-assemblies render identically apart from their heading and the parent
- * hint — duplicating the card markup twice in a 630-line file is how the two
- * copies drift.
+ * One row of the BOM tree.
+ *
+ * Rendered as a flat list rather than nested markup: a row is a button, and
+ * buttons cannot legally contain buttons — the disclosure toggle and the
+ * per-row menu both need to be independently clickable. `depth` carries the
+ * nesting visually instead.
  */
-function BomGroupSection({
-  label,
-  count,
-  boms,
+function BomTreeRow({
+  node,
   compact,
+  expanded,
+  onToggle,
   selectedBomId,
-  bomUnread,
+  unread,
   onSelect,
-  showParent = false,
   canEdit,
   relinkingId,
   onRelink,
+  onDelete,
 }: {
-  label: string;
-  count?: number;
-  boms: BOM[];
+  node: BomTreeNode;
   /** True when standing beside a selected BOM, i.e. in the narrow sidebar. */
   compact: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   selectedBomId: string | null;
-  bomUnread: Record<string, number>;
+  unread: number;
   onSelect: (id: string) => void;
-  showParent?: boolean;
   canEdit: boolean;
   relinkingId: string | null;
   onRelink: (bom: BOM) => void;
+  onDelete: (bom: BOM) => void;
 }) {
-  if (boms.length === 0) return null;
+  const { bom, depth, children, descendantCount } = node;
+  const hasChildren = children.length > 0;
+  // Indent by depth. Kept modest in the sidebar, where 14rem has to hold a
+  // 48-character name as well.
+  const indent = depth * (compact ? 10 : 20);
 
   return (
-    <section className="space-y-1">
-      <SectionLabel>
-        {label}
-        {count !== undefined && ` (${count})`}
-      </SectionLabel>
-      <div
-        className={compact ? "space-y-1" : "grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"}
+    <div className="flex items-stretch gap-1" style={{ paddingLeft: `${indent}px` }}>
+      {hasChildren ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${bom.name}`}
+          className="shrink-0 px-1 rounded hover:bg-foreground/5 text-muted-foreground"
+        >
+          {expanded ? (
+            <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+          )}
+        </button>
+      ) : (
+        <span className="w-[1.375rem] shrink-0" aria-hidden="true" />
+      )}
+
+      <button
+        title={bom.name}
+        className={`flex-1 min-w-0 text-left px-3 py-2 rounded-lg border transition-all duration-150 ${
+          selectedBomId === bom.id
+            ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
+            : "bg-card border-border/60 text-foreground hover:border-foreground/20 hover:bg-foreground/5"
+        }`}
+        onClick={() => onSelect(bom.id)}
       >
-        {boms.map((bom) => {
-          const unread = bomUnread[bom.id] || 0;
-          const parent = bom.usedIn?.[0];
-          const extraParents = (bom.usedIn?.length ?? 0) - 1;
-          return (
-            <button
-              key={bom.id}
-              title={bom.name}
-              className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
-                selectedBomId === bom.id
-                  ? "bg-foreground/12 text-foreground font-medium border-foreground/15"
-                  : "bg-card border-border/60 text-foreground hover:border-foreground/20 hover:bg-foreground/5"
-              }`}
-              onClick={() => onSelect(bom.id)}
+        <div className="flex items-start gap-1.5 min-w-0">
+          <p
+            className={`text-sm flex-1 min-w-0 ${compact ? "truncate" : "line-clamp-2 break-words"}`}
+          >
+            {bom.name}
+          </p>
+          {unread > 0 && (
+            <span
+              aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
+              className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
             >
-              <div className="flex items-start gap-1.5 min-w-0">
-                {/* The sidebar has one line to give; browse mode can afford
-                    two, which fits every name in the NANO-1000S build list
-                    without needing the tooltip. */}
-                <p
-                  className={`text-sm flex-1 min-w-0 ${compact ? "truncate" : "line-clamp-2 break-words"}`}
-                >
-                  {bom.name}
-                </p>
-                {unread > 0 && (
-                  <span
-                    aria-label={`${unread} unread notification${unread === 1 ? "" : "s"}`}
-                    className="bg-primary text-primary-foreground text-4xs font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1 shrink-0"
-                  >
-                    {unread > 9 ? "9+" : unread}
-                  </span>
-                )}
-              </div>
-              {showParent && parent && (
-                <p className="text-3xs text-muted-foreground truncate mt-0.5">
-                  in {parent.name}
-                  {extraParents > 0 && ` +${extraParents} more`}
-                </p>
-              )}
-              {/* A top-level BOM that something meant to reference but
-                  misspelt. Without this it sits among the products looking
-                  deliberate — which is how NANO-1000S Casting-Components
-                  read after the first import. The fix is offered here
-                  because a warning with no remedy just moves the work. */}
-              {bom.orphanHint && (
-                <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5">
-                  <p className="text-3xs text-warning flex items-start gap-1">
-                    <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
-                    <span className="min-w-0">
-                      Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
-                    </span>
-                  </p>
-                  {canEdit && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-1.5 h-6 text-3xs"
-                      disabled={relinkingId === bom.id}
-                      onClick={(e) => {
-                        // The card itself navigates; repairing is a different
-                        // intent and must not also open the BOM.
-                        e.stopPropagation();
-                        onRelink(bom);
-                      }}
-                    >
-                      {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
-                    </Button>
-                  )}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
-                <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
+        </div>
+
+        {/* A top-level BOM that something meant to reference but misspelt.
+            Without this it sits among the products looking deliberate, which
+            is how NANO-1000S Casting-Components read after the first import.
+            The fix is offered here because a warning with no remedy just
+            moves the work. */}
+        {bom.orphanHint && (
+          <div className="mt-1 rounded border border-warning/40 bg-warning/5 p-1.5">
+            <p className="text-3xs text-warning flex items-start gap-1">
+              <TriangleAlert className="w-3 h-3 shrink-0 mt-px" aria-hidden="true" />
+              <span className="min-w-0">
+                Not linked — a line references &ldquo;{bom.orphanHint}&rdquo;
+              </span>
+            </p>
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1.5 h-6 text-3xs"
+                disabled={relinkingId === bom.id}
+                onClick={(e) => {
+                  // The card navigates; repairing is a different intent.
+                  e.stopPropagation();
+                  onRelink(bom);
+                }}
+              >
+                {relinkingId === bom.id ? "Linking..." : "Link as sub-assembly"}
+              </Button>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <StatusBadge status={bom.status} kind="bom" className="text-4xs px-1.5 py-0" />
+          <span className="text-3xs text-muted-foreground">Rev {bom.revision}</span>
+          {hasChildren && !expanded && (
+            <span className="text-3xs text-muted-foreground">
+              · {descendantCount} sub-assembl{descendantCount === 1 ? "y" : "ies"}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* Delete lived only in the detail view's menu, so removing a BOM meant
+          opening it first and hunting for the action. It belongs on the row. */}
+      {canEdit && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto w-7 shrink-0 px-0 text-muted-foreground"
+                aria-label={`Actions for ${bom.name}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(bom);
+              }}
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   );
 }

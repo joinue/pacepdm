@@ -1,61 +1,125 @@
 import type { BOM } from "./types";
 
 /**
- * Splitting the BOM list into what people actually go looking for.
+ * Turning the BOM list into the tree it actually is.
  *
- * A flat list is fine while a tenant has a handful of BOMs. It stops being
- * fine the moment a real product is imported: the NANO-1000S build list
- * produces 26 BOMs of which one is a machine and the other 25 are its
- * commodity groups and sub-assemblies. Rendered flat they all look equally
- * important, and the thing you came for is one row in twenty-six.
+ * A flat list misrepresents an imported product: the NANO-1000S build list
+ * produces 26 BOMs of which one is a machine and 25 are its groups and
+ * sub-assemblies. Splitting them into "products" and "sub-assemblies" was
+ * better than nothing, but the sub-assembly section is the part that grows —
+ * a second machine makes it 50 rows, a fifth makes it well over 100, and none
+ * of them say what they belong to except by a line of small print.
  *
- * `usedIn` is derived server-side from `bom_items.linkedBomId`, so this
- * reflects the structure as it actually is rather than a flag someone has to
- * remember to set. A BOM created by hand and not yet used anywhere is
- * top-level, which is correct — it just has no parents yet.
+ * So: products at the top, their children nested underneath, collapsed until
+ * asked for. The tree is derived from `usedIn`, which the list endpoint
+ * computes from `bom_items.linkedBomId` — structure as it actually is, not a
+ * field anyone maintains.
  */
 
-export interface BomGroups {
+export interface BomTreeNode {
+  bom: BOM;
+  children: BomTreeNode[];
+  /** Nesting level from the root, 0 for a product. Drives indentation. */
+  depth: number;
+  /** Every BOM at or below this node, counted once each. */
+  descendantCount: number;
+}
+
+export interface BomTree {
   /** Referenced by no other BOM: products, and anything not yet linked up. */
-  topLevel: BOM[];
-  /** Referenced by at least one other BOM, sorted by their parent's name. */
-  subAssemblies: BOM[];
+  roots: BomTreeNode[];
   /**
-   * The subset of `topLevel` that looks like a link broken by a typo — the
-   * server found a line referencing a near-miss of this BOM's name. Called
-   * out separately because "top-level" and "orphaned by a typo" look
-   * identical in the data but mean opposite things to the reader.
+   * Roots that look like a link broken by a typo rather than a real product
+   * — the server found a line referencing a near-miss of the name.
    */
   orphans: BOM[];
+  /** Total BOMs below a root, so the header can say what is hidden. */
+  subAssemblyCount: number;
 }
 
 /** Alphabetical, case-insensitive, stable. */
-function byName(a: BOM, b: BOM): number {
-  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+function byName(a: BomTreeNode, b: BomTreeNode): number {
+  return a.bom.name.localeCompare(b.bom.name, undefined, { sensitivity: "base" });
 }
 
-export function groupBoms(boms: BOM[]): BomGroups {
-  const topLevel: BOM[] = [];
-  const subAssemblies: BOM[] = [];
+export function buildBomTree(boms: BOM[]): BomTree {
+  const byId = new Map(boms.map((b) => [b.id, b]));
 
+  // `usedIn` points child → parents. Invert it once so the walk below is a
+  // lookup rather than a scan per node.
+  const childrenOf = new Map<string, BOM[]>();
+  const roots: BOM[] = [];
   for (const bom of boms) {
-    if ((bom.usedIn?.length ?? 0) > 0) subAssemblies.push(bom);
-    else topLevel.push(bom);
+    const parents = bom.usedIn ?? [];
+    if (parents.length === 0) {
+      roots.push(bom);
+      continue;
+    }
+    for (const parent of parents) {
+      // A parent outside this list (deleted, or beyond the 500 the endpoint
+      // returns) would strand the child. Treat it as a root so it stays
+      // reachable rather than vanishing from the page.
+      if (!byId.has(parent.id)) {
+        if (!roots.includes(bom)) roots.push(bom);
+        continue;
+      }
+      const siblings = childrenOf.get(parent.id) ?? [];
+      siblings.push(bom);
+      childrenOf.set(parent.id, siblings);
+    }
   }
 
-  // Grouping sub-assemblies under their parent's name keeps siblings
-  // together, which is how someone scanning for "the electrical groups of
-  // the 1000S" actually reads the list.
-  subAssemblies.sort((a, b) => {
-    const parent = (a.usedIn?.[0]?.name ?? "").localeCompare(b.usedIn?.[0]?.name ?? "", undefined, {
-      sensitivity: "base",
-    });
-    return parent !== 0 ? parent : byName(a, b);
-  });
+  const subAssemblies = new Set<string>();
+
+  /**
+   * `path` guards against a cycle in the data. `wouldCreateCycle` stops the
+   * API creating one, but a row written before that guard existed — or by
+   * hand in SQL — must not hang the page.
+   */
+  const build = (bom: BOM, depth: number, path: Set<string>): BomTreeNode => {
+    if (path.has(bom.id)) {
+      return { bom, children: [], depth, descendantCount: 0 };
+    }
+    const nextPath = new Set(path).add(bom.id);
+    const children = (childrenOf.get(bom.id) ?? [])
+      .map((child) => {
+        subAssemblies.add(child.id);
+        return build(child, depth + 1, nextPath);
+      })
+      .sort(byName);
+
+    return {
+      bom,
+      children,
+      depth,
+      descendantCount: children.reduce((n, c) => n + 1 + c.descendantCount, 0),
+    };
+  };
+
+  const rootNodes = roots.map((b) => build(b, 0, new Set())).sort(byName);
 
   return {
-    topLevel: topLevel.sort(byName),
-    subAssemblies,
-    orphans: topLevel.filter((b) => !!b.orphanHint),
+    roots: rootNodes,
+    orphans: roots.filter((b) => !!b.orphanHint),
+    subAssemblyCount: subAssemblies.size,
   };
+}
+
+/**
+ * Flatten a node into the rows to render, given which nodes are expanded.
+ *
+ * Rendering is a flat list rather than nested markup so every row is a
+ * sibling in the DOM: nesting buttons inside buttons is invalid, and the
+ * indentation is a visual concern that `depth` already carries.
+ */
+export function visibleRows(nodes: BomTreeNode[], expanded: Set<string>): BomTreeNode[] {
+  const out: BomTreeNode[] = [];
+  const walk = (list: BomTreeNode[]) => {
+    for (const node of list) {
+      out.push(node);
+      if (node.children.length > 0 && expanded.has(node.bom.id)) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
 }
