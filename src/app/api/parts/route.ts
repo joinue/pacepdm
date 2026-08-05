@@ -3,7 +3,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
-import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+import { z, parseBody, nonEmptyString, optionalString, ilikeContains } from "@/lib/validation";
 import { nextPartNumberSequence, formatPartNumber, readPartNumberSettings } from "@/lib/parts";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 
@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
       .order("partNumber");
 
     if (q) {
-      query = query.or(`name.ilike.%${q}%,partNumber.ilike.%${q}%,description.ilike.%${q}%`);
+      const term = ilikeContains(q);
+      query = query.or(`name.ilike.${term},partNumber.ilike.${term},description.ilike.${term}`);
     }
     if (category && category !== "all") {
       query = query.eq("category", category);

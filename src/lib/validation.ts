@@ -153,5 +153,32 @@ export const positiveNumber = z.number().positive("Must be greater than zero");
 /** Non-negative number for costs. */
 export const nonNegativeNumber = z.number().min(0, "Must be zero or greater");
 
+/**
+ * Quote a user-supplied term for use inside a PostgREST filter *string*.
+ *
+ * `.eq()`, `.ilike()` and friends take the value as a separate argument and
+ * escape it themselves — those are safe and need nothing. `.or()` is the
+ * exception: it takes one raw filter string, so an interpolated term is parsed
+ * as syntax.
+ *
+ * A comma is the one that bites. `or=(name.ilike.*a,b*)` reads the comma as
+ * the separator between two conditions, and the fragment after it fails to
+ * parse — PGRST100, surfaced as a 500. Searching for "M6, 20mm" or any part
+ * description with a comma in it broke search outright, and part descriptions
+ * routinely contain commas.
+ *
+ * Verified against the live database rather than assumed: a `)` does not
+ * escape the `or=(...)` group and a term cannot reach another tenant's rows —
+ * the tenant filter is a separate `.eq()` that PostgREST ANDs with the group.
+ * So this is a robustness fix, not an isolation one.
+ *
+ * Quoting rather than stripping, so a term containing a comma still searches
+ * for that term instead of quietly searching for something else.
+ */
+export function ilikeContains(term: string): string {
+  const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"%${escaped}%"`;
+}
+
 // Re-export z so consumers don't need a separate import.
 export { z };

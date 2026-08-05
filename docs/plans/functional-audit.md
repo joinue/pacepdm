@@ -11,10 +11,10 @@ FK, the index, the picker and the API all existed and agreed with each other,
 and every insert had still been rejected for a day by a CHECK constraint
 nobody re-read.
 
-Six findings across seven areas. Every one was invisible to
+Seven findings across twelve areas. Every one was invisible to
 `npm run check`.
 
-**Read this before adding features.** Five of the six were governance or
+**Read this before adding features.** Five of the seven were governance or
 correctness holes — in the change-control story this product exists for, or in
 who is allowed to weaken it.
 
@@ -118,6 +118,26 @@ want.
 Both now call the guard. The pattern is the same as finding 2: **a rule
 applied to one of two paths that need it.**
 
+### 7. A comma in a search term returned a 500
+
+`.or()` is the one Supabase builder that takes a raw PostgREST filter
+_string_, so an interpolated term is parsed as syntax rather than treated as a
+value. `or=(name.ilike.*M6, 20mm*)` reads the comma as the separator between
+two conditions, the remainder fails to parse, and PGRST100 surfaces as a 500.
+
+Part descriptions routinely contain commas. Five call sites in
+`/api/search`, plus `/api/parts` and `/api/parts/export`.
+
+**Checked against the live database before assuming the worst**, because this
+looks like injection: a `)` does _not_ escape the `or=(...)` group, and no
+term reaches another tenant's rows — the tenant filter is a separate `.eq()`
+that PostgREST ANDs with the group. Robustness, not isolation.
+
+Fixed with `ilikeContains` in `src/lib/validation.ts`, which quotes and
+escapes rather than stripping, so a term containing a comma still searches for
+that term. `/api/releases` originally stripped `,()`; it now uses the helper
+too, because the stripping version silently searched for something else.
+
 ---
 
 ## What this says about the codebase
@@ -194,9 +214,25 @@ the existing row so history stays attached, and races resolve through
 `ON CONFLICT`. Finding 6 is in the admin route that configures it, not the
 provisioning.
 
-Not covered: parts and vendors beyond their schema, the search page, metadata
-fields, saved searches, and notification delivery. All lower stakes than what
-is above, but none of them have been walked.
+Also covered, on a second pass: parts, vendors, search, metadata fields,
+saved searches, and notification delivery. Finding 7 came out of search;
+everything else there held up:
+
+- **Metadata fields and vendors** — wrapped, gated on the permission their
+  screen implies.
+- **Saved searches** — tenant-scoped through the wrapper, and a shared search
+  is visible tenant-wide but deletable only by its author.
+- **Notification delivery** — `notify` filters the actor out so nobody is told
+  about their own action, and the email path honours per-type opt-out and
+  skips inactive users.
+- **Part deletion** — refuses while the part is used in any BOM item, and
+  `eco_items.partId` is RESTRICT behind that.
+- **Plain `.ilike()` / `.eq()` calls** — the value is a separate argument that
+  Supabase escapes, so only `.or()` ever needed this.
+
+Nothing is now entirely unwalked, but the coverage is uneven: this pass read
+routes and schema rather than exercising flows against real data. Anything
+depending on volume, concurrency, or a populated vault is still unproven.
 
 ### 4. Self-approval is still permitted
 

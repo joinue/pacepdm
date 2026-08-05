@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
+import { ilikeContains } from "@/lib/validation";
 
 /**
  * GET /api/parts/export?q=...&category=...&state=...
@@ -60,7 +61,8 @@ export async function GET(request: NextRequest) {
       .order("partNumber");
 
     if (q) {
-      query = query.or(`name.ilike.%${q}%,partNumber.ilike.%${q}%,description.ilike.%${q}%`);
+      const term = ilikeContains(q);
+      query = query.or(`name.ilike.${term},partNumber.ilike.${term},description.ilike.${term}`);
     }
     if (category && category !== "all") query = query.eq("category", category);
     if (state && state !== "all") query = query.eq("lifecycleState", state);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser } from "@/lib/auth";
 import { getFolderAccessScope, filterViewable } from "@/lib/folder-access";
+import { ilikeContains } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,6 +13,9 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category") || "";
     const state = searchParams.get("state") || "";
     const type = searchParams.get("type") || "all"; // all, files, ecos, parts, boms, folders
+    // Quoted once for every `.or()` below — an unquoted comma in the term is
+    // read as a filter separator and 500s the whole search.
+    const term = ilikeContains(query);
 
     if (!query && !category && !state) {
       return NextResponse.json({ files: [], ecos: [], parts: [], boms: [] });
@@ -51,7 +55,7 @@ export async function GET(request: NextRequest) {
 
       if (query) {
         fileQuery = fileQuery.or(
-          `name.ilike.%${query}%,partNumber.ilike.%${query}%,description.ilike.%${query}%`
+          `name.ilike.${term},partNumber.ilike.${term},description.ilike.${term}`
         );
       }
       if (category) {
@@ -80,7 +84,7 @@ export async function GET(request: NextRequest) {
 
       if (query) {
         ecoQuery = ecoQuery.or(
-          `title.ilike.%${query}%,ecoNumber.ilike.%${query}%,description.ilike.%${query}%`
+          `title.ilike.${term},ecoNumber.ilike.${term},description.ilike.${term}`
         );
       }
       if (state) {
@@ -103,7 +107,7 @@ export async function GET(request: NextRequest) {
 
       if (query) {
         partQuery = partQuery.or(
-          `partNumber.ilike.%${query}%,name.ilike.%${query}%,description.ilike.%${query}%`
+          `partNumber.ilike.${term},name.ilike.${term},description.ilike.${term}`
         );
       }
       if (category) {
@@ -125,7 +129,7 @@ export async function GET(request: NextRequest) {
         .limit(50);
 
       if (query) {
-        bomQuery = bomQuery.or(`name.ilike.%${query}%,description.ilike.%${query}%`);
+        bomQuery = bomQuery.or(`name.ilike.${term},description.ilike.${term}`);
       }
 
       const { data: boms } = await bomQuery;
@@ -143,7 +147,7 @@ export async function GET(request: NextRequest) {
         .limit(50);
 
       if (query) {
-        folderQuery = folderQuery.or(`name.ilike.%${query}%,path.ilike.%${query}%`);
+        folderQuery = folderQuery.or(`name.ilike.${term},path.ilike.${term}`);
       }
 
       const { data: folders } = await folderQuery;

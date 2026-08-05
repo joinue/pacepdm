@@ -1,6 +1,6 @@
 import { withTenant } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
-import { z } from "@/lib/validation";
+import { z, ilikeContains } from "@/lib/validation";
 import type { ReleaseManifest } from "@/lib/releases";
 
 /**
@@ -51,13 +51,12 @@ export const GET = withTenant(
       .range(query.offset, query.offset + query.limit - 1);
 
     if (query.q) {
-      // `or` takes a raw PostgREST filter string, so commas and parens in
-      // the term would be read as syntax. Strip them rather than escaping:
-      // neither appears in a release name or an ECO number.
-      const term = query.q.replace(/[,()]/g, " ").trim();
-      if (term) {
-        select = select.or(`name.ilike.%${term}%,ecoNumber.ilike.%${term}%`);
-      }
+      // `or` takes a raw PostgREST filter string, so an interpolated term is
+      // parsed as syntax. This originally stripped `,()` on the reasoning
+      // that none appear in a release name — quoting is better, and it is
+      // what every other search does now. See ilikeContains.
+      const term = ilikeContains(query.q);
+      select = select.or(`name.ilike.${term},ecoNumber.ilike.${term}`);
     }
 
     const { data, error } = await select;
