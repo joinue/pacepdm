@@ -43,9 +43,25 @@ const { mockTenantUser, supabaseResponses, mockSupabaseFrom } = vi.hoisted(() =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {};
 
-    for (const m of ["select", "eq", "in", "neq", "is", "order", "limit", "match"] as const) {
+    for (const m of [
+      "select",
+      "eq",
+      "in",
+      "neq",
+      "is",
+      "not",
+      "order",
+      "limit",
+      "match",
+    ] as const) {
       chain[m] = (...args: unknown[]) => {
         if (m === "eq" && args.length === 2) filters[args[0] as string] = args[1];
+        // The trash routes are the only ones that ask for soft-deleted rows;
+        // recording which way they filtered lets those cases assert that the
+        // tenant guard still applies on the deleted side of the table.
+        if (m === "is" && args[0] === "deletedAt" && args[1] === null)
+          filters.deletedState = "null";
+        if (m === "not" && args[0] === "deletedAt") filters.deletedState = "notNull";
         return chain;
       };
     }
@@ -167,6 +183,8 @@ import {
 } from "@/app/api/parts/[partId]/files/route";
 import { PUT as putFileMetadata } from "@/app/api/files/[fileId]/metadata/route";
 import { GET as listShareTokens } from "@/app/api/share-tokens/route";
+import { GET as listDeletedFiles } from "@/app/api/files/deleted/route";
+import { POST as undeleteFile } from "@/app/api/files/[fileId]/undelete/route";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -543,6 +561,72 @@ describe("Multi-tenant isolation (API routes)", () => {
       const req = new Request("http://test.local/api/files?folderId=folder-1");
       const res = await listFiles(req as never);
       expect(res.status).toBe(401);
+    });
+  });
+
+  // The trash is the one place that deliberately reads rows every other query
+  // in the app filters out. Worth its own entries here: a soft-deleted file
+  // still carries its tenant's data, and "it's deleted" is not an access
+  // control. Both routes go through the scoped client, so the guard is in the
+  // SQL — these fail if that ever changes.
+  describe("GET /api/files/deleted — SQL-level tenant guard", () => {
+    it("scopes the trash listing to the caller's tenant", async () => {
+      let observed: Record<string, unknown> = {};
+      supabaseResponses.set("files", (filters) => {
+        observed = { ...filters };
+        return { data: [], error: null };
+      });
+
+      const res = await listDeletedFiles(
+        makeRequest("http://test.local/api/files/deleted") as never
+      );
+
+      expect(res.status).toBe(200);
+      expect(observed.tenantId).toBe(TENANT_A);
+      // ...and asked for deleted rows, not live ones.
+      expect(observed.deletedState).toBe("notNull");
+    });
+  });
+
+  describe("POST /api/files/[fileId]/undelete — SQL-level tenant guard", () => {
+    it("returns 404 when the deleted file belongs to another tenant", async () => {
+      supabaseResponses.set("files", (filters) =>
+        filters.tenantId === TENANT_B && filters.deletedState === "notNull"
+          ? {
+              data: {
+                id: FILE_ID,
+                tenantId: TENANT_B,
+                name: "secret.sldprt",
+                folderId: "f-b",
+                deletedAt: "2026-08-01T00:00:00Z",
+              },
+              error: null,
+            }
+          : { data: null, error: null }
+      );
+
+      const res = await undeleteFile(makeRequest() as never, {
+        params: Promise.resolve({ fileId: FILE_ID }),
+      });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 for a live file — undelete cannot resurrect what is not deleted", async () => {
+      supabaseResponses.set("files", (filters) =>
+        filters.deletedState === "notNull"
+          ? { data: null, error: null }
+          : {
+              data: { id: FILE_ID, tenantId: TENANT_A, name: "ours.sldprt", folderId: "f-a" },
+              error: null,
+            }
+      );
+
+      const res = await undeleteFile(makeRequest() as never, {
+        params: Promise.resolve({ fileId: FILE_ID }),
+      });
+
+      expect(res.status).toBe(404);
     });
   });
 });

@@ -23,10 +23,15 @@ export const DELETE = withTenant(
     }
 
     // Soft-delete: mark the file as deleted instead of removing the row.
-    // Child rows (versions, metadata) are left intact for audit trail.
+    // Child rows (versions, metadata) are left intact for audit trail, and
+    // the storage blob is never touched — which is what makes
+    // `POST /api/files/[fileId]/undelete` a metadata-only operation.
+    //
+    // `deletedById` is stamped alongside so the trash view can show who
+    // deleted a file without joining the audit log.
     const { error } = await db
       .from("files")
-      .update({ deletedAt: new Date().toISOString() })
+      .update({ deletedAt: new Date().toISOString(), deletedById: tenantUser.id })
       .eq("id", params.fileId);
     if (error) throw new Error(error.message);
 

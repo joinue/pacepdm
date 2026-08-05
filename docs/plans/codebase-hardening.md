@@ -1,10 +1,10 @@
 # Codebase hardening — continuation plan
 
-**Started:** 2026-08-04 · **Last updated:** 2026-08-04 · **Status:** in progress
+**Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 98
-routes-wrapped: 28
+routes-total: 100
+routes-wrapped: 30
 unwrapped-route: 330
 raw-fetch: 112
 generic-error-toast: 14
@@ -29,10 +29,10 @@ this plan was written under, and it reorders the priorities below.
   missing `tenantId` filter cannot leak to anyone. Still worth doing — it is
   what makes the routes readable and testable — but it is hygiene now, not
   urgency. The same goes for the RLS lockdown, share links, and SSO.
-- **Trash / undelete is promoted to the top.** For a file vault it was a
-  nuisance. For the BOM of record it is data loss on the thing the company runs
-  on, with recovery only via hand-written SQL. See
-  [Product gaps](#product-gaps-found-along-the-way).
+- **~~Trash / undelete is promoted to the top.~~ Shipped 2026-08-05.** See
+  [Product gaps](#product-gaps-found-along-the-way) for what it does and does
+  not cover — notably folders are still hard-deleted, and nothing purges the
+  trash.
 - **Two operational items now rank above everything in the queue:** a separate
   development database, and verified backups. Both are in
   [Do these first](#do-these-first-not-code) as items 4 and 5.
@@ -41,8 +41,11 @@ this plan was written under, and it reorders the priorities below.
   loading real data" items get harder with every part entered, so they should be
   settled before this queue is resumed.
 
-Suggested order: undelete → dev database → verify backups → BOM import (in the
-integration plan) → then back to item 1 below.
+Suggested order: ~~undelete~~ → **dev database → verify backups** → BOM import
+(in the integration plan) → then back to item 1 below.
+
+Both remaining operational items are yours to do in the Supabase console; there
+is nothing in this repo to change for either.
 
 The foundations are in and pushed to `main` (`9695e8d`). What remains is volume, not design: every outstanding item is mechanical, has a counter that can only go down, and can be picked up and put down without losing your place.
 
@@ -85,7 +88,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                               | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                              | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                              | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **28 / 98**                         | 98                                                    |
+| Routes on `withTenant`                | 0                | **30 / 100**                        | 100                                                   |
 | `raw-fetch` in client components      | 112              | **112**                             | 0                                                     |
 | `generic-error-toast`                 | 14               | **14**                              | 0                                                     |
 | `swallowed-error`                     | 11               | **11**                              | 0                                                     |
@@ -99,13 +102,18 @@ Both linters compare against `scripts/*.baseline.json`. Existing debt is frozen;
 
 ## Do these first (not code)
 
-**1. Check whether migration 012 is actually applied.** `get_folder_access_scope` returned `PGRST202 — function does not exist` on 2026-08-04, which means **folder ACLs currently do nothing**. The resolver falls back to an open scope, so the folder-access dialog will let you grant and revoke access with no effect. Verify against the live catalog, and apply `migration-012` if it is genuinely missing:
+**~~1. Check whether migration 012 is actually applied.~~ Resolved 2026-08-05 — it is.** `get_folder_access_scope` exists in the live catalog with the signature `folder-access.ts` calls (`p_tenant_id, p_user_id, p_role_id, p_bypass`). **Folder ACLs are real**, not the no-op the 2026-08-04 reading suggested.
+
+Two things follow, and both are live behaviour rather than trivia:
+
+- **The resolver fails closed.** On a genuine RPC error `folder-access.ts` returns `closedScope`, so a Supabase blip hides folders from non-bypass users rather than exposing them. Intended, but it is a visible change from the open-scope fallback the app was effectively running under while 012 looked missing.
+- **Every folder-gated path is now actually gated**, including the trash: its listing post-filters on `canViewFolder` and restore requires `canEditFolder`. A user with view-only access to a folder sees nothing from it in the trash and cannot restore from it.
+
+**If `PGRST202` ever reappears after a function-adding migration, suspect the schema cache before the migration.** PostgREST caches the schema and returns `PGRST202 — function does not exist` for a function that is genuinely there until the cache reloads. That is the most likely explanation for the 2026-08-04 reading. The fix is not to re-run the migration:
 
 ```sql
-select proname from pg_proc where proname = 'get_folder_access_scope';
+notify pgrst, 'reload schema';
 ```
-
-Note the follow-on: once 012 _is_ applied, `folder-access.ts` fails **closed** on a real RPC error (`closedScope`), so a database blip will hide folders from non-bypass users rather than exposing them. That is intended, but it is a visible change in failure behaviour.
 
 **2. Confirm migration 039 is applied.** `npm run probe:rls` passed on 2026-08-04, which implies it is. Re-check after any schema work — the migration files are not a ledger of what is live ([`../decisions/hand-applied-migrations.md`](../decisions/hand-applied-migrations.md)).
 
@@ -130,6 +138,10 @@ backup. Do the restore once, into the dev project from item 4.
 ## The work queue
 
 ### 1. Finish the route wrapper — 70 routes
+
+> Still 70. `routes-wrapped` went 28 → 30 because the trash work **added** two
+> routes that were wrapped from the start, not because two were converted. The
+> remaining count only falls when an old handler is rewritten.
 
 Makes tenant isolation correct by construction rather than by review. Note the reprioritisation above: with a single tenant this is readability and testability rather than a live isolation risk, so it no longer outranks the operational items.
 
@@ -197,11 +209,13 @@ Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form
 
 Not refactors — real missing behaviour, worth their own tickets.
 
-**No trash / undelete.** Deleting a file is one-way from the UI even though the row and the storage blob both survive. `files/route.ts` always filters `.is("deletedAt", null)`, and `files/[fileId]/restore` restores an older _version_, not a deleted file — it explicitly 404s when `deletedAt` is set. Three files had to be recovered by hand with SQL during this session.
+**~~No trash / undelete.~~ Done** (migration 042 + `GET /api/files/deleted` + `POST /api/files/[fileId]/undelete` + the `trash` flat view). Recovering a file no longer needs database access. Three things the next person should know:
 
-Roughly: a `?deleted=1` filter on the list, a `POST /api/files/[fileId]/undelete`, and a "Recently deleted" tab in the vault. Small, and it stops the next recovery needing database access.
+- It is **files only**. Folders have no `deletedAt` column, so deleting a folder is still one-way — the delete dialog now says so for folders and promises the trash for files. Extending soft-delete to folders is its own piece of work, and needs a decision about what happens to the files inside.
+- Migration 042 made `files_tenantId_folderId_name_key` **partial** on `deletedAt IS NULL`. That fixed a live bug (a deleted file kept reserving its name, so re-uploading the same filename failed with "already exists" about an invisible file) and introduced the collision undelete now returns a 409 for.
+- **Nothing purges the trash.** Deleted rows and their storage blobs accumulate forever, and the listing is capped at 200. A retention policy is the obvious follow-up; until then storage grows monotonically.
 
-**No confirm on multi-file delete.** Seven files were deleted in 45 seconds in May, which reads like clicking through without friction.
+**~~No confirm on multi-file delete.~~ Already fixed** before this plan was written — `showBulkDeleteConfirm` gates it and `VaultDialogs` renders the AlertDialog. The plan was stale on this point. Its copy claimed the delete was permanent, which is now corrected.
 
 **SolidWorks files can never render in 3D.** `.SLDPRT`/`.SLDDRW` are proprietary OLE binaries; occt-import-js is OpenCascade and reads neutral formats only (`step`, `stp`, `iges`, `igs`, `stl`, `obj`). Only the embedded 2D preview bitmap can be extracted. If real 3D previews matter, uploads need an accompanying STEP export — worth deciding before the vault has 500 files instead of 7.
 

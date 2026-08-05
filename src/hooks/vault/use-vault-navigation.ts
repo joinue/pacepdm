@@ -15,12 +15,17 @@ type NavigableFolder = { id: string; name: string };
 
 /**
  * The set of flat (cross-folder) views the vault can render in place of
- * the usual folder listing. Today there's only one — "my checkouts" — but
- * the shape is an open string enum so future flat views ("recent",
- * "in WIP", etc.) can slot in without reshaping the navigation state.
+ * the usual folder listing. The shape is an open string enum so future flat
+ * views ("recent", "in WIP", etc.) can slot in without reshaping the
+ * navigation state.
  */
-export type FlatView = "checkouts";
+export const FLAT_VIEWS = ["checkouts", "trash"] as const;
+export type FlatView = (typeof FLAT_VIEWS)[number];
 export type VaultViewMode = "folder" | FlatView;
+
+function isFlatView(value: string | null): value is FlatView {
+  return value !== null && (FLAT_VIEWS as readonly string[]).includes(value);
+}
 
 /**
  * Vault navigation state and helpers.
@@ -38,7 +43,7 @@ export function useVaultNavigation(rootFolderId: string) {
   const searchParams = useSearchParams();
 
   const initialViewParam = searchParams.get("view");
-  const initialViewMode: VaultViewMode = initialViewParam === "checkouts" ? "checkouts" : "folder";
+  const initialViewMode: VaultViewMode = isFlatView(initialViewParam) ? initialViewParam : "folder";
 
   const [viewMode, setViewMode] = useState<VaultViewMode>(initialViewMode);
   const [currentFolderId, setCurrentFolderId] = useState(

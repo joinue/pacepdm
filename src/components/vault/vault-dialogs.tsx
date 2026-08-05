@@ -83,8 +83,20 @@ export function VaultDialogs({ vault }: VaultDialogsProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {vault.deleteTarget?.type}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &ldquo;{vault.deleteTarget?.name}&rdquo;? This action
-              cannot be undone.
+              {/* Files are soft-deleted and restorable from the trash; folders
+                  are not. Saying "cannot be undone" for both was wrong in one
+                  direction and needlessly frightening in the other. */}
+              {vault.deleteTarget?.type === "file" ? (
+                <>
+                  Delete &ldquo;{vault.deleteTarget?.name}&rdquo;? It moves to the trash, where you
+                  can restore it later.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete &ldquo;{vault.deleteTarget?.name}&rdquo;? This
+                  action cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -182,7 +194,8 @@ export function VaultDialogs({ vault }: VaultDialogsProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {vault.selectedFiles.size} file(s)?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the selected files. This action cannot be undone.
+              The selected files move to the trash, where you can restore them later. Released files
+              and files checked out by someone else will be skipped.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

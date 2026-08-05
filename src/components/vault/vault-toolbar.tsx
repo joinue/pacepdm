@@ -47,6 +47,11 @@ const FLAT_VIEW_META: Record<
     title: "My checked-out files",
     description: "Files you've checked out across every folder, oldest first.",
   },
+  trash: {
+    title: "Recently deleted",
+    description:
+      "Deleted files, newest first. Restoring puts a file back in the folder it came from.",
+  },
 };
 
 export function VaultToolbar({ vault }: VaultToolbarProps) {
@@ -138,6 +143,17 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
               <span className="hidden sm:inline">New Folder</span>
             </Button>
           )}
+          {!isFlat && canDelete && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => vault.enterFlatView("trash")}
+              title="Files that have been deleted but can still be restored"
+            >
+              <Trash2 className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Trash</span>
+            </Button>
+          )}
           {!isFlat && canUpload && (
             <Button size="sm" onClick={() => vault.setShowUpload(true)}>
               <Upload className="w-4 h-4 sm:mr-2" />
@@ -153,8 +169,10 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
         </div>
       </div>
 
-      {/* Search & Filter */}
-      {!vault.selectedFile && (
+      {/* Search & Filter. Hidden in the trash: those controls filter the
+          vault's own file list, which the trash view doesn't populate, so
+          they would silently do nothing. */}
+      {!vault.selectedFile && vault.viewMode !== "trash" && (
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

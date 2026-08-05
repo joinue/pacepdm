@@ -17,6 +17,7 @@ import { FileDetailPanel } from "./file-detail-panel";
 import { CheckInDialog } from "./checkin-dialog";
 import { VaultToolbar } from "./vault-toolbar";
 import { VaultFileList } from "./vault-file-list";
+import { TrashList } from "./trash-list";
 import { VaultDialogs } from "./vault-dialogs";
 import type { MetadataFieldDef } from "./vault-types";
 
@@ -205,9 +206,17 @@ export function VaultBrowser({
           </Sheet>
         ))}
 
-      {/* File list — hidden when detail view is open on desktop */}
+      {/* File list — hidden when detail view is open on desktop. The trash
+          renders its own list: deleted files have a different row shape and
+          exactly one action, so they don't go through VaultFileList. */}
       <div className={vault.selectedFile && isDesktop ? "hidden" : ""}>
-        <VaultFileList vault={vault} userId={user.id} />
+        {vault.viewMode === "trash" ? (
+          <ErrorBoundary>
+            <TrashList onRestored={vault.refresh} />
+          </ErrorBoundary>
+        ) : (
+          <VaultFileList vault={vault} userId={user.id} />
+        )}
       </div>
 
       {/* Dialogs */}

@@ -11,10 +11,16 @@ import type { VaultViewMode } from "./use-vault-navigation";
  * the usual per-folder listing; other variants are flat cross-folder views
  * that don't have a folder tree and return files from many folders at once.
  */
-export type VaultContentSource = { kind: "folder"; folderId: string } | { kind: "checkouts" };
+export type VaultContentSource =
+  { kind: "folder"; folderId: string } | { kind: "checkouts" } | { kind: "external" };
 
 function sourceFromViewMode(viewMode: VaultViewMode, folderId: string): VaultContentSource {
   if (viewMode === "checkouts") return { kind: "checkouts" };
+  // The trash renders from its own endpoint with its own row shape, and owns
+  // that fetch itself (see `TrashList`). Declaring it as an `external` source
+  // rather than letting it fall through to `folder` is what stops this hook
+  // firing a pointless folder listing behind the trash view.
+  if (viewMode === "trash") return { kind: "external" };
   return { kind: "folder", folderId };
 }
 
@@ -34,6 +40,10 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
   const loadAbortRef = useRef<AbortController | null>(null);
 
   const fetchForSource = useCallback(async (source: VaultContentSource, signal: AbortSignal) => {
+    // A view that loads its own data — nothing for this hook to fetch.
+    if (source.kind === "external") {
+      return { folders: [] as FolderItem[], files: [] as FileItem[] };
+    }
     if (source.kind === "folder") {
       const [foldersData, filesData] = await Promise.all([
         fetchJson<FolderItem[]>(`/api/folders?parentId=${source.folderId}`, { signal }),

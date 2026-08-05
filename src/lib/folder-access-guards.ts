@@ -93,6 +93,45 @@ export async function loadFile(
   return file;
 }
 
+/**
+ * The mirror of `loadFile` for the trash: loads a file that IS soft-deleted.
+ *
+ * Deliberately a separate function rather than a flag on `loadFile`. Every
+ * one of `loadFile`'s callers wants deleted rows excluded, and that exclusion
+ * is the kind of default that should not be reachable by passing the wrong
+ * boolean — a `loadFile(..., { includeDeleted: true })` typo'd into an
+ * unrelated route is a silent correctness bug, whereas calling a function
+ * named `loadDeletedFile` is never accidental.
+ *
+ * Requires edit on the containing folder: restoring a file puts content back
+ * into a folder, so it is a write to that folder regardless of the fact that
+ * only the file row changes.
+ */
+export async function loadDeletedFile(
+  db: ScopedDb,
+  tenantUser: TenantUserForAccess,
+  fileId: string,
+  select = "*"
+) {
+  const { data: file } = await db
+    .from("files")
+    .select(select)
+    .eq("id", fileId)
+    .not("deletedAt", "is", null)
+    .maybeSingle();
+
+  // Same message whether the id is unknown, belongs to another tenant, or
+  // points at a file that is not actually deleted. A caller probing ids
+  // learns nothing from the difference.
+  if (!file) throw notFound("Deleted file not found");
+
+  const scope = await getFolderAccessScope(tenantUser);
+  if (!canViewFolder(scope, file.folderId)) throw notFound("Deleted file not found");
+  if (!canEditFolder(scope, file.folderId)) throw forbidden();
+
+  return file;
+}
+
 function gate(
   scope: FolderAccessScope,
   folderId: string,
