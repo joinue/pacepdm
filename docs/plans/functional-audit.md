@@ -151,8 +151,7 @@ throw — the original reasoning was sound — it is to log.
 
 **A permission that is granted but never read is worse than no permission.**
 Finding 2 looked enforced from `DEFAULT_ROLES`, from `PERMISSION_INFO`, and
-from the tests. `scripts/` now has no guard for this; the scan that found it
-is worth turning into one.
+from the tests. Now guarded by the `unenforced-permission` lint rule.
 
 **Unresolved narration in shipped code is a defect marker.** Finding 4's
 author wrote down that they had not solved the problem, in the function, and

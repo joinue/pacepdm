@@ -4,8 +4,7 @@
 
 <!-- plan-metrics
 bom-import-route: 1
-erp-external-id: 0
--->
+erp-external-id: 1-->
 
 PACE Technologies is deploying this internally as the BOM of record and the
 change-control system for our equipment line. SolidWorks is upstream, NetSuite
@@ -135,10 +134,12 @@ that makes it a reliable trigger to hang a sync off later.
 
 Four things block automating it today.
 
-**1. No external identifier.** `parts`, `boms`, and `bom_items` have no
-`externalId` / `erpId` column. Any sync would key on `partNumber` string
-matching, which breaks the first time someone edits a part number. → gated
-below.
+**1. No external identifier.** Any sync would key on `partNumber` string
+matching, which breaks the first time someone edits a part number — and is
+already broken by the revision split, before anyone has edited anything.
+Migration 051 adds `externalId` to `parts` and `boms`; **it is written but not
+applied**, and `bom_items` deliberately does not get one (a line is identified
+by its parent BOM plus its `partId`, not independently). → gated below.
 
 **2. BOM lines can be free text.** `bom_items.partId` is nullable and sits
 beside plain `partNumber` / `name` / `vendor` columns. A line with no `partId`
@@ -210,29 +211,36 @@ about the shape (`-R` followed by digits, at the end). `PS-24V-LRS75-24` and
 genuinely ends in `-R<n>` without meaning a revision; `sourcePartNumber` is
 retained through the parse so such a case stays traceable.
 
-### 2. Add `externalId` to `parts` and `boms`
+### ~~2. Add `externalId` to `parts` and `boms`~~ Written 2026-08-06 — apply it
 
-One migration now, versus a reconciliation project once there are several
-hundred parts with no stable link to their NetSuite records. Nullable, unique
-per tenant, never set by the UI:
+[`migration-051-erp-external-id.sql`](../../supabase/migrations/migration-051-erp-external-id.sql).
+Nullable `text` on both tables, unique per tenant via a partial index so the
+nulls do not collide.
 
-```sql
-alter table parts add column if not exists "externalId" text;
-create unique index if not exists parts_tenant_external_id_key
-  on parts ("tenantId", "externalId") where "externalId" is not null;
-```
+**Not yet applied.** Migrations here are hand-pasted into the Supabase SQL
+editor, so this is written and reviewed but not live until someone runs it. The
+migration ends with a verify block to paste afterwards. Until it is applied,
+treat this item as open —
+[`../decisions/hand-applied-migrations.md`](../decisions/hand-applied-migrations.md)
+is explicit that the files are not a ledger.
 
-Same for `boms`. Idempotent and re-runnable, per
-[`../decisions/hand-applied-migrations.md`](../decisions/hand-applied-migrations.md),
-and RLS stays as-is since no new table is created.
+Nothing writes the column yet, and no route accepts it: both PUT handlers
+validate against a Zod allowlist (`UpdatePartSchema`, `UpdateBomSchema`) and
+`externalId` is on neither, so it can only ever be set by an importer or a sync.
+
+The value to backfill for the 14 revision-suffixed parts is already known —
+`sourcePartNumber` is retained through the importer's parse, so it does not have
+to be reconstructed from `concat(partNumber, '-', revision)`.
 
 ---
 
 ## Sequencing
 
-1. ~~**The two decisions above.**~~ Revision handling settled (split). Part
-   number authority between PACE and NetSuite still open, and `externalId` is
-   still not added.
+1. ~~**The two decisions above.**~~ Revision handling settled (split).
+   `externalId` migration written (051) — **paste it into the Supabase SQL
+   editor**; it is not live until you do. Part number authority between PACE
+   and NetSuite is the one still genuinely open, and it is a policy call rather
+   than code.
 2. ~~**BOM CSV import.**~~ Built — see above.
 3. **Import the item master.** Now the top item: the build list gave structure
    but no cost, description, material or vendor, so every BOM currently rolls
