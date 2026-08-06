@@ -172,10 +172,14 @@ decide what an option line means to NetSuite — most likely: push the base
 configuration only, and let order entry add the selected variant. Worth
 settling with whoever owns the NetSuite side before the push is built.
 
-**3. `parts.unitCost` and `parts.currency` duplicate NetSuite costing.** Two
-costing systems drift, and the ERP one is the one Finance believes. Either
-relabel the PACE field explicitly as an engineering estimate in the UI, or
-drop it. Decide before anyone starts populating it.
+**3. `parts.unitCost` and `parts.currency` duplicate NetSuite costing.**
+**Settled 2026-08-06: NetSuite owns cost; the PACE field is an engineering
+estimate and is kept**, because the BOM rollup needs a number before the item
+master lands and an all-zero rollup cannot sanity-check an imported structure.
+Nothing in PACE may ever present its cost as authoritative or push it to
+NetSuite — see [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
+**Still to do: relabel the field in the UI**, which today says "Unit Cost ($)"
+with no qualifier.
 
 **4. No machine-to-machine auth.** Every route resolves a browser session via
 `getApiTenantUser`. The only exception is the shared `CRON_SECRET` bearer check
@@ -191,27 +195,20 @@ a synthetic tenant user with a narrow permission set.
 These two get harder with every part entered. Everything else in this plan can
 wait.
 
-### 1. Pick one part numbering scheme, authoritative in one place
+### ~~1. Pick one part numbering scheme, authoritative in one place~~ Settled 2026-08-06
 
-Policy, not code, and the decision everything else depends on.
+**NetSuite owns part numbers and cost.** The earlier recommendation here was a
+split — PACE issuing numbers for engineered parts — and it was rejected: two
+minting authorities need a rule about which applies, and that rule gets applied
+wrongly the first time somebody designs a part that turns out to be purchasable.
 
-Recommendation: **PACE issues numbers for engineered parts and NetSuite mirrors
-them; NetSuite owns purchased-item numbers.** Write the outcome into
-[`../decisions/`](../decisions/) once agreed — it is a standing decision, not a
-plan item.
+Recorded in [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md),
+along with the revision-split consequence and why the join is `externalId`.
 
-**Half-settled on 2026-08-05.** The archive bakes the revision into the part
-number — `N1S-M-001-R2`, `N1S-SA-A-R4`, 14 of them. Decision taken: the
-importer **splits** them, so `N1S-M-001-R2` becomes part `N1S-M-001` at
-revision `R2`. Revising a part now stays one part with history, and where-used
-works across revisions — which is the main thing a PDM buys over a
-spreadsheet.
-
-The consequence to carry into the NetSuite mapping: **PACE part numbers no
-longer match QuickBooks/NetSuite verbatim** for those 14 parts. The join rule
-is `concat(partNumber, '-', revision)` on the ERP side, or an `externalId`
-holding the original string — which is the argument for doing item 2 sooner
-rather than later.
+**One workflow question this leaves open**, which is not blocking and is not a
+schema problem: a newly designed part has no number until NetSuite issues one.
+Either the engineer waits, or PACE holds a placeholder reconciled later. Answer
+it when parts start being created in anger.
 
 `splitRevision` in [`bom-import.ts`](../../src/lib/bom-import.ts) is strict
 about the shape (`-R` followed by digits, at the end). `PS-24V-LRS75-24` and

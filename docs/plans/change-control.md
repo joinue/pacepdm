@@ -158,9 +158,14 @@ draft. A draft supersedes nothing.
 
 ### 5. Smaller things the review surfaced
 
-- **No serial or as-built tracking.** Serial _effectivity_ exists; recording
-  what actually shipped on a given unit does not. Required for regulated or
-  serial-tracked manufacturing, ignorable otherwise. Segment decision.
+- **~~No serial or as-built tracking.~~ Closed 2026-08-06 — will not be built.**
+  Serialisation and sales live in NetSuite, and its work order already records
+  which components were issued against a given unit. A second as-built record
+  here would be a worse copy fed by hand. Serial _effectivity_ stays, because
+  it is a property of the change rather than a fact about a unit. Full reasoning
+  and the one caveat — component-level genealogy needs serialised or lot-tracked
+  inventory on the components, not just the finished machine — in
+  [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 - **~~BOM revision is free text on the PUT route.~~ Closed 2026-08-06.**
   `PUT /api/boms/[bomId]` now refuses a revision `nextRevision` cannot
   continue from, and refuses reserved letters outright. It deliberately still

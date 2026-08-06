@@ -30,22 +30,25 @@ this plan was written under, and it reorders the priorities below.
   urgency. The same goes for the RLS lockdown, share links, and SSO.
 - **~~Trash / undelete is promoted to the top.~~ Shipped 2026-08-05.** See
   [Product gaps](#product-gaps-found-along-the-way) for what it does and does
-  not cover — notably folders are still hard-deleted, and nothing purges the
-  trash.
-- **Two operational items now rank above everything in the queue:** a separate
-  development database, and verified backups. Both are in
-  [Do these first](#do-these-first-not-code) as items 4 and 5.
+  not cover — notably folders are still hard-deleted. Retention is settled as of
+  2026-08-06 (nothing is destroyed on a timer); the 200-row listing cap is a
+  live bug and is still there.
+- **One operational item now ranks above everything in the queue: verified
+  backups.** The separate development database was considered and deliberately
+  declined on 2026-08-06 — see item 4 in
+  [Do these first](#do-these-first-not-code). That makes backups the only thing
+  standing between a bad afternoon and the loss of the BOM of record.
 - **The SolidWorks and NetSuite seams have their own plan** →
-  [`cad-erp-integration.md`](cad-erp-integration.md). Its two "decide before
-  loading real data" items get harder with every part entered, so they should be
-  settled before this queue is resumed.
+  [`cad-erp-integration.md`](cad-erp-integration.md). Both of its "decide before
+  loading real data" items are now settled →
+  [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 
-Suggested order: ~~undelete~~ → ~~BOM import~~ → **dev database → verify
+Suggested order: ~~undelete~~ → ~~BOM import~~ → ~~dev database~~ → **verify
 backups** → item master import (in the integration plan) → then back to item 1
 below.
 
-Both remaining operational items are yours to do in the Supabase console; there
-is nothing in this repo to change for either.
+The one remaining operational item is yours to do in the Supabase console; there
+is nothing in this repo to change for it.
 
 The foundations are in and pushed to `main` (`9695e8d`). What remains is volume, not design: every outstanding item is mechanical, has a counter that can only go down, and can be picked up and put down without losing your place.
 
@@ -126,15 +129,19 @@ notify pgrst, 'reload schema';
 git push origin --delete master
 ```
 
-**4. Stand up a separate Supabase project for development.** `.env.local`
-points at the live project, so dev and prod are the same database and
-`npm run dev` edits real BOMs. That was survivable while the data was test
-data. Once the equipment line is in there, there is no accident buffer at all.
+**~~4. Stand up a separate Supabase project for development.~~ Closed
+2026-08-06 — deliberately not doing this.** Working directly on production is
+an accepted risk while PACE and Joinue are the only tenants, with Joinue acting
+as the test environment. Recorded in
+[`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md),
+including what reopens it: a third tenant, at which point another customer's
+data is in reach of a dev session.
 
-**5. Confirm backups exist and that a restore works.** Nothing in this repo
-addresses Supabase backup posture. For the BOM of record that matters more than
-every counter in the table above combined — and an untested restore is not a
-backup. Do the restore once, into the dev project from item 4.
+**5. Confirm backups exist and that a restore works.** ← **the one operational
+item still open, and the decision above raises its stakes rather than lowering
+them.** There is no second copy of the BOM of record anywhere. An untested
+restore is not a backup. Nothing in this repo can do it; it is a Supabase
+console task.
 
 ---
 
@@ -282,11 +289,15 @@ Not refactors — real missing behaviour, worth their own tickets.
 
 - It is **files only**. Folders have no `deletedAt` column, so deleting a folder is still one-way — the delete dialog now says so for folders and promises the trash for files. Extending soft-delete to folders is its own piece of work, and needs a decision about what happens to the files inside.
 - Migration 042 made `files_tenantId_folderId_name_key` **partial** on `deletedAt IS NULL`. That fixed a live bug (a deleted file kept reserving its name, so re-uploading the same filename failed with "already exists" about an invisible file) and introduced the collision undelete now returns a 409 for.
-- **Nothing purges the trash.** Deleted rows and their storage blobs accumulate forever, and the listing is capped at 200. A retention policy is the obvious follow-up; until then storage grows monotonically.
+- **Retention settled 2026-08-06: nothing is ever destroyed on a timer.** No auto-purge, no 90-day window. Permanent deletion is an admin-only act on one named file. Reasoning in [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md) — briefly, this is the BOM of record, the trash exists precisely so recovery does not need database access, and a timer that quietly destroys evidence is that failure in slower motion. Storage growing is the accepted cost.
+
+  **Two things still to build:** the admin permanent-delete action, and removing the 200-row listing cap. The cap is the part that is actually a bug — past 200 deletions the oldest stop appearing in the UI while remaining in the database, so they are invisible, un-restorable and un-deletable through any supported route. A cap that hides data is worse than no cap, because it looks like the data is gone.
 
 **~~No confirm on multi-file delete.~~ Already fixed** before this plan was written — `showBulkDeleteConfirm` gates it and `VaultDialogs` renders the AlertDialog. The plan was stale on this point. Its copy claimed the delete was permanent, which is now corrected.
 
-**SolidWorks files can never render in 3D.** `.SLDPRT`/`.SLDDRW` are proprietary OLE binaries; occt-import-js is OpenCascade and reads neutral formats only (`step`, `stp`, `iges`, `igs`, `stl`, `obj`). Only the embedded 2D preview bitmap can be extracted. If real 3D previews matter, uploads need an accompanying STEP export — worth deciding before the vault has 500 files instead of 7.
+**SolidWorks files can never render in 3D.** `.SLDPRT`/`.SLDDRW` are proprietary OLE binaries; occt-import-js is OpenCascade and reads neutral formats only (`step`, `stp`, `iges`, `igs`, `stl`, `obj`). Only the embedded 2D preview bitmap can be extracted.
+
+**Settled 2026-08-06: prompt, do not enforce.** Uploading a SolidWorks file with no neutral-format sibling shows a non-blocking nudge saying the file will be 2D-preview-only. Enforcing it — refusing check-in without a STEP — was rejected because the friction lands mid-task, and the first person in a hurry attaches a stale STEP, which is worse than none since it looks current. See [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md). **Still to build:** the prompt itself. Doing it now is the whole point — retrofitting exports onto 500 files is manual labour, from file #7 it is free.
 
 ---
 
