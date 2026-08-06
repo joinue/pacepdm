@@ -118,7 +118,7 @@ export interface RollupResult {
    *
    * Surfaced for the same reason as `itemsMissingCost` and arguably a sharper
    * one: a missing cost visibly understates a total, while an estimate blends
-   * in. A rollup reading £48,000 where £8,000 of it is guesswork looks exactly
+   * in. A rollup reading $48,000 where $8,000 of it is guesswork looks exactly
    * like a rollup where none of it is.
    */
   itemsUsingEstimate: number;

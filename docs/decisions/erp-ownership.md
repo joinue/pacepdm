@@ -131,8 +131,8 @@ wrong.
 The basis travels with the number, and the rollup reports
 `itemsUsingEstimate` beside the existing `itemsMissingCost`. **A total that
 mixes real cost with guesses has to say so.** A missing cost visibly
-understates; an estimate blends in — £48,000 with £8,000 of guesswork looks
-exactly like £48,000 of real cost, and that is the number somebody quotes.
+understates; an estimate blends in — $48,000 with $8,000 of guesswork looks
+exactly like $48,000 of real cost, and that is the number somebody quotes.
 Individual lines are marked `est.` so the warning is actionable rather than
 merely alarming.
 

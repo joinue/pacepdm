@@ -174,8 +174,8 @@ export function BomRollupPanel({
               )}
 
               {/* A missing cost visibly understates a total. An estimate blends
-                  in: £48,000 with £8,000 of guesswork looks exactly like
-                  £48,000 of real cost. Saying so is what keeps this number from
+                  in: $48,000 with $8,000 of guesswork looks exactly like
+                  $48,000 of real cost. Saying so is what keeps this number from
                   being quoted as though an ERP stood behind all of it. */}
               {data.itemsUsingEstimate > 0 && (
                 <div className="flex items-center gap-2 text-xs text-warning bg-warning/10 rounded p-2">
