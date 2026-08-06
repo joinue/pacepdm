@@ -14,6 +14,10 @@ const SETTINGS_KEYS = [
   "partNumberMode",
   "partNumberPrefix",
   "partNumberPadding",
+  // Refuse an approval from the person who raised the request. Off by
+  // default — see docs/decisions/self-approval.md for why a hard block is the
+  // wrong default for a team this size.
+  "blockSelfApproval",
 ] as const;
 
 const UpdateSettingsSchema = z.object({

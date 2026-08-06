@@ -5,6 +5,7 @@ import { notify, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { ECO_STATUS_FLOW as VALID_TRANSITIONS } from "@/lib/status-flows";
 import { z, optionalString, uuid } from "@/lib/validation";
+import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
 
 // Update body: status transitions and field updates can be combined.
 // Field updates are only allowed in DRAFT (enforced after parse). The
@@ -190,6 +191,25 @@ export const PUT = withTenant(
           `Moving an ECO to ${status} requires the "Approve ECOs" permission. ` +
             `Ask an approver to decide it.`
         );
+      }
+
+      // Self-approval, if the tenant has turned it off.
+      //
+      // This is the path that matters. `findWorkflowForTrigger` falls through
+      // to a direct status update when no workflow is assigned, and no tenant
+      // is seeded with an ECO workflow — so for most tenants an ECO is decided
+      // here and never touches the approval engine. Gating only the engine
+      // would leave the setting looking enforced and doing nothing, which is
+      // finding 2 of the functional audit repeated exactly.
+      if (
+        DECISION_STATUSES.has(status) &&
+        eco.createdById === tenantUser.id &&
+        (await blocksSelfApproval(
+          db.unscoped("tenant settings are read by tenant id, which is the caller's own"),
+          tenantUser.tenantId
+        ))
+      ) {
+        throw forbidden(selfApprovalRefusal("decide"));
       }
 
       // Check for an approval workflow on SUBMITTED / IN_REVIEW transitions.

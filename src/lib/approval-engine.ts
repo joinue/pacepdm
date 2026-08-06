@@ -7,6 +7,7 @@ import {
   markNotificationsReadByRef,
 } from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
+import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
 
 /**
  * Core approval workflow engine.
@@ -292,6 +293,15 @@ export async function processDecision({
 
   const request = decision.request;
   const requestId = decision.requestId;
+
+  // Self-approval, if the tenant has turned it off. Checked after membership
+  // so the more fundamental refusal wins, and before the compare-and-swap so a
+  // refused attempt does not consume a seat. See lib/self-approval.ts — the
+  // direct ECO status path needs the same check, and misses it if this one is
+  // ever moved into the engine's internals.
+  if (request.requestedById === userId && (await blocksSelfApproval(db, tenantId))) {
+    return { error: selfApprovalRefusal() };
+  }
 
   // One vote per person per step. ALL and MAJORITY steps now hold one row
   // per group member, and any member can claim any pending row — so without
@@ -662,6 +672,13 @@ export async function rejectForRework({
   if (!membership) return { error: "Not in approval group" };
 
   const request = decision.request;
+
+  // Rework is a decision on someone else's request too. Sending your own
+  // request back to yourself is not separation of duties, so it is refused on
+  // the same terms as an approval.
+  if (request.requestedById === userId && (await blocksSelfApproval(db, tenantId))) {
+    return { error: selfApprovalRefusal("decide") };
+  }
 
   // Mark decision as rework
   await db

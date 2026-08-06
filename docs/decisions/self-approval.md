@@ -13,8 +13,19 @@ A tenant admin can turn it off with a single setting — `blockSelfApproval` —
 which point the requester is refused on their own request even though they hold
 the permission and sit in the group.
 
-> **Decided, not yet built.** The setting does not exist and nothing enforces
-> it. Tracked in [`../plans/functional-audit.md`](../plans/functional-audit.md).
+Enforced in [`src/lib/self-approval.ts`](../../src/lib/self-approval.ts), which
+both decision paths call. There are two, and that is the whole reason the check
+lives in its own file rather than inside the approval engine:
+
+1. **The approval engine** (`processDecision`, `rejectForRework`), when a
+   workflow is assigned to the trigger.
+2. **A direct status update** on `PUT /api/ecos/[ecoId]`, which is what runs
+   when no workflow is assigned — and no tenant is seeded with an ECO workflow,
+   so in practice this is the path almost every ECO takes.
+
+Gating only the engine would leave the setting looking enforced while doing
+nothing on the path everyone uses. That is finding 2 of the functional audit
+exactly. **A third decision path means a third call to `blocksSelfApproval`.**
 
 ## Why permitted by default
 
@@ -62,6 +73,27 @@ That last point is worth keeping in view: on an `ALL` or `MAJORITY` step,
 allowing self-approval does not let an author approve alone. The mode already
 requires other people. The setting matters most on `ANY` steps, which is where
 a single click completes the request.
+
+## Why the check fails open
+
+A failed read of the tenant settings permits the approval.
+
+The reflex for anything that looks like a governance check is to fail closed,
+and it is wrong here. This is a **process preference**, not a security control.
+Every real gate around an approval is enforced separately and is untouched by
+a settings read: the `eco.approve` permission, approval-group membership, and
+the one-vote-per-person compare-and-swap. A Supabase blip should not stop a
+legitimate approver doing their job on the strength of a setting the tenant has
+most likely not turned on.
+
+Two ordering rules follow, both pinned by tests:
+
+- **Membership and permission refusals win.** Someone outside the group, or
+  without `eco.approve`, is told that — not told about a policy setting they
+  could not have satisfied anyway.
+- **The refusal lands before the compare-and-swap.** A refused attempt must not
+  claim the decision row, or it would burn a seat and leave an `ALL` step one
+  approval short forever.
 
 ## Related
 

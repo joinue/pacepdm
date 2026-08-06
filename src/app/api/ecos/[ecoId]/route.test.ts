@@ -164,3 +164,88 @@ describe("ECO decision transitions require ECO_APPROVE", () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * Self-approval on the direct status path.
+ *
+ * This is the path that matters. `findWorkflowForTrigger` falls through to a
+ * direct status update when no workflow is assigned, and no tenant is seeded
+ * with an ECO workflow — so for most tenants an ECO is decided here and never
+ * touches the approval engine. Gating only the engine would leave the setting
+ * looking enforced while doing nothing on the path everyone uses, which is
+ * finding 2 of the functional audit repeated exactly.
+ */
+describe("self-approval on the direct ECO status path", () => {
+  /** An approver who also authored the ECO. */
+  const authorApprover = {
+    id: "user-1", // matches inReviewEco.createdById
+    tenantId: "tenant-1",
+    fullName: "Alice",
+    email: "alice@example.com",
+    role: { permissions: ["eco.create", "eco.edit", "eco.approve"] },
+  };
+
+  function givenSetting(blockSelfApproval: boolean) {
+    tableResults.tenants = { data: { settings: { blockSelfApproval } }, error: null };
+  }
+
+  it("lets an author approve their own ECO by default", async () => {
+    mockTenantUser.current = authorApprover;
+    tableResults.tenants = { data: { settings: {} }, error: null };
+    expect((await PUT(req({ status: "APPROVED" }), { params })).status).not.toBe(403);
+  });
+
+  it("refuses when the tenant has turned self-approval off", async () => {
+    mockTenantUser.current = authorApprover;
+    givenSetting(true);
+    const res = await PUT(req({ status: "APPROVED" }), { params });
+    expect(res.status).toBe(403);
+    const { error } = await res.json();
+    expect(error).toMatch(/raised this request/i);
+    expect(error).toMatch(/Block self-approval/);
+  });
+
+  it("refuses a self-rejection on the same terms", async () => {
+    mockTenantUser.current = authorApprover;
+    givenSetting(true);
+    expect((await PUT(req({ status: "REJECTED" }), { params })).status).toBe(403);
+  });
+
+  it("still lets a different approver decide it", async () => {
+    mockTenantUser.current = manager; // user-2, not the author
+    givenSetting(true);
+    expect((await PUT(req({ status: "APPROVED" }), { params })).status).not.toBe(403);
+  });
+
+  /**
+   * The setting governs deciding, not moving an ECO along. An author must
+   * still be able to submit their own change order for review — that is the
+   * normal way one starts.
+   */
+  it("does not block the author submitting their own ECO", async () => {
+    mockTenantUser.current = authorApprover;
+    givenSetting(true);
+    tableResults.ecos = { data: { ...inReviewEco, status: "DRAFT" }, error: null };
+    expect((await PUT(req({ status: "SUBMITTED" }), { params })).status).not.toBe(403);
+  });
+
+  /**
+   * The permission is the more fundamental refusal and must win, or an
+   * engineer without eco.approve would be told about a policy setting rather
+   * than that they cannot approve at all.
+   */
+  it("reports the missing permission ahead of self-approval", async () => {
+    mockTenantUser.current = engineer; // authored it, but has no eco.approve
+    givenSetting(true);
+    const res = await PUT(req({ status: "APPROVED" }), { params });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/Approve ECOs/);
+  });
+
+  it("permits the decision when the settings read fails", async () => {
+    // Fails open: this is a process preference, not a security control.
+    mockTenantUser.current = authorApprover;
+    tableResults.tenants = { data: null, error: { message: "timeout" } };
+    expect((await PUT(req({ status: "APPROVED" }), { params })).status).not.toBe(403);
+  });
+});

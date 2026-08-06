@@ -1562,3 +1562,119 @@ describe("getRequestTimeline", () => {
     expect(await getRequestTimeline("req-1")).toEqual([]);
   });
 });
+
+// ── Self-approval ──────────────────────────────────────────────────────────
+//
+// Permitted by default; a tenant admin can turn it off. See
+// docs/decisions/self-approval.md. The setting lives on the tenant row, so the
+// mock has to serve `tenants` for these.
+
+describe("self-approval", () => {
+  beforeEach(resetMockState);
+
+  /** requestedById is user-9 by default, so user-9 deciding is self-approval. */
+  const selfApprove = { ...approve, userId: "user-9" };
+
+  function givenSetting(blockSelfApproval: boolean) {
+    tableResults["tenants"] = { data: { settings: { blockSelfApproval } }, error: null };
+  }
+
+  it("is permitted by default, with no setting stored at all", async () => {
+    givenDecision();
+    tableResults["tenants"] = { data: { settings: {} }, error: null };
+    expect(await processDecision(selfApprove)).toMatchObject({ success: true });
+  });
+
+  it("is permitted when the tenant row has no settings object", async () => {
+    givenDecision();
+    tableResults["tenants"] = { data: { settings: null }, error: null };
+    expect(await processDecision(selfApprove)).toMatchObject({ success: true });
+  });
+
+  it("is permitted when the setting is explicitly off", async () => {
+    givenDecision();
+    givenSetting(false);
+    expect(await processDecision(selfApprove)).toMatchObject({ success: true });
+  });
+
+  it("is refused when the tenant has turned it on", async () => {
+    givenDecision();
+    givenSetting(true);
+    const result = await processDecision(selfApprove);
+    expect(result.error).toMatch(/raised this request/i);
+    // The message has to name the setting, or a user who holds the permission
+    // and sits in the group reads the refusal as a bug.
+    expect(result.error).toMatch(/Block self-approval/);
+  });
+
+  /**
+   * The refusal must land before the compare-and-swap. A refused attempt that
+   * had already claimed the row would burn a seat on an ALL step and leave the
+   * request one approval short forever.
+   */
+  it("does not consume a seat when refused", async () => {
+    givenDecision();
+    givenSetting(true);
+    await processDecision(selfApprove);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("never blocks somebody approving another person's request", async () => {
+    givenDecision();
+    givenSetting(true);
+    // approve is user-1; the request was raised by user-9.
+    expect(await processDecision(approve)).toMatchObject({ success: true });
+  });
+
+  /**
+   * Membership is the more fundamental refusal, so it wins. Otherwise someone
+   * outside the group would be told about a policy setting rather than that
+   * they are not an approver.
+   */
+  it("reports non-membership ahead of self-approval", async () => {
+    givenDecision({ member: false });
+    givenSetting(true);
+    expect(await processDecision(selfApprove)).toEqual({
+      error: "You are not a member of this approval group",
+    });
+  });
+
+  it("blocks rework on your own request too", async () => {
+    givenDecision();
+    givenSetting(true);
+    const result = await rejectForRework({
+      decisionId: "dec-1",
+      tenantId: "tenant-1",
+      userId: "user-9",
+      userFullName: "Author",
+      comment: "changing my mind",
+    });
+    expect(result.error).toMatch(/raised this request/i);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("allows rework on somebody else's request", async () => {
+    givenDecision();
+    givenSetting(true);
+    const result = await rejectForRework({
+      decisionId: "dec-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "Alice",
+      comment: "add a chamfer",
+    });
+    expect(result).toEqual({ success: true });
+  });
+
+  /**
+   * Fails open, deliberately. This is a process preference, not a security
+   * control — the permission, the group membership and the one-vote
+   * compare-and-swap are all enforced separately and are unaffected by it. A
+   * database blip should not stop a legitimate approver working.
+   */
+  it("permits self-approval when the settings read fails", async () => {
+    givenDecision();
+    tableResults["tenants"] = { data: null, error: { message: "timeout" } };
+    expect(await processDecision(selfApprove)).toMatchObject({ success: true });
+  });
+});

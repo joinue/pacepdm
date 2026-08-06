@@ -266,24 +266,19 @@ Nothing is now entirely unwalked, but the coverage is uneven: this pass read
 routes and schema rather than exercising flows against real data. Anything
 depending on volume, concurrency, or a populated vault is still unproven.
 
-### 4. Self-approval — settled 2026-08-06, needs building
+### ~~4. Self-approval is still permitted~~ Settled and built 2026-08-06
 
-**Decided:** permitted by default, with a tenant setting (`blockSelfApproval`)
-an admin can turn on. Reasoning in
-[`../decisions/self-approval.md`](../decisions/self-approval.md) — briefly, a
-hard block deadlocks a team this size and gets worked around by asking a
-colleague to click approve on something they have not read, which is worse.
+Permitted by default, with a tenant setting (`blockSelfApproval`) an admin can
+turn on under Admin → Settings → Change Control. Reasoning in
+[`../decisions/self-approval.md`](../decisions/self-approval.md).
 
-**What is left is the implementation**, not the decision:
-
-- Add `blockSelfApproval` to the settings allowlist in `/api/settings` and to
-  the admin settings screen.
-- Enforce in `processDecision` and `rejectForRework` (decider vs
-  `request.requestedById`) **and** on the direct ECO status path, which bypasses
-  the approval engine entirely when no workflow is assigned. That second path is
-  the one finding 2 was about — a rule applied to one of two paths that need it
-  is the most common defect shape in this codebase.
-- The refusal must name the setting, or it reads as a bug to whoever hits it.
+Enforced in [`src/lib/self-approval.ts`](../../src/lib/self-approval.ts), called
+from **both** decision paths — the approval engine and the direct ECO status
+update. The second is the one that matters: no tenant is seeded with an ECO
+workflow, so `findWorkflowForTrigger` falls through and almost every ECO is
+decided without the engine ever running. Gating only the engine would have left
+the setting looking enforced and doing nothing, which is this plan's finding 2
+happening a second time.
 
 ---
 

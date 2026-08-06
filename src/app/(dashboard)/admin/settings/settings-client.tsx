@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Save, Building2, HardDrive, FileType, Bell, Hash } from "lucide-react";
+import { Save, Building2, HardDrive, FileType, Bell, Hash, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
@@ -31,6 +31,7 @@ export interface TenantSettings {
   partNumberMode: "AUTO" | "MANUAL";
   partNumberPrefix: string;
   partNumberPadding: number;
+  blockSelfApproval: boolean;
 }
 
 const DEFAULT_SETTINGS: TenantSettings = {
@@ -44,6 +45,9 @@ const DEFAULT_SETTINGS: TenantSettings = {
   partNumberMode: "AUTO",
   partNumberPrefix: "PRT-",
   partNumberPadding: 5,
+  // Off by default. A hard block deadlocks a small team — see
+  // docs/decisions/self-approval.md.
+  blockSelfApproval: false,
 };
 
 export function SettingsClient({
@@ -201,6 +205,35 @@ export function SettingsClient({
                 Prepended to auto-generated release numbers (e.g., REL-001)
               </p>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Change control */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="w-4 h-4 text-primary" />
+              Change Control
+            </CardTitle>
+            <CardDescription>Who may decide a change order</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <Checkbox
+                checked={settings.blockSelfApproval}
+                onCheckedChange={(v) => updateSetting("blockSelfApproval", !!v)}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium">Block self-approval</p>
+                <p className="text-xs text-muted-foreground">
+                  Stop an approver from approving a change order or request they raised themselves.
+                  Off by default, because a small team can deadlock on it — with one approver at
+                  their desk, the change waits. Turn it on once there are reliably two people who
+                  can decide.
+                </p>
+              </div>
+            </label>
           </CardContent>
         </Card>
 
