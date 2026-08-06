@@ -190,12 +190,25 @@ describe("POST /api/parts/import — reserved revision letters", () => {
    * as "2 rows did not import" when all of them did.
    */
   it("keeps warned rows out of the failed count", async () => {
+    // Three rows, one of each outcome: one warned-but-landed, one clean, one
+    // genuinely rejected. Each counter must see only its own.
     const body = await (
-      await POST(csv(`${HEADER}\nPN-1,Bracket,S\nPN-2,Housing,BAD CATEGORY`))
+      await POST(csv(`${HEADER}\nPN-1,Bracket,S\nPN-2,Housing,B\n,NoNumber,A`))
     ).json();
     expect(body.warned).toBe(1);
-    expect(body.failed).toBe(0);
+    expect(body.failed).toBe(1);
     expect(body.inserted).toBe(2);
+    expect(body.total).toBe(3);
+
+    const [warned, clean, rejected] = body.results;
+    expect(warned).toMatchObject({
+      action: "inserted",
+      warning: expect.stringContaining("Y14.35"),
+    });
+    expect(clean.warning).toBeUndefined();
+    expect(rejected).toMatchObject({ action: "failed", error: "Missing Part Number" });
+    // A failed row carries no warning — it never got as far as being assessed.
+    expect(rejected.warning).toBeUndefined();
   });
 
   it("warns on an updated row as well as an inserted one", async () => {
