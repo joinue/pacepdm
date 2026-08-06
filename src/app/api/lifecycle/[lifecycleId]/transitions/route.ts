@@ -180,11 +180,18 @@ export async function DELETE(
       return NextResponse.json({ error: "Lifecycle not found" }, { status: 404 });
     }
 
-    await db
+    // An approval workflow assignment keyed on this transition pins it.
+    const { error: deleteError } = await db
       .from("lifecycle_transitions")
       .delete()
       .eq("id", transitionId)
       .eq("lifecycleId", lifecycleId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete transition: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

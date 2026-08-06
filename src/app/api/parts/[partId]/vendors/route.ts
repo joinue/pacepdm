@@ -122,7 +122,17 @@ export async function DELETE(
       .eq("partId", partId)
       .single();
 
-    await db.from("part_vendors").delete().eq("id", vendorId).eq("partId", partId);
+    const { error: removeError } = await db
+      .from("part_vendors")
+      .delete()
+      .eq("id", vendorId)
+      .eq("partId", partId);
+    if (removeError) {
+      return NextResponse.json(
+        { error: `Could not remove vendor: ${removeError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

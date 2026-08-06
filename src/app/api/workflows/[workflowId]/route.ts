@@ -126,7 +126,18 @@ export async function DELETE(
 
       // Drop the assignments so it's no longer wired to any transition
       // or ECO trigger — archiving means "don't use for new requests".
-      await db.from("approval_workflow_assignments").delete().eq("workflowId", workflowId);
+      // Checked, because an archive that left the assignments in place would
+      // report success while the workflow kept firing on every transition.
+      const { error: assignmentsError } = await db
+        .from("approval_workflow_assignments")
+        .delete()
+        .eq("workflowId", workflowId);
+      if (assignmentsError) {
+        return NextResponse.json(
+          { error: `Could not clear workflow assignments: ${assignmentsError.message}` },
+          { status: 409 }
+        );
+      }
 
       await logAudit({
         tenantId: tenantUser.tenantId,
@@ -144,11 +155,17 @@ export async function DELETE(
       });
     }
 
-    await db
+    const { error: deleteError } = await db
       .from("approval_workflows")
       .delete()
       .eq("id", workflowId)
       .eq("tenantId", tenantUser.tenantId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete workflow: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

@@ -162,7 +162,17 @@ export async function DELETE(
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 423 });
     }
 
-    await db.from("part_files").delete().eq("partId", partId).eq("fileId", fileId);
+    const { error: unlinkError } = await db
+      .from("part_files")
+      .delete()
+      .eq("partId", partId)
+      .eq("fileId", fileId);
+    if (unlinkError) {
+      return NextResponse.json(
+        { error: `Could not unlink file: ${unlinkError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

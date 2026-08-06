@@ -104,7 +104,17 @@ export async function DELETE(
       return NextResponse.json({ error: "Group not found" }, { status: 404 });
     }
 
-    await db.from("approval_group_members").delete().eq("groupId", groupId).eq("userId", userId);
+    const { error: removeError } = await db
+      .from("approval_group_members")
+      .delete()
+      .eq("groupId", groupId)
+      .eq("userId", userId);
+    if (removeError) {
+      return NextResponse.json(
+        { error: `Could not remove member: ${removeError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

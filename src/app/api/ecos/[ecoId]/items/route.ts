@@ -343,7 +343,17 @@ export async function DELETE(
       return NextResponse.json({ error: "Can only remove items from DRAFT ECOs" }, { status: 400 });
     }
 
-    await db.from("eco_items").delete().eq("id", itemId).eq("ecoId", ecoId);
+    const { error: deleteError } = await db
+      .from("eco_items")
+      .delete()
+      .eq("id", itemId)
+      .eq("ecoId", ecoId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not remove item: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

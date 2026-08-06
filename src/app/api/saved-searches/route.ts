@@ -1,4 +1,4 @@
-import { withTenant } from "@/lib/api-route";
+import { withTenant, conflict } from "@/lib/api-route";
 import { v4 as uuid } from "uuid";
 import { z, nonEmptyString } from "@/lib/validation";
 
@@ -44,6 +44,11 @@ export const POST = withTenant({ body: SaveSearchSchema }, async ({ db, tenantUs
 export const DELETE = withTenant({ body: DeleteSearchSchema }, async ({ db, tenantUser, body }) => {
   // Scoped to the author as well as the tenant: a shared search is visible
   // to everyone in the tenant, but only its author may remove it.
-  await db.from("saved_searches").delete().eq("id", body.searchId).eq("userId", tenantUser.id);
+  const { error } = await db
+    .from("saved_searches")
+    .delete()
+    .eq("id", body.searchId)
+    .eq("userId", tenantUser.id);
+  if (error) throw conflict(`Could not delete saved search: ${error.message}`);
   return { success: true };
 });

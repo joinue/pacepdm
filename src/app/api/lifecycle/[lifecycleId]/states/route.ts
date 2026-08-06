@@ -245,7 +245,15 @@ export async function DELETE(
       );
     }
 
-    await db.from("lifecycle_states").delete().eq("id", stateId);
+    // A transition referencing this state pins it. The file check above does
+    // not cover that, so the error is the only thing that would catch it.
+    const { error: deleteError } = await db.from("lifecycle_states").delete().eq("id", stateId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete state: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

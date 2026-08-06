@@ -101,11 +101,17 @@ export async function DELETE(request: NextRequest) {
 
     const db = getServiceClient();
 
-    await db
+    const { error: deleteError } = await db
       .from("approval_workflow_assignments")
       .delete()
       .eq("id", assignmentId)
       .eq("tenantId", tenantUser.tenantId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete assignment: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

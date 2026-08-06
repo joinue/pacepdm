@@ -80,9 +80,28 @@ export async function DELETE(
       });
     }
 
-    // Pristine — safe to remove.
-    await db.from("approval_group_members").delete().eq("groupId", groupId);
-    await db.from("approval_groups").delete().eq("id", groupId);
+    // Pristine — safe to remove. Both deletes are checked: the group row is
+    // referenced by workflow steps and historical decisions, so a stale
+    // reference the counts above missed surfaces here as a RESTRICT violation
+    // rather than a success message and an audit row for a group still present.
+    const { error: membersError } = await db
+      .from("approval_group_members")
+      .delete()
+      .eq("groupId", groupId);
+    if (membersError) {
+      return NextResponse.json(
+        { error: `Could not remove group members: ${membersError.message}` },
+        { status: 409 }
+      );
+    }
+
+    const { error: groupError } = await db.from("approval_groups").delete().eq("id", groupId);
+    if (groupError) {
+      return NextResponse.json(
+        { error: `Could not delete group: ${groupError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

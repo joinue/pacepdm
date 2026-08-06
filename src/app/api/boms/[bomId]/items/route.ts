@@ -517,7 +517,17 @@ export async function DELETE(
       .eq("id", itemId)
       .single();
 
-    await db.from("bom_items").delete().eq("id", itemId).eq("bomId", bomId);
+    const { error: deleteError } = await db
+      .from("bom_items")
+      .delete()
+      .eq("id", itemId)
+      .eq("bomId", bomId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete item: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

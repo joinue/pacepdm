@@ -3,7 +3,7 @@
 **Started:** 2026-08-05 · **Last updated:** 2026-08-05 · **Status:** phase 1 complete
 
 <!-- plan-metrics
-unchecked-delete: 20-->
+unchecked-delete: 0-->
 
 A workflow-by-workflow audit against the **live database**, not against the
 migration files or the tests. Prompted by `eco_items.bomId`: the column, the
@@ -184,15 +184,30 @@ some inputs is not read-only.**
 
 ## What is left
 
-### 1. Burn down `unchecked-delete` — 20 sites
+### ~~1. Burn down `unchecked-delete` — 20 sites~~ Done 2026-08-06
 
-Baselined, so the ratchet stops new ones. Most are on CASCADE tables or are
-pre-checked, which is why only the folder one had a live consequence — but
-each needs the two-line check before its audit row can be trusted.
+All 20 now bind `{ error }` and refuse before the audit row: a 409 carrying
+the database's own message on the unwrapped routes, `conflict(...)` on the two
+that are already on `withTenant`.
 
-```bash
-node scripts/lint-conventions.mjs --list unchecked-delete
-```
+The original note said most were on CASCADE tables or pre-checked. Reading
+them, four had a real gap the pre-check could not cover, and they are the ones
+worth remembering:
+
+- **`lifecycle/[lifecycleId]/states`** checks that no _file_ sits in the state,
+  but a transition referencing it also pins it. Nothing else would have caught
+  that.
+- **`lifecycle/[lifecycleId]`** deletes transitions, states and the lifecycle
+  in sequence. A failure partway used to report success, leaving a lifecycle
+  with no states — which renders as an empty dropdown rather than as an error.
+- **`workflows/[workflowId]` archive** drops the assignments so the workflow
+  stops firing. Discarding that error reported "archived" while it went on
+  triggering on every transition.
+- **`workflows/[workflowId]/steps`** re-orders the remaining steps immediately
+  after the delete, so a failed delete meant re-ordering around a step that was
+  still there.
+
+The lint rule stays; the ratchet is what stops the next one.
 
 ### 2. Turn the dead-permission scan into a lint rule
 

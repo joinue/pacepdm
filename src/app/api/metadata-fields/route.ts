@@ -77,8 +77,18 @@ export const DELETE = withTenant(
 
     // lint-conventions-allow: child-table-direct-query — parent resolved above through
     // the scoped client, which 404s on another tenant's fieldId before we reach here.
-    await db.from("metadata_values").delete().eq("fieldId", body.fieldId);
-    await db.from("metadata_fields").delete().eq("id", body.fieldId);
+    //
+    // Values first, because they are RESTRICT against the field. Both results
+    // are checked: a discarded error here would report a deleted field that is
+    // still on every form, and audit-log the deletion besides.
+    const { error: valuesError } = await db
+      .from("metadata_values")
+      .delete()
+      .eq("fieldId", body.fieldId);
+    if (valuesError) throw conflict(`Could not delete field values: ${valuesError.message}`);
+
+    const { error: fieldError } = await db.from("metadata_fields").delete().eq("id", body.fieldId);
+    if (fieldError) throw conflict(`Could not delete field: ${fieldError.message}`);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

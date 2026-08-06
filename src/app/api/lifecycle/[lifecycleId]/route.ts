@@ -130,10 +130,40 @@ export async function DELETE(
       );
     }
 
-    // Delete transitions, states, then lifecycle
-    await db.from("lifecycle_transitions").delete().eq("lifecycleId", lifecycleId);
-    await db.from("lifecycle_states").delete().eq("lifecycleId", lifecycleId);
-    await db.from("lifecycles").delete().eq("id", lifecycleId);
+    // Delete transitions, states, then lifecycle — children first, because
+    // both are RESTRICT against the parent. Each step is checked and bails on
+    // failure: a partial teardown that reported success would leave a
+    // lifecycle with no states, which renders as an empty state dropdown
+    // rather than as an error anyone could act on.
+    const { error: transitionsError } = await db
+      .from("lifecycle_transitions")
+      .delete()
+      .eq("lifecycleId", lifecycleId);
+    if (transitionsError) {
+      return NextResponse.json(
+        { error: `Could not delete transitions: ${transitionsError.message}` },
+        { status: 409 }
+      );
+    }
+
+    const { error: statesError } = await db
+      .from("lifecycle_states")
+      .delete()
+      .eq("lifecycleId", lifecycleId);
+    if (statesError) {
+      return NextResponse.json(
+        { error: `Could not delete states: ${statesError.message}` },
+        { status: 409 }
+      );
+    }
+
+    const { error: lifecycleError } = await db.from("lifecycles").delete().eq("id", lifecycleId);
+    if (lifecycleError) {
+      return NextResponse.json(
+        { error: `Could not delete lifecycle: ${lifecycleError.message}` },
+        { status: 409 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

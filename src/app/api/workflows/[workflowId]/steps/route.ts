@@ -131,7 +131,20 @@ export async function DELETE(
       return NextResponse.json({ error: "Workflow not found" }, { status: 404 });
     }
 
-    await db.from("approval_workflow_steps").delete().eq("id", stepId).eq("workflowId", workflowId);
+    // A decision row on an in-flight request references this step, so a step
+    // can be pinned. Bailing here beats the re-ordering below running against
+    // a step that is still present.
+    const { error: deleteError } = await db
+      .from("approval_workflow_steps")
+      .delete()
+      .eq("id", stepId)
+      .eq("workflowId", workflowId);
+    if (deleteError) {
+      return NextResponse.json(
+        { error: `Could not delete step: ${deleteError.message}` },
+        { status: 409 }
+      );
+    }
 
     // Re-order remaining steps
     const { data: remaining } = await db
