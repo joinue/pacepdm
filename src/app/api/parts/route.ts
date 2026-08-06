@@ -20,6 +20,8 @@ const CreatePartSchema = z.object({
   weight: z.number().nullable().optional(),
   weightUnit: z.string().optional(),
   unitCost: z.number().nullable().optional(),
+  /** Engineering estimate. Always writable — see lib/cost-source.ts. */
+  estimatedCost: z.number().nullable().optional(),
   currency: z.string().optional(),
   unit: z.string().optional(),
   notes: optionalString,
@@ -120,6 +122,7 @@ export async function POST(request: NextRequest) {
       weight: body.weight ?? null,
       weightUnit: body.weightUnit || "kg",
       unitCost: body.unitCost ?? null,
+      estimatedCost: body.estimatedCost ?? null,
       currency: body.currency || "USD",
       unit: body.unit || "EA",
       notes: body.notes ?? null,

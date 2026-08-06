@@ -18,6 +18,10 @@ const SETTINGS_KEYS = [
   // default — see docs/decisions/self-approval.md for why a hard block is the
   // wrong default for a team this size.
   "blockSelfApproval",
+  // "OPEN" (default) or "LOCKED". When LOCKED, `parts.unitCost` is read-only
+  // in the app so only a source of cost truth writes it; `estimatedCost` stays
+  // open either way. See docs/decisions/erp-ownership.md.
+  "costSource",
 ] as const;
 
 const UpdateSettingsSchema = z.object({

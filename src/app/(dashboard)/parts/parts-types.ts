@@ -14,6 +14,8 @@ export interface Part {
   weight: number | null;
   weightUnit: string;
   unitCost: number | null;
+  /** Engineering estimate; always editable. See docs/decisions/erp-ownership.md. */
+  estimatedCost: number | null;
   currency: string;
   unit: string;
   thumbnailUrl: string | null;

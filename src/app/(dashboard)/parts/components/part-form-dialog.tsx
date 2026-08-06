@@ -44,6 +44,11 @@ interface PartFormDialogProps {
   onOpenChange: (open: boolean) => void;
   editingPart: Part | null;
   partNumberMode: "AUTO" | "MANUAL";
+  /**
+   * LOCKED when the tenant has a connected source of cost truth, which makes
+   * `unitCost` read-only here. An affordance only — the route enforces it.
+   */
+  costSource?: "OPEN" | "LOCKED";
   onSaved: () => void;
 }
 
@@ -52,8 +57,10 @@ export function PartFormDialog({
   onOpenChange,
   editingPart,
   partNumberMode,
+  costSource = "OPEN",
   onSaved,
 }: PartFormDialogProps) {
+  const costLocked = costSource === "LOCKED";
   const [formData, setFormData] = useState({
     partNumber: "",
     name: "",
@@ -61,6 +68,7 @@ export function PartFormDialog({
     category: "MANUFACTURED",
     material: "",
     unitCost: "",
+    estimatedCost: "",
     unit: "EA",
     notes: "",
   });
@@ -108,6 +116,7 @@ export function PartFormDialog({
           category: editingPart.category,
           material: editingPart.material || "",
           unitCost: editingPart.unitCost != null ? String(editingPart.unitCost) : "",
+          estimatedCost: editingPart.estimatedCost != null ? String(editingPart.estimatedCost) : "",
           unit: editingPart.unit,
           notes: editingPart.notes || "",
         });
@@ -120,6 +129,7 @@ export function PartFormDialog({
           category: "MANUFACTURED",
           material: "",
           unitCost: "",
+          estimatedCost: "",
           unit: "EA",
           notes: "",
         });
@@ -184,6 +194,7 @@ export function PartFormDialog({
     const payload: Record<string, unknown> = {
       ...formData,
       unitCost: formData.unitCost ? parseFloat(formData.unitCost) : null,
+      estimatedCost: formData.estimatedCost ? parseFloat(formData.estimatedCost) : null,
       description: formData.description || null,
       material: formData.material || null,
       notes: formData.notes || null,
@@ -401,6 +412,21 @@ export function PartFormDialog({
                 />
               </div>
               <div className="space-y-1">
+                <Label htmlFor="part-estimated-cost" className="text-xs">
+                  Est. Cost ($)
+                </Label>
+                <Input
+                  id="part-estimated-cost"
+                  type="number"
+                  value={formData.estimatedCost}
+                  onChange={(e) => setFormData({ ...formData, estimatedCost: e.target.value })}
+                  placeholder="0.00"
+                  className="h-8 text-sm"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="space-y-1">
                 <Label htmlFor="part-unit-cost" className="text-xs">
                   Unit Cost ($)
                 </Label>
@@ -409,11 +435,17 @@ export function PartFormDialog({
                   type="number"
                   value={formData.unitCost}
                   onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
-                  placeholder="0.00"
+                  placeholder={costLocked ? "Set by cost system" : "0.00"}
                   className="h-8 text-sm"
                   min="0"
                   step="0.01"
+                  disabled={costLocked}
                 />
+                {costLocked && (
+                  <p className="text-2xs text-muted-foreground">
+                    Locked — set by the connected cost system. Put your own figure in Est. Cost.
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="part-unit" className="text-xs">

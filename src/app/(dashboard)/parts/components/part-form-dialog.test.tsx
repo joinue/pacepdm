@@ -369,3 +369,76 @@ describe("PartFormDialog — after saving", () => {
     expect(saveButton()).toBeEnabled();
   });
 });
+
+/**
+ * Two cost fields, and the difference is authority rather than precision.
+ * `estimatedCost` is an engineer's figure and is always writable;
+ * `unitCost` is the real number and goes read-only once the tenant has a
+ * connected cost system. See docs/decisions/erp-ownership.md.
+ */
+describe("PartFormDialog — cost fields", () => {
+  it("offers both cost fields", () => {
+    renderDialog();
+    expect(field("Est. Cost ($)")).toBeInTheDocument();
+    expect(field("Unit Cost ($)")).toBeInTheDocument();
+  });
+
+  it("leaves both editable when cost is owned here", () => {
+    renderDialog({ costSource: "OPEN" });
+    expect(field("Unit Cost ($)")).toBeEnabled();
+    expect(field("Est. Cost ($)")).toBeEnabled();
+  });
+
+  /**
+   * The estimate stays open in both modes. Locking it too would leave an
+   * engineer with nowhere to record a figure, which is the failure that made
+   * a single relabelled field the wrong answer.
+   */
+  it("locks only the authoritative field when an external system owns cost", () => {
+    renderDialog({ costSource: "LOCKED" });
+    expect(field("Unit Cost ($)")).toBeDisabled();
+    expect(field("Est. Cost ($)")).toBeEnabled();
+  });
+
+  it("says where to put a figure instead when unit cost is locked", () => {
+    renderDialog({ costSource: "LOCKED" });
+    expect(screen.getByText(/put your own figure in est\. cost/i)).toBeInTheDocument();
+  });
+
+  it("sends both costs as numbers", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.type(field("Name"), "Bracket");
+    await user.type(field("Est. Cost ($)"), "3.50");
+    await user.type(field("Unit Cost ($)"), "4.25");
+    await user.click(saveButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedRequest().body).toMatchObject({ estimatedCost: 3.5, unitCost: 4.25 });
+  });
+
+  it("sends null for a cost left blank, not zero", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.type(field("Name"), "Bracket");
+    await user.click(saveButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedRequest().body.estimatedCost).toBeNull();
+    expect(savedRequest().body.unitCost).toBeNull();
+  });
+
+  it("fills both from the part being edited", async () => {
+    renderDialog({
+      editingPart: { ...existingPart, unitCost: 4.25, estimatedCost: 3.5 } as Part,
+    });
+    await waitFor(() => expect(field("Unit Cost ($)")).toHaveValue(4.25));
+    expect(field("Est. Cost ($)")).toHaveValue(3.5);
+  });
+
+  it("shows an empty box rather than 'null' for a part with no estimate", async () => {
+    renderDialog({ editingPart: { ...existingPart, estimatedCost: null } as Part });
+    await waitFor(() => expect(partNumberField()).toHaveValue("PN-1042"));
+    expect(field("Est. Cost ($)")).toHaveValue(null);
+  });
+});

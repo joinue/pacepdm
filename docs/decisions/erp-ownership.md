@@ -72,9 +72,36 @@ dropped, for one reason: the BOM rollup needs a number before the item master
 import lands, and a rollup that is structurally correct and entirely zero is not
 useful for sanity-checking an imported structure.
 
-> **Not yet reflected in the UI.** The field is still labelled "Unit Cost ($)"
-> with no qualifier, which is exactly the ambiguity this decision exists to
-> remove. Tracked in
+### Two fields, because relabelling one serves only tenants with an ERP
+
+A part carries **`estimatedCost`** and **`unitCost`**, and the difference is
+authority rather than precision.
+
+| Field           | Who writes it                          | When cost is locked |
+| --------------- | -------------------------------------- | ------------------- |
+| `estimatedCost` | any engineer                           | still editable      |
+| `unitCost`      | an engineer, or an ERP sync once built | read-only           |
+
+The tenant setting `costSource` decides: `OPEN` (default) or `LOCKED`.
+
+The earlier plan was to relabel `unitCost` as an estimate and stop. That works
+here and fails everyone else: a team with no ERP has no other place to record
+what a part actually costs, so calling their only cost field an estimate makes
+it useless to them. Two fields serve both — PACE locks `unitCost` and defers to
+NetSuite; a tenant without an ERP leaves it open and it is simply their cost.
+
+`bom_items.unitCost` is deliberately **not** split. A line-level override is a
+judgement about one use of a part rather than about the part, so it is an
+estimate by nature. Splitting it too would produce four numbers per line and no
+way to reason about which the rollup used.
+
+Added by [`migration-052`](../../supabase/migrations/migration-052-estimated-cost.sql).
+
+> **The rollup does not yet use `estimatedCost`.** It reads `bom_items.unitCost`
+> only, so a part priced solely by estimate still contributes nothing to a
+> total. When that fallback is added it **must report how many lines it came
+> from** — a total silently mixing real cost with guesses reads as a quotable
+> number and is not one. Tracked in
 > [`../plans/cad-erp-integration.md`](../plans/cad-erp-integration.md).
 
 Two costing systems drift, and the ERP one is the one Finance believes. The

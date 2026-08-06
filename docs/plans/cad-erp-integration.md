@@ -172,14 +172,24 @@ decide what an option line means to NetSuite — most likely: push the base
 configuration only, and let order entry add the selected variant. Worth
 settling with whoever owns the NetSuite side before the push is built.
 
-**3. `parts.unitCost` and `parts.currency` duplicate NetSuite costing.**
-**Settled 2026-08-06: NetSuite owns cost; the PACE field is an engineering
-estimate and is kept**, because the BOM rollup needs a number before the item
-master lands and an all-zero rollup cannot sanity-check an imported structure.
-Nothing in PACE may ever present its cost as authoritative or push it to
-NetSuite — see [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
-**Still to do: relabel the field in the UI**, which today says "Unit Cost ($)"
-with no qualifier.
+**~~3. `parts.unitCost` and `parts.currency` duplicate NetSuite costing.~~
+Settled and mostly built 2026-08-06.** NetSuite owns cost. A part now carries
+**two** fields — `estimatedCost` (always writable, an engineer's figure) and
+`unitCost` (the real number, read-only once the tenant sets `costSource` to
+`LOCKED`). Relabelling the single field was rejected: it serves a tenant with an
+ERP and leaves everyone else with no place to record cost at all. Migration 052;
+reasoning in [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
+
+**One piece deliberately left, and it is the one that matters most for
+trusting a number:** the rollup still reads `bom_items.unitCost` only. It does
+not fall back to the part's `unitCost`, let alone its `estimatedCost`, so a part
+priced only by estimate contributes nothing to a total today.
+
+When that fallback is added it **must report how many lines it came from**. A
+rollup that silently mixes real cost with guesses reads as a quotable figure and
+is not one. The engine already counts `itemsMissingCost` and surfaces it, so the
+shape exists — this needs a second counter and a per-line basis, resolved in the
+rollup route where the parts are joined rather than inside the pure engine.
 
 **4. No machine-to-machine auth.** Every route resolves a browser session via
 `getApiTenantUser`. The only exception is the shared `CRON_SECRET` bearer check

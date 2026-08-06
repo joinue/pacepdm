@@ -32,6 +32,7 @@ export interface TenantSettings {
   partNumberPrefix: string;
   partNumberPadding: number;
   blockSelfApproval: boolean;
+  costSource: "OPEN" | "LOCKED";
 }
 
 const DEFAULT_SETTINGS: TenantSettings = {
@@ -48,6 +49,8 @@ const DEFAULT_SETTINGS: TenantSettings = {
   // Off by default. A hard block deadlocks a small team — see
   // docs/decisions/self-approval.md.
   blockSelfApproval: false,
+  // Open unless the tenant has a source of cost truth to defer to.
+  costSource: "OPEN",
 };
 
 export function SettingsClient({
@@ -234,6 +237,31 @@ export function SettingsClient({
                 </p>
               </div>
             </label>
+            <Separator />
+            <div className="space-y-2">
+              <Label>Cost source</Label>
+              <Select
+                value={settings.costSource}
+                onValueChange={(v) =>
+                  updateSetting("costSource", (v ?? "OPEN") as "OPEN" | "LOCKED")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="OPEN">PACE — unit cost is edited here</SelectItem>
+                  <SelectItem value="LOCKED">
+                    External system — unit cost is read-only here
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Choose &ldquo;External system&rdquo; when an ERP owns cost. Unit cost becomes
+                read-only so nothing typed here can overwrite it, and engineers use Est. Cost
+                instead. Until a sync is connected, unit cost will simply stay empty.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

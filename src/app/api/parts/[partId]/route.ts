@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { getCostSource, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
 import { z, parseBody, optionalString } from "@/lib/validation";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
 
@@ -18,6 +19,8 @@ const UpdatePartSchema = z.object({
   weight: z.number().nullable().optional(),
   weightUnit: z.string().optional(),
   unitCost: z.number().nullable().optional(),
+  /** Engineering estimate. Always writable — see lib/cost-source.ts. */
+  estimatedCost: z.number().nullable().optional(),
   currency: z.string().optional(),
   unit: z.string().optional(),
   notes: optionalString,
@@ -188,6 +191,18 @@ export async function PUT(
       .single();
     if (!existing) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
+
+    // `unitCost` is the authoritative figure. When the tenant has locked it,
+    // only a connected cost system writes it — an estimate typed into a form
+    // must not be able to overwrite what Finance believes. `estimatedCost` is
+    // always writable, and the refusal says so, because otherwise the answer to
+    // "then where do I put my number" is nowhere.
+    if (body.unitCost !== undefined) {
+      const costSource = await getCostSource(db, tenantUser.tenantId);
+      if (costSource === "LOCKED") {
+        return NextResponse.json({ error: UNIT_COST_LOCKED_MESSAGE }, { status: 403 });
+      }
     }
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };

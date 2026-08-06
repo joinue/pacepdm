@@ -70,6 +70,9 @@ export default function PartsPage() {
   const detailRequestSeq = useRef(0);
   const user = useTenantUser();
   const [partNumberMode, setPartNumberMode] = useState<"AUTO" | "MANUAL">("AUTO");
+  // OPEN unless the tenant has a connected source of cost truth. Only a UI
+  // affordance — the parts route enforces it. See lib/cost-source.ts.
+  const [costSource, setCostSource] = useState<"OPEN" | "LOCKED">("OPEN");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -242,11 +245,12 @@ export default function PartsPage() {
 
   // Tenant part-number mode. A failure here is non-fatal — the form falls
   // back to AUTO — so this read deliberately does not surface an error.
-  const { data: settingsData } = useFetch<{ settings?: { partNumberMode?: string } }>(
-    "/api/settings"
-  );
+  const { data: settingsData } = useFetch<{
+    settings?: { partNumberMode?: string; costSource?: string };
+  }>("/api/settings");
   useEffect(() => {
     if (settingsData?.settings?.partNumberMode === "MANUAL") setPartNumberMode("MANUAL");
+    if (settingsData?.settings?.costSource === "LOCKED") setCostSource("LOCKED");
   }, [settingsData]);
 
   // Auto-select part from URL query param
@@ -630,6 +634,7 @@ export default function PartsPage() {
         onOpenChange={setShowCreate}
         editingPart={editingPart}
         partNumberMode={partNumberMode}
+        costSource={costSource}
         onSaved={() => {
           reloadParts();
           if (editingPart && selectedPartId === editingPart.id) loadPartDetail(editingPart.id);
