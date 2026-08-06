@@ -243,9 +243,104 @@ function isClientComponent(path, source) {
   return /^\s*["']use client["']/m.test(source);
 }
 
+// ─── Whole-codebase check: unenforced permissions ───────────────────────────
+//
+// `ECO_APPROVE` was defined in PERMISSIONS, described in PERMISSION_INFO,
+// granted to Admin and Manager in DEFAULT_ROLES, and asserted in
+// permissions.test.ts — and read by nothing. It looked enforced from every
+// angle a reader would check. What made it matter rather than merely untidy:
+// `findWorkflowForTrigger` falls through to a direct status update when no
+// workflow is assigned, and no tenant is seeded with an ECO workflow. So one
+// Engineer could take an ECO DRAFT → APPROVED alone and implement it, which
+// releases parts, freezes files, and releases the BOM revisions it carries.
+//
+// A permission the server never reads is worse than no permission: the roles
+// screen offers it, an admin grants it believing it does something, and the
+// gate they think they configured is not there.
+//
+// This cannot be a per-file rule — the declaration and its enforcement are
+// never in the same file — so it runs once over the whole scan and reports
+// against the declaration line in permissions.ts.
+
+const PERMISSIONS_FILE = "src/lib/permissions.ts";
+
+/**
+ * Where a permission may be enforced. Deliberately narrow, and the narrowness
+ * is the interesting part: **a server component is server-side.** Classifying
+ * by directory alone reported `audit.view` as unenforced the first time this
+ * scan was run, because its gate is a check inside `admin/audit/page.tsx` that
+ * runs before any query, with no endpoint to bypass. That was a false positive
+ * on a permission that is genuinely enforced.
+ *
+ * Client components are excluded on purpose. `usePermissions().can(...)` hides
+ * buttons, which is a UX affordance and not a control — a permission enforced
+ * *only* there is exactly the hole this rule exists to find.
+ */
+function isEnforcementSite(path, source) {
+  if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
+  if (path === PERMISSIONS_FILE) return false; // declaration, not enforcement
+  if (path.startsWith("src/app/api/")) return true;
+  if (path.startsWith("src/lib/")) return true;
+  if (path === "src/proxy.ts" || path === "src/middleware.ts") return true;
+  // Server components: a page or layout with no "use client" directive.
+  if (/\/(page|layout)\.tsx$/.test(path)) return !/^\s*["']use client["']/m.test(source);
+  return false;
+}
+
+/** Parse `PERMISSIONS` from permissions.ts into [{ constName, value, line }]. */
+function declaredPermissions() {
+  const source = readFileSync(join(ROOT, ...PERMISSIONS_FILE.split("/")), "utf8");
+  const block = source.match(/export const PERMISSIONS = \{([\s\S]*?)\n\} as const;/);
+  if (!block) {
+    console.error(
+      `lint:conventions — could not read PERMISSIONS from ${PERMISSIONS_FILE}.\n` +
+        "The unenforced-permission rule cannot run. Fix the parser rather than removing the rule."
+    );
+    process.exit(1);
+  }
+  const startLine = source.slice(0, block.index).split("\n").length;
+  const out = [];
+  block[1].split("\n").forEach((text, i) => {
+    const m = text.match(/^\s*([A-Z0-9_]+):\s*["']([^"']+)["']/);
+    if (m) out.push({ constName: m[1], value: m[2], line: startLine + i + 1 });
+  });
+  return out;
+}
+
+/**
+ * A permission counts as enforced if a server-side file names it — either
+ * through the constant (`PERMISSIONS.ECO_APPROVE`, the normal form) or as its
+ * bare string value, which is how a few older hand-rolled checks read.
+ */
+function findUnenforcedPermissions(enforcementSources) {
+  const rawLines = readFileSync(join(ROOT, ...PERMISSIONS_FILE.split("/")), "utf8").split("\n");
+  const violations = [];
+
+  for (const { constName, value, line } of declaredPermissions()) {
+    const byConst = new RegExp(String.raw`\bPERMISSIONS\.${constName}\b`);
+    const byValue = new RegExp(String.raw`["']${value.replace(/\./g, "\\.")}["']`);
+    const enforced = enforcementSources.some((s) => byConst.test(s) || byValue.test(s));
+    if (enforced) continue;
+    if (isSuppressed(rawLines, line, "unenforced-permission")) continue;
+    violations.push({
+      file: PERMISSIONS_FILE,
+      line,
+      rule: "unenforced-permission",
+      text: `${constName}: "${value}"`,
+      message:
+        "permission is granted and described but never read server-side — the roles screen " +
+        "offers a gate that does not exist. Enforce it in a route or server component, or " +
+        "remove it (docs/plans/functional-audit.md finding 2)",
+    });
+  }
+  return violations;
+}
+
 // ─── Scan ───────────────────────────────────────────────────────────────────
 
 const violations = [];
+/** Comment-stripped sources of every file where a permission may be enforced. */
+const enforcementSources = [];
 
 for (const dir of SCAN_DIRS) {
   for (const file of walk(join(ROOT, dir))) {
@@ -253,6 +348,8 @@ for (const dir of SCAN_DIRS) {
     const raw = readFileSync(file, "utf8");
     const rawLines = raw.split("\n");
     const source = stripComments(raw);
+
+    if (isEnforcementSite(relPath, raw)) enforcementSources.push(source);
 
     for (const rule of RULES) {
       if (!rule.applies(relPath, raw)) continue;
@@ -270,6 +367,9 @@ for (const dir of SCAN_DIRS) {
     }
   }
 }
+
+// Runs after the per-file scan because it needs every enforcement site at once.
+violations.push(...findUnenforcedPermissions(enforcementSources));
 
 if (process.argv.includes("--update")) {
   writeBaseline(BASELINE_PATH, violations);

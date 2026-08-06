@@ -167,11 +167,12 @@ same _thing_.
 
 ## Guards added
 
-| Guard                        | Catches                                                                 |
-| ---------------------------- | ----------------------------------------------------------------------- |
-| `npm run probe:schema`       | columns, NOT NULL, tables and RPCs that disagree with the live database |
-| `unchecked-delete` lint rule | a discarded `delete()` result — finding 5's shape                       |
-| `status-flows.test.ts`       | the SQL and TypeScript copies of the ECO-release rule drifting          |
+| Guard                             | Catches                                                                 |
+| --------------------------------- | ----------------------------------------------------------------------- |
+| `npm run probe:schema`            | columns, NOT NULL, tables and RPCs that disagree with the live database |
+| `unchecked-delete` lint rule      | a discarded `delete()` result — finding 5's shape                       |
+| `unenforced-permission` lint rule | a permission granted and described but never read — finding 2's shape   |
+| `status-flows.test.ts`            | the SQL and TypeScript copies of the ECO-release rule drifting          |
 
 `probe:schema` deliberately never writes. An intermediate version confirmed
 findings by posting a row that omitted the column under test, assuming a
@@ -209,13 +210,30 @@ worth remembering:
 
 The lint rule stays; the ratchet is what stops the next one.
 
-### 2. Turn the dead-permission scan into a lint rule
+### ~~2. Turn the dead-permission scan into a lint rule~~ Done 2026-08-06
 
-The scan that found finding 2 is a throwaway script. A permission with zero
-server-side references should fail the build. Note the trap that produced a
-false positive first time: **a server component is server-side.** Classifying
-by directory reported `audit.view` as unenforced when its gate is a
-`page.tsx` check that runs before any query, with no endpoint to bypass.
+`unenforced-permission` in `scripts/lint-conventions.mjs`. It parses
+`PERMISSIONS` and fails on any entry no server-side file reads, by constant or
+by bare string value, reporting against the declaration line.
+
+It could not be a per-file rule — a permission and its enforcement are never in
+the same file — so it runs once over the whole scan.
+
+Two things it deliberately does:
+
+- **Server components count.** This is the trap the earlier scan fell into:
+  classifying by directory reported `audit.view` as unenforced when its gate is
+  a check in `audit-log/page.tsx` that runs before any query, with no endpoint
+  to bypass. Verified by disabling that branch — `AUDIT_VIEW` immediately
+  false-positives, so the branch is load-bearing rather than defensive.
+- **Client components do not count.** `usePermissions().can(...)` hides
+  buttons, which is an affordance and not a control. A permission enforced only
+  there is precisely the hole this rule exists to find, so counting it would
+  defeat the rule.
+
+Currently zero violations. Verified it can fail by adding a throwaway
+permission and watching it fire at the right line — a rule that cannot fail
+proves nothing.
 
 ### 3. Audit what this pass did not reach
 
