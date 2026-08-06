@@ -161,12 +161,24 @@ draft. A draft supersedes nothing.
 - **No serial or as-built tracking.** Serial _effectivity_ exists; recording
   what actually shipped on a given unit does not. Required for regulated or
   serial-tracked manufacturing, ignorable otherwise. Segment decision.
-- **BOM revision is free text on the PUT route.** `revise` sequences it
-  properly, but `PUT /api/boms/[bomId]` still accepts any string, so a BOM
-  can be dragged to a revision the sequencer would never produce.
-- **`usesReservedLetter` is unused.** It exists to warn on imported data
-  using letters ASME reserves (`S`, `Z`). Nothing calls it; the parts
-  importer is the obvious caller.
+- **~~BOM revision is free text on the PUT route.~~ Closed 2026-08-06.**
+  `PUT /api/boms/[bomId]` now refuses a revision `nextRevision` cannot
+  continue from, and refuses reserved letters outright. It deliberately still
+  allows a manual correction — fixing a typo, or matching what the ERP already
+  calls this revision — because what causes harm is a value with no successor,
+  not a value that was typed rather than sequenced. Without this the _next_
+  revise fails, on a released BOM, with no obvious connection to the edit.
+- **~~`usesReservedLetter` is unused.~~ Closed 2026-08-06.** Called by
+  `POST /api/parts/import`, which now returns a per-row `warning` alongside
+  `error` and a `warned` count, surfaced in the import results dialog. Warned
+  rather than rejected on purpose: a part at revision `S` is a fact about
+  QuickBooks, not a mistake the importer gets to refuse. The warning is what
+  tells the importer's user why revising that part will later ask for the next
+  revision by hand.
+
+  Note the distinction the response now draws: `error` means the row did not
+  land, `warning` means it did. Folding warnings into `failed` would make the
+  summary read "2 rows did not import" when all of them did — pinned by a test.
 
 ---
 

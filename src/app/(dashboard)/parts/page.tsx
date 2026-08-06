@@ -88,12 +88,14 @@ export default function PartsPage() {
     inserted: number;
     updated: number;
     failed: number;
+    warned: number;
     total: number;
     results: {
       row: number;
       partNumber: string;
       action: "inserted" | "updated" | "failed";
       error?: string;
+      warning?: string;
     }[];
   } | null>(null);
 
@@ -361,8 +363,13 @@ export default function PartsPage() {
         return;
       }
       setImportResult(data);
-      const summary = `${data.inserted} added, ${data.updated} updated${data.failed ? `, ${data.failed} failed` : ""}`;
-      if (data.failed > 0) {
+      const summary =
+        `${data.inserted} added, ${data.updated} updated` +
+        `${data.failed ? `, ${data.failed} failed` : ""}` +
+        `${data.warned ? `, ${data.warned} with warnings` : ""}`;
+      // A warning still opens the results dialog, but it is not a failure —
+      // the rows landed. Only the toast tone differs.
+      if (data.failed > 0 || data.warned > 0) {
         toast.warning(summary);
       } else {
         toast.success(summary);

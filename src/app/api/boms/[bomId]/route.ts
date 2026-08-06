@@ -6,6 +6,7 @@ import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
 import { captureBomSnapshot } from "@/lib/bom-snapshot";
 import { z, uuid } from "@/lib/validation";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
+import { nextRevision, usesReservedLetter } from "@/lib/revision";
 
 // Partial-update shape: any of name/status/revision can be supplied. The
 // state-transition rule (only valid next-states allowed) is enforced after
@@ -63,6 +64,17 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) =
  */
 const GOVERNED_BOM_STATUSES = new Set(["RELEASED", "OBSOLETE"]);
 
+/** Render the first few offending lines into something a user can go and fix. */
+function describeUnresolvedLines(
+  lines: Array<{ itemNumber: string | null; name: string | null }>
+): string {
+  const shown = lines
+    .slice(0, 5)
+    .map((l) => `${l.itemNumber ?? "?"} ${l.name ?? "(unnamed)"}`.trim())
+    .join(", ");
+  return lines.length > 5 ? `${shown}, and ${lines.length - 5} more` : shown;
+}
+
 export const PUT = withTenant(
   { permission: PERMISSIONS.FILE_EDIT, body: UpdateBomSchema, params: ParamsSchema },
   async ({ db, tenantUser, params, body, permissions }) => {
@@ -105,13 +117,94 @@ export const PUT = withTenant(
         );
       }
 
+      // Every line must resolve to something the rest of the system can
+      // identify before the BOM leaves DRAFT.
+      //
+      // `bom_items.partId` is nullable and sits beside plain `partNumber` /
+      // `name` / `vendor` columns, so a line can be pure free text. That
+      // flexibility is genuinely useful while drafting — you type what the
+      // drawing says and resolve it later — and useless afterwards: a
+      // free-text line cannot map to an ERP item, cannot be found by
+      // where-used, and rolls up no cost.
+      //
+      // The check belongs on the transition rather than at sync time. At sync
+      // time the error reaches whoever is running the integration, months
+      // later, about a BOM they did not write. Here it reaches the person who
+      // typed the line, while they still remember what they meant.
+      //
+      // A sub-assembly line legitimately has no `partId` — it carries
+      // `linkedBomId` and points at another BOM. Requiring `partId` outright
+      // would make every nested assembly unreleasable, so the rule is
+      // "resolves to a part **or** to a BOM".
+      //
+      // Only DRAFT → IN_REVIEW is gated. Coming back the other way
+      // (IN_REVIEW → DRAFT, APPROVED → DRAFT) stays open, or a BOM that
+      // acquired a bad line could never be sent back to be fixed.
+      if (existing.status === "DRAFT" && body.status === "IN_REVIEW") {
+        // lint-conventions-allow: child-table-direct-query — bom_items has no
+        // tenantId. The parent BOM is resolved through the scoped client
+        // above, which 404s on another tenant's bomId before this runs.
+        const { data: unresolved } = await db
+          .from("bom_items")
+          .select("itemNumber, name")
+          .eq("bomId", bomId)
+          .is("partId", null)
+          .is("linkedBomId", null)
+          .order("sortOrder");
+
+        const lines = (unresolved ?? []) as Array<{
+          itemNumber: string | null;
+          name: string | null;
+        }>;
+        if (lines.length > 0) {
+          throw badRequest(
+            `${lines.length} line${lines.length === 1 ? "" : "s"} on this BOM ` +
+              `${lines.length === 1 ? "is" : "are"} not linked to a part or a ` +
+              `sub-assembly: ${describeUnresolvedLines(lines)}. Link each one to a ` +
+              `part before sending the BOM for review.`
+          );
+        }
+      }
+
       updates.status = body.status;
       changes.status = `${existing.status} → ${body.status}`;
     }
 
     if (body.revision !== undefined) {
-      updates.revision = body.revision;
-      changes.revision = body.revision;
+      // The revision has to stay in a scheme `nextRevision` can continue from.
+      //
+      // `revise` sequences properly, but this route took any string at all, so
+      // a BOM could be dragged to a value the sequencer would never produce —
+      // and then the *next* revise fails, on a released BOM, with no obvious
+      // connection to the edit that caused it. Refusing here puts the error
+      // next to the typo.
+      //
+      // Accepted schemes are alphabetic (ASME Y14.35), plain integer, and
+      // prefixed-integer (`R2`, `Rev09`) — see src/lib/revision.ts. That
+      // deliberately still allows a manual correction, which is legitimate:
+      // fixing a typo, or matching what the ERP already calls this revision.
+      // What it refuses is a value with no successor.
+      const revision = body.revision.trim();
+      if (!revision) {
+        throw badRequest("Revision cannot be empty.");
+      }
+      if (usesReservedLetter(revision)) {
+        throw badRequest(
+          `Revision "${revision}" uses a letter ASME Y14.35 reserves ` +
+            `(I, O, Q, S, X and Z read as 1, 0, O, 5, experimental and 2). ` +
+            `Use the next letter in sequence instead.`
+        );
+      }
+      if (!nextRevision(revision)) {
+        throw badRequest(
+          `Revision "${revision}" is not in a format that can be sequenced, so ` +
+            `the next revision after it could not be worked out. Use letters ` +
+            `(A, B, C…), a number (1, 2, 3…), or a prefixed number (R1, R2…).`
+        );
+      }
+
+      updates.revision = revision;
+      changes.revision = revision;
     }
 
     const { data: bom, error } = await db

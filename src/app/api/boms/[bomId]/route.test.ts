@@ -160,3 +160,138 @@ describe("BOM release requires ECO_APPROVE", () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * A line with no `partId` and no `linkedBomId` is free text. That is fine
+ * while drafting and useless afterwards: it cannot map to an ERP item, cannot
+ * be found by where-used, and rolls up no cost. The gate is on the transition
+ * so the error reaches whoever typed the line rather than whoever runs the
+ * integration months later.
+ */
+describe("leaving DRAFT requires every line to resolve", () => {
+  const draftBom = { ...approvedBom, status: "DRAFT" };
+
+  beforeEach(() => {
+    mockTenantUser.current = engineer;
+    tableResults.boms = { data: draftBom, error: null };
+  });
+
+  it("refuses DRAFT → IN_REVIEW while a line is pure free text", async () => {
+    tableResults.bom_items = {
+      data: [{ itemNumber: "003", name: "M6 washer" }],
+      error: null,
+    };
+    const res = await PUT(req({ status: "IN_REVIEW" }), { params });
+    expect(res.status).toBe(400);
+    const { error } = await res.json();
+    // The message has to name the line, or it is not actionable.
+    expect(error).toContain("003 M6 washer");
+    expect(error).toMatch(/not linked to a part/i);
+  });
+
+  it("allows the transition when every line resolves", async () => {
+    tableResults.bom_items = { data: [], error: null };
+    const res = await PUT(req({ status: "IN_REVIEW" }), { params });
+    expect(res.status).not.toBe(400);
+  });
+
+  it("counts a sub-assembly line as resolved", async () => {
+    // A sub-assembly carries linkedBomId and no partId. The query filters on
+    // both being null, so such a line never reaches the error path — this
+    // pins the intent, because requiring partId outright would make every
+    // nested assembly unreleasable.
+    tableResults.bom_items = { data: [], error: null };
+    expect((await PUT(req({ status: "IN_REVIEW" }), { params })).status).not.toBe(400);
+  });
+
+  it("names at most five lines, then says how many more", async () => {
+    tableResults.bom_items = {
+      data: Array.from({ length: 8 }, (_, i) => ({
+        itemNumber: `00${i + 1}`,
+        name: `Part ${i + 1}`,
+      })),
+      error: null,
+    };
+    const { error } = await (await PUT(req({ status: "IN_REVIEW" }), { params })).json();
+    expect(error).toContain("001 Part 1");
+    expect(error).toContain("005 Part 5");
+    expect(error).not.toContain("006 Part 6");
+    expect(error).toContain("and 3 more");
+  });
+
+  it("handles an unnamed line without rendering 'null'", async () => {
+    tableResults.bom_items = { data: [{ itemNumber: null, name: null }], error: null };
+    const { error } = await (await PUT(req({ status: "IN_REVIEW" }), { params })).json();
+    expect(error).toContain("? (unnamed)");
+    expect(error).not.toContain("null");
+  });
+
+  /**
+   * Coming back the other way has to stay open, or a BOM that acquired a bad
+   * line could never be sent back to be fixed — which is the only place it
+   * *can* be fixed.
+   */
+  it("does not gate IN_REVIEW → DRAFT", async () => {
+    tableResults.boms = { data: { ...approvedBom, status: "IN_REVIEW" }, error: null };
+    tableResults.bom_items = { data: [{ itemNumber: "003", name: "M6 washer" }], error: null };
+    expect((await PUT(req({ status: "DRAFT" }), { params })).status).not.toBe(400);
+  });
+
+  it("does not gate APPROVED → DRAFT", async () => {
+    tableResults.bom_items = { data: [{ itemNumber: "003", name: "M6 washer" }], error: null };
+    expect((await PUT(req({ status: "DRAFT" }), { params })).status).not.toBe(400);
+  });
+
+  it("does not gate a rename", async () => {
+    tableResults.bom_items = { data: [{ itemNumber: "003", name: "M6 washer" }], error: null };
+    expect((await PUT(req({ name: "Renamed" }), { params })).status).not.toBe(400);
+  });
+});
+
+/**
+ * `revise` sequences the revision properly; this route used to take any
+ * string, so a BOM could be dragged to a value the sequencer would never
+ * produce — and the *next* revise would then fail, on a released BOM, with no
+ * obvious connection to the edit that caused it.
+ */
+describe("revision has to stay sequenceable", () => {
+  beforeEach(() => {
+    mockTenantUser.current = engineer;
+    tableResults.boms = { data: approvedBom, error: null };
+  });
+
+  // The prefix in the prefixed scheme may contain hyphens, so `A-1` and
+  // `Rev-1` sequence to `A-2` and `Rev-2` rather than being rejected.
+  it.each(["B", "AA", "2", "09", "R2", "Rev09", "A-1", "Rev-1"])("accepts %s", async (revision) => {
+    expect((await PUT(req({ revision }), { params })).status).not.toBe(400);
+  });
+
+  it.each(["final", "B (draft)", "1.2", "--", "2A", "A1B"])(
+    "refuses %s, which has no successor",
+    async (revision) => {
+      const res = await PUT(req({ revision }), { params });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/cannot be sequenced|not in a format/i);
+    }
+  );
+
+  it("refuses an empty revision", async () => {
+    expect((await PUT(req({ revision: "   " }), { params })).status).toBe(400);
+  });
+
+  /**
+   * ASME Y14.35 excludes these because they misread: I and O as 1 and 0, Q as
+   * O, S as 5, Z as 2, and X means experimental. The importer tolerates them
+   * as a fact about a source system; a value typed here is ours.
+   */
+  it.each(["I", "O", "Q", "S", "X", "Z"])("refuses reserved letter %s", async (revision) => {
+    const res = await PUT(req({ revision }), { params });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("Y14.35");
+  });
+
+  it("trims before storing, so ' B ' is not a new revision", async () => {
+    const res = await PUT(req({ revision: "  B  " }), { params });
+    expect(res.status).not.toBe(400);
+  });
+});

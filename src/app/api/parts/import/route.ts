@@ -4,6 +4,7 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { parseCsvRecords } from "@/lib/csv";
+import { usesReservedLetter } from "@/lib/revision";
 
 /**
  * POST /api/parts/import
@@ -80,6 +81,36 @@ interface RowResult {
   partNumber: string;
   action: "inserted" | "updated" | "failed";
   error?: string;
+  /**
+   * The row landed, but something about it is worth a second look. Distinct
+   * from `error`, which means the row did not land at all.
+   */
+  warning?: string;
+}
+
+/**
+ * Non-fatal observations about a row that is otherwise fine.
+ *
+ * Currently one: a revision using a letter ASME Y14.35 reserves. The standard
+ * excludes I, O, Q, S, X and Z because they misread — I and O as 1 and 0, Q as
+ * O, S as 5, Z as 2, and X means experimental.
+ *
+ * Warned rather than rejected, deliberately. An imported part at revision `S`
+ * is a fact about the source system, not a mistake this importer gets to
+ * refuse — QuickBooks does not know about Y14.35 and the part exists either
+ * way. What it does mean is that `nextRevision` cannot sequence it, so the
+ * first person to revise that part will be told to set the revision by hand,
+ * and this is where they find out why.
+ */
+function warningsFor(parsed: ParsedRow): string | undefined {
+  if (parsed.revision && usesReservedLetter(parsed.revision)) {
+    return (
+      `Revision "${parsed.revision}" uses a letter ASME Y14.35 reserves ` +
+      `(I, O, Q, S, X, Z). Imported as-is, but it cannot be sequenced — ` +
+      `revising this part will ask for the next revision by hand.`
+    );
+  }
+  return undefined;
 }
 
 function parseOptionalNumber(value: string): number | null {
@@ -244,6 +275,7 @@ export async function POST(request: NextRequest) {
     let inserted = 0;
     let updated = 0;
     let failed = 0;
+    let warned = 0;
 
     // Process rows sequentially. Parallelizing would be faster but
     // would fight the per-row error reporting (we want a stable order
@@ -265,6 +297,8 @@ export async function POST(request: NextRequest) {
 
       const parsed = built.row;
       const existing = existingById.get(parsed.partNumber);
+      const warning = warningsFor(parsed);
+      if (warning) warned++;
 
       try {
         if (existing) {
@@ -290,7 +324,12 @@ export async function POST(request: NextRequest) {
             })
             .eq("id", existing.id);
           if (error) throw error;
-          results.push({ row: rowNumber, partNumber: parsed.partNumber, action: "updated" });
+          results.push({
+            row: rowNumber,
+            partNumber: parsed.partNumber,
+            action: "updated",
+            warning,
+          });
           updated++;
         } else {
           const { error } = await db.from("parts").insert({
@@ -314,7 +353,12 @@ export async function POST(request: NextRequest) {
             updatedAt: now,
           });
           if (error) throw error;
-          results.push({ row: rowNumber, partNumber: parsed.partNumber, action: "inserted" });
+          results.push({
+            row: rowNumber,
+            partNumber: parsed.partNumber,
+            action: "inserted",
+            warning,
+          });
           inserted++;
         }
       } catch (err) {
@@ -335,13 +379,14 @@ export async function POST(request: NextRequest) {
       action: "parts.import",
       entityType: "part",
       entityId: "bulk",
-      details: { inserted, updated, failed, total: rows.length },
+      details: { inserted, updated, failed, warned, total: rows.length },
     });
 
     return NextResponse.json({
       inserted,
       updated,
       failed,
+      warned,
       total: rows.length,
       results,
     });

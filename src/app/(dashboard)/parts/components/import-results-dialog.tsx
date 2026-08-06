@@ -15,12 +15,15 @@ interface ImportResult {
   inserted: number;
   updated: number;
   failed: number;
+  /** Rows that landed but carry something worth a second look. */
+  warned: number;
   total: number;
   results: {
     row: number;
     partNumber: string;
     action: "inserted" | "updated" | "failed";
     error?: string;
+    warning?: string;
   }[];
 }
 
@@ -51,6 +54,12 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
                     , <span className="text-destructive font-medium">{result.failed} failed</span>
                   </>
                 )}
+                {result.warned > 0 && (
+                  <>
+                    ,{" "}
+                    <span className="text-warning font-medium">{result.warned} with warnings</span>
+                  </>
+                )}
               </>
             )}
           </DialogDescription>
@@ -63,7 +72,7 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
                   <th className="py-1.5 pr-2 w-12">Row</th>
                   <th className="py-1.5 pr-2">Part Number</th>
                   <th className="py-1.5 pr-2 w-24">Action</th>
-                  <th className="py-1.5 pr-2">Error</th>
+                  <th className="py-1.5 pr-2">Detail</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,7 +94,12 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
                         {r.action}
                       </Badge>
                     </td>
-                    <td className="py-1.5 pr-2 text-destructive">{r.error || ""}</td>
+                    {/* A row has an error or a warning, never both: an error
+                        means it did not land, and a warning is about a row
+                        that did. */}
+                    <td className={`py-1.5 pr-2 ${r.error ? "text-destructive" : "text-warning"}`}>
+                      {r.error || r.warning || ""}
+                    </td>
                   </tr>
                 ))}
               </tbody>

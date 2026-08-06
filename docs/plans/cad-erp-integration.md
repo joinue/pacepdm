@@ -141,14 +141,22 @@ Migration 051 adds `externalId` to `parts` and `boms`; **it is written but not
 applied**, and `bom_items` deliberately does not get one (a line is identified
 by its parent BOM plus its `partId`, not independently). → gated below.
 
-**2. BOM lines can be free text.** `bom_items.partId` is nullable and sits
-beside plain `partNumber` / `name` / `vendor` columns. A line with no `partId`
-cannot map to a NetSuite item. The flexibility is genuinely useful while
-drafting, so the fix is not to drop the columns — it is to require every line
-to be resolved to a part before the BOM can leave `DRAFT`. Enforce it in the
-`DRAFT → IN_REVIEW` transition, not at sync time, so the error surfaces to the
-person who can fix it. _Partly closed: `POST /api/boms/import` always resolves
-`partId`, so imported BOMs are already clean. Hand-entered ones are not._
+**~~2. BOM lines can be free text.~~ Closed 2026-08-06.**
+`DRAFT → IN_REVIEW` on `PUT /api/boms/[bomId]` now refuses while any line has
+neither a `partId` nor a `linkedBomId`, naming the first five offenders so the
+error is actionable.
+
+Three things worth knowing before changing it:
+
+- **The rule is "resolves to a part _or_ to a BOM".** A sub-assembly line
+  legitimately has no `partId` — it carries `linkedBomId`. Requiring `partId`
+  outright would make every nested assembly unreleasable, which is most of the
+  imported set.
+- **Only the forward transition is gated.** IN_REVIEW → DRAFT and
+  APPROVED → DRAFT stay open, or a BOM that acquired a bad line could never be
+  sent back to the one place it can be fixed.
+- **The columns stay.** Free text while drafting is the useful part; the gate
+  is on leaving DRAFT, not on typing.
 
 **2a. End items are already modelled, and map straight across.** Migration
 044 added `parts.isEndItem` — declared, never inferred — which is the same
@@ -250,9 +258,8 @@ to be reconstructed from `concat(partNumber, '-', revision)`.
    longer have.
 4. **Add `externalId`** (item 2 under decisions above). More urgent after the
    revision split, since part numbers no longer match the ERP verbatim.
-5. **Require `partId` on every line before `DRAFT → IN_REVIEW`.** Cheap, and it
-   is what makes an eventual ERP push possible at all. The importer already
-   guarantees it for imported BOMs; this closes hand-entered ones.
+5. ~~**Require `partId` on every line before `DRAFT → IN_REVIEW`.**~~ Done
+   2026-08-06 — see [NetSuite side](#netsuite-side) item 2.
 6. **Resolve the `unitCost` ownership question** — relabel or remove.
 7. **Stop here and stay manual.** PACE BOM export → NetSuite CSV import
    assistant is a legitimate steady state for an equipment line releasing a
