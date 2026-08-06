@@ -16,6 +16,6 @@ One file per decision that constrains future work. Each explains the context, th
 | [`perceived-performance.md`](perceived-performance.md)     | Cache the session per request, mutate optimistically, suppress your own realtime echo, and shape skeletons like the page they replace. |
 | [`system-roles.md`](system-roles.md)                       | Four seeded roles, what Manager must never hold, and why a change to `DEFAULT_ROLES` needs a backfill migration.                       |
 | [`supplier-access.md`](supplier-access.md)                 | Part shares resolve live and default to released files; release shares are frozen. The two must never converge.                        |
-| [`erp-ownership.md`](erp-ownership.md)                     | NetSuite owns part numbers and cost; PACE owns revision and approval. They join on `externalId`, never on part number.                 |
+| [`erp-ownership.md`](erp-ownership.md)                     | One owner per fact, chosen per tenant. Systems join on `externalId`, never on part number. PACE cost never flows outward.              |
 | [`self-approval.md`](self-approval.md)                     | An approver may approve their own request by default; a tenant admin can turn it off with one setting.                                 |
 | [`retention-and-formats.md`](retention-and-formats.md)     | Nothing in the trash is destroyed on a timer, neutral-format exports are prompted not required, and production is the dev database.    |

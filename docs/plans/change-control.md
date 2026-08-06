@@ -133,23 +133,59 @@ Three things worth knowing before touching it:
   database on an ordinary page view. Guarded by a `seen` set, not just by the
   iteration cap.
 
-### 3. Effectivity is stored but never read — **the top item in this plan**
+### 3. Effectivity is stored but never read — **re-scoped 2026-08-06, and it shrank**
 
-This is the one that delivers "which version of the machine did this customer
-get", which is a job PACE owns outright and cannot currently do. The columns are
-typed, indexed and editable, and **nothing queries them**, so the capability is
-sitting one query away and unavailable.
+The columns are typed, indexed and editable, and nothing queries them. The
+original framing of this item was "add the two queries that were impossible
+before". **That framing was wrong**, and correcting it is most of the value
+here.
 
-- "What is in effect on 1 March?" — needs a date-filtered view of implemented ECOs
-- "Which BOM revision covers unit 47?" — needs serial effectivity resolved against release history
+**Two of four effectivity types cannot be computed by this app, ever.**
 
-Neither is hard now that the data is typed. Both were impossible before.
+| Effectivity   | Can PACE answer "is it in effect?"                    |
+| ------------- | ----------------------------------------------------- |
+| Immediate     | **Yes** — from the implementation date                |
+| From a date   | **Yes**                                               |
+| From a serial | **No** — needs the unit's serial, which is in the ERP |
+| On use-up     | **No** — needs inventory levels, which are in the ERP |
 
-**Why this matters more than it looks.** A machine has versions and a timeline,
-and together they identify the configuration a customer received — which is what
-service documentation, a spares list, and the blast radius of a change all rest
-on. Do not confuse it with as-built genealogy ("which physical bracket is in
-unit 47"), which lives in the NetSuite work order and is deliberately not built
+`SERIAL` was in the original list as "resolve serial effectivity against release
+history". It cannot be resolved here at all: PACE does not know serials.
+
+Worse, the common case in equipment manufacture is missing from the enum
+entirely. **A change usually takes effect when existing stock of the old design
+is used up** — not on a date, not at a serial. Production keeps building the old
+one until the shelf is empty. That is an inventory fact, so the app cannot
+compute it either, and today there is no honest way to record it: the options
+are Immediate, a date, or a serial, so anyone with a use-up change picks a
+fictional date or leaves it blank.
+
+**So the work is:**
+
+1. **Add `USE_UP` to `EffectivityType`.** One enum value, one label, a CHECK
+   constraint update. It makes the field record something true, which it
+   currently cannot for the most common case.
+2. **Answer only what is answerable.** For `IMMEDIATE` and `DATE`, resolve which
+   revision was in effect on a given date. For `SERIAL` and `USE_UP`, display
+   the recorded intent and say where the answer lives — _"from serial N1S-0470 —
+   check the unit in your ERP"_. **Do not calculate.** A query that looks right
+   and is wrong in practice is worse than no query.
+3. **Do not remove `DATE` or `SERIAL`.** PACE mostly will not use them, but this
+   is a multi-tenant product: serial effectivity is standard in aerospace and
+   medical devices, and date cutoffs are normal wherever a regulation or a
+   supplier contract sets one. Removing an option because one tenant does not
+   use it is the mistake
+   [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md) was rewritten
+   to prevent.
+
+**Related, undocumented, and worth deciding separately:** `implement_eco` does
+not read effectivity at all. Implementing an ECO releases the carried revision
+immediately, whatever the ECO says about when it takes effect. That is
+defensible — releasing a design is not the same as switching production — but
+nothing says so, and `RELEASED` therefore does not mean "being built".
+
+Do **not** confuse any of this with as-built genealogy ("which physical bracket
+is in unit 47"), which lives in the ERP work order and is deliberately not built
 here. The two get conflated constantly; the split is in
 [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 
