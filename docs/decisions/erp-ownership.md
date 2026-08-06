@@ -79,40 +79,81 @@ useful for sanity-checking an imported structure.
 
 Two costing systems drift, and the ERP one is the one Finance believes. The
 mitigation is labelling, not arithmetic — nothing in PACE should ever present
-its own cost as authoritative, and nothing should push it to NetSuite.
+its own cost as authoritative.
 
-## Why there is no as-built / serial record here
+### Sync direction, when it is built
 
-PDM owns what the design **is** at each revision, and when that revision takes
-effect. ERP owns what was actually **consumed** to build a specific unit.
+**NetSuite → PACE is the goal. PACE → NetSuite must never carry cost.**
 
-NetSuite's work order records which components were issued against serial #47,
-and that is the as-built record. Building a second one in PACE would be a worse
-copy of it, fed by hand, that drifts from the real one.
+Pulling real cost down from NetSuite is the point of the eventual integration:
+it is what turns the BOM rollup from an estimate into a number worth quoting.
+That direction is wanted.
 
-Serial _effectivity_ stays here, because it is a property of the change: "this
-revision applies from unit 100 onward" is a decision the ECO makes. What
-actually shipped is a fact the work order records.
+The reverse is not, and the asymmetry is the whole reason cost has a single
+owner. A PACE `unitCost` is an engineer's estimate typed into a form. If it can
+reach NetSuite it can overwrite what Finance believes, and nobody would see it
+happen — the field looks identical on both sides. So the estimate is a local
+convenience that gets _replaced_ by the real figure, never one that competes
+with it.
 
-**The caveat worth knowing before relying on this:** it holds only if the
-NetSuite work orders capture component genealogy, which needs serialized or
-lot-tracked inventory on the _components_, not just on the finished machine. If
-only the top-level unit is serialized, then "which bracket revision is in unit
-47" is answerable from effectivity plus the ECO date rather than from a hard
-record — the difference between naming the affected units and naming a date
-range. That is normally acceptable for equipment. It is worth confirming with
-whoever configures NetSuite, and it does not change anything in this repo.
+## Which machine went to which customer: two different questions
+
+These sound like one question and are not, and confusing them is how a PDM ends
+up rebuilding half an ERP.
+
+| Question                                          | Answered by                                | Owned by     |
+| ------------------------------------------------- | ------------------------------------------ | ------------ |
+| "What **type** of machine did this customer get?" | The BOM revision in effect when it shipped | **PACE**     |
+| "Which **physical parts** went into unit #47?"    | The work order that issued them            | **NetSuite** |
+
+### PACE owns the machine version and the timeline
+
+This is a first-class job here, not a gap. A machine has versions — NANO-1000S
+revision B, then C — and a timeline saying when each took effect. Together they
+answer what configuration a customer received, which is what you need for
+service documentation, for a spares list, and for scoping who is affected by a
+change.
+
+The data for it already exists and is typed: BOM revision lineage
+(`previousRevisionId` / `supersededById`), and `effectivityType` /
+`effectiveFrom` / `effectiveSerial` on the ECO.
+
+> **The data is stored and nothing reads it.** There is no query today that
+> answers "what was in effect on 1 March" or "which revision covers unit 47".
+> Both are straightforward now that the columns are typed, and both were
+> impossible before. Tracked as item 3 in
+> [`../plans/change-control.md`](../plans/change-control.md), and it is the
+> open item that delivers the capability described in this section.
+
+### NetSuite owns what was physically consumed
+
+The work order records which components were issued to build a specific serial.
+Building a second copy of that here would be fed by hand and would drift from
+the real one, so there is no as-built table in PACE and there should not be.
+
+**The limit worth knowing before relying on it:** NetSuite answers this at
+component level only if serialised or lot-tracked inventory is enabled on the
+_components_, not just on the finished machine. If only the top-level unit is
+serialised, then "which bracket is in unit 47" resolves through PACE's
+effectivity instead — which gives you the revision that _should_ be in it, and a
+date range rather than a definitive per-unit list. For equipment that is usually
+enough; for a recall it is the difference between naming units and naming a
+window. Worth confirming with whoever configures NetSuite. It changes nothing in
+this repo either way.
 
 ## What this rules out
 
 - **A part-number generator in PACE.** If one is ever added it is a placeholder
   scheme with an explicit reconciliation step, not an authority.
-- **Pushing PACE cost to NetSuite.** In any direction, ever.
+- **Any sync that carries PACE `unitCost` to NetSuite.** The other direction is
+  the goal; this one never happens.
 - **Matching parts across the two systems by part number** in any sync,
   importer, or report. Use `externalId`; if it is null, the part is not linked
   yet and that is the answer.
-- **An as-built table.** If a warranty or recall question genuinely cannot be
-  answered from NetSuite, reopen this decision rather than adding one quietly.
+- **An as-built table**, recording which physical components went into a serial.
+  That is the work order's job. It does **not** rule out answering "which
+  version of the machine did this customer get" — that is PACE's job and is
+  still to be built, above.
 
 ## Related
 

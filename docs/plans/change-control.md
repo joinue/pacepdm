@@ -133,15 +133,25 @@ Three things worth knowing before touching it:
   database on an ordinary page view. Guarded by a `seen` set, not just by the
   iteration cap.
 
-### 3. Effectivity is stored but never read
+### 3. Effectivity is stored but never read — **the top item in this plan**
 
-The columns are typed, indexed and editable, and nothing queries them. The
-questions that justified the work are still unanswered:
+This is the one that delivers "which version of the machine did this customer
+get", which is a job PACE owns outright and cannot currently do. The columns are
+typed, indexed and editable, and **nothing queries them**, so the capability is
+sitting one query away and unavailable.
 
 - "What is in effect on 1 March?" — needs a date-filtered view of implemented ECOs
-- "Which BOM shipped on unit 47?" — needs serial effectivity resolved against release history
+- "Which BOM revision covers unit 47?" — needs serial effectivity resolved against release history
 
 Neither is hard now that the data is typed. Both were impossible before.
+
+**Why this matters more than it looks.** A machine has versions and a timeline,
+and together they identify the configuration a customer received — which is what
+service documentation, a spares list, and the blast radius of a change all rest
+on. Do not confuse it with as-built genealogy ("which physical bracket is in
+unit 47"), which lives in the NetSuite work order and is deliberately not built
+here. The two get conflated constantly; the split is in
+[`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 
 ### 4. Deliberate omissions — do not "fix" these without a decision
 
@@ -158,14 +168,15 @@ draft. A draft supersedes nothing.
 
 ### 5. Smaller things the review surfaced
 
-- **~~No serial or as-built tracking.~~ Closed 2026-08-06 — will not be built.**
-  Serialisation and sales live in NetSuite, and its work order already records
-  which components were issued against a given unit. A second as-built record
-  here would be a worse copy fed by hand. Serial _effectivity_ stays, because
-  it is a property of the change rather than a fact about a unit. Full reasoning
-  and the one caveat — component-level genealogy needs serialised or lot-tracked
-  inventory on the components, not just the finished machine — in
-  [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
+- **~~No serial or as-built tracking.~~ Closed 2026-08-06 — half of it will not
+  be built, and the other half is item 3 above.** Recording which _physical_
+  components went into a serial belongs to the NetSuite work order; a copy here
+  would be fed by hand and drift. But identifying **which version of the machine
+  a customer received** is PACE's job, it is what revision lineage plus
+  effectivity is for, and it is not done — see item 3. The two are routinely
+  confused; the split, and the caveat about component-level genealogy needing
+  serialised inventory on the components rather than just the finished machine,
+  are in [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 - **~~BOM revision is free text on the PUT route.~~ Closed 2026-08-06.**
   `PUT /api/boms/[bomId]` now refuses a revision `nextRevision` cannot
   continue from, and refuses reserved letters outright. It deliberately still
