@@ -17,6 +17,8 @@ interface RollupLine {
   effectiveQuantity: number;
   unit: string;
   unitCost: number | null;
+  /** "line" | "part" | "estimate" | null — see src/lib/bom-rollup.ts. */
+  costBasis: "line" | "part" | "estimate" | null;
   extendedCost: number | null;
   depth: number;
   isSubAssembly: boolean;
@@ -36,6 +38,8 @@ interface RollupResponse {
   totalLineCount: number;
   maxDepth: number;
   itemsMissingCost: number;
+  /** Base-configuration lines priced from an engineer's estimate. */
+  itemsUsingEstimate: number;
   lines: RollupLine[];
 }
 
@@ -169,6 +173,18 @@ export function BomRollupPanel({
                 </div>
               )}
 
+              {/* A missing cost visibly understates a total. An estimate blends
+                  in: £48,000 with £8,000 of guesswork looks exactly like
+                  £48,000 of real cost. Saying so is what keeps this number from
+                  being quoted as though an ERP stood behind all of it. */}
+              {data.itemsUsingEstimate > 0 && (
+                <div className="flex items-center gap-2 text-xs text-warning bg-warning/10 rounded p-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  {data.itemsUsingEstimate} item{data.itemsUsingEstimate !== 1 ? "s" : ""} priced
+                  from an engineering estimate — not a quotable total.
+                </div>
+              )}
+
               {/* Flattened tree walk */}
               {data.lines.length > 0 && (
                 <div className="border rounded overflow-hidden">
@@ -218,6 +234,16 @@ export function BomRollupPanel({
                           </td>
                           <td className="px-2 py-1 text-right font-mono">
                             {line.unitCost !== null ? `$${line.unitCost.toFixed(2)}` : "—"}
+                            {/* Marks which figures are guesses, so the warning
+                                above is actionable rather than just alarming. */}
+                            {line.costBasis === "estimate" && (
+                              <span
+                                className="ml-1 text-3xs text-warning"
+                                title="Engineering estimate"
+                              >
+                                est.
+                              </span>
+                            )}
                           </td>
                           <td className="px-2 py-1 text-right font-mono">
                             {line.extendedCost !== null ? `$${line.extendedCost.toFixed(2)}` : "—"}

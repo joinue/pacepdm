@@ -97,12 +97,29 @@ way to reason about which the rollup used.
 
 Added by [`migration-052`](../../supabase/migrations/migration-052-estimated-cost.sql).
 
-> **The rollup does not yet use `estimatedCost`.** It reads `bom_items.unitCost`
-> only, so a part priced solely by estimate still contributes nothing to a
-> total. When that fallback is added it **must report how many lines it came
-> from** — a total silently mixing real cost with guesses reads as a quotable
-> number and is not one. Tracked in
-> [`../plans/cad-erp-integration.md`](../plans/cad-erp-integration.md).
+### What the rollup does with all this
+
+Each line's cost resolves in descending order of authority: the override typed
+on the BOM line, then the part's `unitCost`, then the part's `estimatedCost`.
+Before this the rollup read the line override **and nothing else**, so a part
+priced perfectly well in the parts library contributed zero to every total it
+appeared in — understating silently, which is the worst way for a cost to be
+wrong.
+
+The basis travels with the number, and the rollup reports
+`itemsUsingEstimate` beside the existing `itemsMissingCost`. **A total that
+mixes real cost with guesses has to say so.** A missing cost visibly
+understates; an estimate blends in — £48,000 with £8,000 of guesswork looks
+exactly like £48,000 of real cost, and that is the number somebody quotes.
+Individual lines are marked `est.` so the warning is actionable rather than
+merely alarming.
+
+Option lines are excluded from the count: only one member of a group ever
+ships, so their basis says nothing about the base configuration's total.
+
+Resolution happens in the rollup route, not in `bom-rollup.ts` — the engine is
+pure and is handed items, and the route is the only place that knows where a
+figure came from.
 
 Two costing systems drift, and the ERP one is the one Finance believes. The
 mitigation is labelling, not arithmetic — nothing in PACE should ever present

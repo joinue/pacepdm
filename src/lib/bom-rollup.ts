@@ -21,6 +21,17 @@ export interface RollupBomItem {
   unit: string;
   unitCost: number | null;
   /**
+   * Where `unitCost` came from. Resolved by the caller, which is the only
+   * place that knows — this engine is pure and is handed the number.
+   *
+   * `"estimate"` is the one that changes how a total should be read: it means
+   * the figure is an engineer's guess rather than anything an ERP stands
+   * behind. Counted into `itemsUsingEstimate` so the UI can say so, because a
+   * total silently mixing real cost with guesses reads as a quotable number
+   * and is not one.
+   */
+  costBasis?: CostBasis;
+  /**
    * Configure-to-order group ("Voltage"), or null/absent for the ordinary
    * always-included lines. A BOM holds every variant in a group — the
    * NANO-1000S carries 110V and 220V parts side by side — so exactly one
@@ -29,6 +40,18 @@ export interface RollupBomItem {
    */
   optionGroup?: string | null;
 }
+
+/**
+ * Where a line's unit cost came from, in descending order of authority.
+ *
+ *   "line"     — an override typed on this BOM line
+ *   "part"     — the part's authoritative `unitCost`
+ *   "estimate" — the part's `estimatedCost`, an engineer's figure
+ *   null       — no cost anywhere
+ *
+ * See docs/decisions/erp-ownership.md.
+ */
+export type CostBasis = "line" | "part" | "estimate" | null;
 
 export interface RollupBom {
   id: string;
@@ -50,6 +73,8 @@ export interface RollupLine {
   effectiveQuantity: number;
   unit: string;
   unitCost: number | null;
+  /** Where `unitCost` came from — see the type. */
+  costBasis: CostBasis;
   /** unitCost × effectiveQuantity, or null if no cost on this line. */
   extendedCost: number | null;
   /** Tree depth — root items are 0, sub-items are 1, etc. */
@@ -87,6 +112,16 @@ export interface RollupResult {
   lines: RollupLine[];
   /** Number of items where unitCost was null — surfaced so the UI can warn. */
   itemsMissingCost: number;
+  /**
+   * Number of base-configuration leaf items priced from an engineer's
+   * estimate rather than an authoritative cost.
+   *
+   * Surfaced for the same reason as `itemsMissingCost` and arguably a sharper
+   * one: a missing cost visibly understates a total, while an estimate blends
+   * in. A rollup reading £48,000 where £8,000 of it is guesswork looks exactly
+   * like a rollup where none of it is.
+   */
+  itemsUsingEstimate: number;
 }
 
 export class BomCycleError extends Error {
@@ -132,6 +167,7 @@ export function computeBomRollup(
   let leafItemCount = 0;
   let maxDepth = 0;
   let itemsMissingCost = 0;
+  let itemsUsingEstimate = 0;
 
   const walk = (
     bom: RollupBom,
@@ -178,6 +214,7 @@ export function computeBomRollup(
             effectiveQuantity: effectiveQty,
             unit: item.unit,
             unitCost: null,
+            costBasis: null,
             extendedCost: null,
             depth,
             isSubAssembly: true,
@@ -197,6 +234,7 @@ export function computeBomRollup(
           effectiveQuantity: effectiveQty,
           unit: item.unit,
           unitCost: null,
+          costBasis: null,
           extendedCost: null,
           depth,
           isSubAssembly: true,
@@ -224,6 +262,10 @@ export function computeBomRollup(
         leafItemCount++;
       }
       if (item.unitCost === null) itemsMissingCost++;
+      // Only base-configuration lines count. An option line is not part of any
+      // single machine's price, so folding its basis into the warning would
+      // overstate how much of `totalCost` is guesswork.
+      else if (item.costBasis === "estimate" && !optionGroup) itemsUsingEstimate++;
 
       lines.push({
         path,
@@ -236,6 +278,7 @@ export function computeBomRollup(
         effectiveQuantity: effectiveQty,
         unit: item.unit,
         unitCost: item.unitCost,
+        costBasis: item.costBasis ?? (item.unitCost === null ? null : "line"),
         extendedCost: ext,
         depth,
         isSubAssembly: false,
@@ -257,6 +300,7 @@ export function computeBomRollup(
     maxDepth,
     lines,
     itemsMissingCost,
+    itemsUsingEstimate,
   };
 }
 

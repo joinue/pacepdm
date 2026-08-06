@@ -6,6 +6,7 @@ import {
   BomCycleError,
   BomNotFoundError,
   type RollupBom,
+  type CostBasis,
 } from "@/lib/bom-rollup";
 
 /**
@@ -85,14 +86,72 @@ export async function GET(
         db
           .from("bom_items")
           .select(
-            "id, bomId, linkedBomId, itemNumber, partNumber, name, quantity, unit, unitCost, optionGroup"
+            "id, bomId, linkedBomId, partId, itemNumber, partNumber, name, quantity, unit, unitCost, optionGroup"
           )
           .in("bomId", ids)
           .order("sortOrder"),
       ]);
 
+      /**
+       * Resolve each line's cost, in descending order of authority:
+       *
+       *   1. the override typed on the BOM line
+       *   2. the part's authoritative `unitCost`
+       *   3. the part's `estimatedCost` — an engineer's figure
+       *
+       * Before this the rollup read the line override and nothing else, so a
+       * part priced perfectly well in the parts library contributed zero to
+       * every total it appeared in. That understated silently, which is the
+       * worst way for a cost to be wrong.
+       *
+       * The basis travels with the number so the engine can count how much of
+       * a total is guesswork. Resolved here rather than in `bom-rollup.ts`
+       * because the engine is pure and is handed items — this is the only
+       * place that knows where a figure came from.
+       */
+      const partIds = Array.from(
+        new Set(
+          (itemRows || []).map((i) => i.partId as string | null).filter((id): id is string => !!id)
+        )
+      );
+      const partCosts = new Map<
+        string,
+        { unitCost: number | null; estimatedCost: number | null }
+      >();
+      if (partIds.length > 0) {
+        const { data: partRows } = await db
+          .from("parts")
+          .select("id, unitCost, estimatedCost")
+          .eq("tenantId", tenantUser.tenantId)
+          .is("deletedAt", null)
+          .in("id", partIds);
+        for (const p of partRows || []) {
+          partCosts.set(p.id as string, {
+            unitCost: (p.unitCost as number | null) ?? null,
+            estimatedCost: (p.estimatedCost as number | null) ?? null,
+          });
+        }
+      }
+
+      function resolveCost(item: { unitCost: number | null; partId: string | null }): {
+        unitCost: number | null;
+        costBasis: CostBasis;
+      } {
+        if (item.unitCost !== null && item.unitCost !== undefined) {
+          return { unitCost: item.unitCost, costBasis: "line" };
+        }
+        const part = item.partId ? partCosts.get(item.partId) : undefined;
+        if (!part) return { unitCost: null, costBasis: null };
+        if (part.unitCost !== null) return { unitCost: part.unitCost, costBasis: "part" };
+        if (part.estimatedCost !== null) {
+          return { unitCost: part.estimatedCost, costBasis: "estimate" };
+        }
+        return { unitCost: null, costBasis: null };
+      }
+
       const itemsByBom = new Map<string, RollupBom["items"]>();
       for (const item of itemRows || []) {
+        const resolved = resolveCost(item as { unitCost: number | null; partId: string | null });
         const list = itemsByBom.get(item.bomId) || [];
         list.push({
           id: item.id,
@@ -103,7 +162,8 @@ export async function GET(
           name: item.name || "",
           quantity: item.quantity ?? 0,
           unit: item.unit || "EA",
-          unitCost: item.unitCost,
+          unitCost: resolved.unitCost,
+          costBasis: resolved.costBasis,
           optionGroup: item.optionGroup ?? null,
         });
         itemsByBom.set(item.bomId, list);

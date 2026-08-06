@@ -180,16 +180,18 @@ Settled and mostly built 2026-08-06.** NetSuite owns cost. A part now carries
 ERP and leaves everyone else with no place to record cost at all. Migration 052;
 reasoning in [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md).
 
-**One piece deliberately left, and it is the one that matters most for
-trusting a number:** the rollup still reads `bom_items.unitCost` only. It does
-not fall back to the part's `unitCost`, let alone its `estimatedCost`, so a part
-priced only by estimate contributes nothing to a total today.
+**The rollup now uses all of it.** Each line resolves line override → part
+`unitCost` → part `estimatedCost`, and reports `itemsUsingEstimate` beside the
+existing `itemsMissingCost`, with estimate-priced lines marked `est.` in the
+table.
 
-When that fallback is added it **must report how many lines it came from**. A
-rollup that silently mixes real cost with guesses reads as a quotable figure and
-is not one. The engine already counts `itemsMissingCost` and surfaces it, so the
-shape exists — this needs a second counter and a per-line basis, resolved in the
-rollup route where the parts are joined rather than inside the pure engine.
+Worth knowing: before this the rollup read the line override **and nothing
+else**, so a part priced perfectly well in the parts library contributed zero to
+every total it appeared in. That is a pre-existing bug this closed, not just a
+new feature — and it understated silently, which is the worst way for a cost to
+be wrong.
+
+Migration 052 applied and verified live 2026-08-06.
 
 **4. No machine-to-machine auth.** Every route resolves a browser session via
 `getApiTenantUser`. The only exception is the shared `CRON_SECRET` bearer check

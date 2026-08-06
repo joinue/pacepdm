@@ -250,3 +250,117 @@ describe("computeBomRollup — configure-to-order options", () => {
     expect(r.optionCost).toBe(0);
   });
 });
+
+// ── Cost basis ─────────────────────────────────────────────────────────────
+//
+// A part can be priced three ways, in descending order of authority: an
+// override typed on the BOM line, the part's authoritative `unitCost`, or the
+// part's `estimatedCost`. The engine is handed the resolved number and its
+// basis — the route resolves it, since only the route knows where a figure
+// came from. What the engine owes is counting how much of a total is guesswork.
+
+/** A leaf whose cost was resolved from something other than a line override. */
+function leafWithBasis(
+  id: string,
+  itemNumber: string,
+  unitCost: number | null,
+  costBasis: RollupBomItem["costBasis"],
+  quantity = 1
+): RollupBomItem {
+  return { ...leaf(id, itemNumber, `Part ${itemNumber}`, quantity, unitCost), costBasis };
+}
+
+describe("computeBomRollup — cost basis", () => {
+  it("counts nothing as estimated when every line is real", () => {
+    const root = bom("b1", "Root", [
+      leafWithBasis("i1", "1", 10, "line"),
+      leafWithBasis("i2", "2", 20, "part"),
+    ]);
+    const result = computeBomRollup("b1", mapOf(root));
+    expect(result.totalCost).toBe(30);
+    expect(result.itemsUsingEstimate).toBe(0);
+  });
+
+  it("counts the estimated lines", () => {
+    const root = bom("b1", "Root", [
+      leafWithBasis("i1", "1", 10, "part"),
+      leafWithBasis("i2", "2", 20, "estimate"),
+      leafWithBasis("i3", "3", 5, "estimate"),
+    ]);
+    const result = computeBomRollup("b1", mapOf(root));
+    expect(result.itemsUsingEstimate).toBe(2);
+    // The estimate still contributes — the point is that the total says so,
+    // not that it is withheld.
+    expect(result.totalCost).toBe(35);
+  });
+
+  it("carries the basis onto each line so the table can mark it", () => {
+    const root = bom("b1", "Root", [
+      leafWithBasis("i1", "1", 10, "part"),
+      leafWithBasis("i2", "2", 20, "estimate"),
+    ]);
+    const { lines } = computeBomRollup("b1", mapOf(root));
+    expect(lines.map((l) => l.costBasis)).toEqual(["part", "estimate"]);
+  });
+
+  /** Backwards compatible: a caller that predates the field still typechecks. */
+  it("treats an unlabelled priced line as a line override", () => {
+    const root = bom("b1", "Root", [leaf("i1", "1", "Widget", 1, 10)]);
+    const { lines, itemsUsingEstimate } = computeBomRollup("b1", mapOf(root));
+    expect(lines[0].costBasis).toBe("line");
+    expect(itemsUsingEstimate).toBe(0);
+  });
+
+  it("gives an unpriced line a null basis rather than calling it an override", () => {
+    const root = bom("b1", "Root", [leaf("i1", "1", "Widget", 1, null)]);
+    const { lines, itemsMissingCost } = computeBomRollup("b1", mapOf(root));
+    expect(lines[0].costBasis).toBeNull();
+    expect(itemsMissingCost).toBe(1);
+  });
+
+  /**
+   * Missing and estimated are different warnings and must not double-count: a
+   * line has no cost, or it has one from some source, never both.
+   */
+  it("never counts a line as both missing and estimated", () => {
+    const root = bom("b1", "Root", [
+      leaf("i1", "1", "No cost", 1, null),
+      leafWithBasis("i2", "2", 20, "estimate"),
+    ]);
+    const result = computeBomRollup("b1", mapOf(root));
+    expect(result.itemsMissingCost).toBe(1);
+    expect(result.itemsUsingEstimate).toBe(1);
+  });
+
+  it("counts estimated lines inside sub-assemblies too", () => {
+    const child = bom("b2", "Child", [leafWithBasis("i2", "1", 5, "estimate")]);
+    const root = bom("b1", "Root", [sub("s1", "1", "Sub", 2, "b2")]);
+    const result = computeBomRollup("b1", mapOf(root, child));
+    expect(result.itemsUsingEstimate).toBe(1);
+    expect(result.totalCost).toBe(10); // 5 × 2
+  });
+
+  /**
+   * An option line is not part of any single machine's price — only one member
+   * of a group ever ships — so folding its basis into the warning would
+   * overstate how much of `totalCost` is guesswork.
+   */
+  it("excludes option lines from the estimate count", () => {
+    const root = bom("b1", "Root", [
+      leafWithBasis("i1", "1", 10, "part"),
+      { ...leafWithBasis("i2", "2", 50, "estimate"), optionGroup: "Voltage" },
+    ]);
+    const result = computeBomRollup("b1", mapOf(root));
+    expect(result.itemsUsingEstimate).toBe(0);
+    expect(result.optionItemCount).toBe(1);
+  });
+
+  it("gives a sub-assembly header line no basis of its own", () => {
+    const child = bom("b2", "Child", [leafWithBasis("i2", "1", 5, "part")]);
+    const root = bom("b1", "Root", [sub("s1", "1", "Sub", 1, "b2")]);
+    const { lines } = computeBomRollup("b1", mapOf(root, child));
+    const header = lines.find((l) => l.isSubAssembly)!;
+    expect(header.costBasis).toBeNull();
+    expect(header.unitCost).toBeNull();
+  });
+});
