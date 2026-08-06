@@ -68,8 +68,16 @@ of viewer work changes that.
 Uploading a SolidWorks file with no neutral-format sibling therefore **prompts**
 — a non-blocking nudge saying the file will be 2D-preview-only, and why.
 
-> **Decided, not yet built.** The upload dialog says nothing today. Tracked in
-> [`../plans/cad-erp-integration.md`](../plans/cad-erp-integration.md).
+`needsNeutralExport` in [`vault-types.ts`](../../src/components/vault/vault-types.ts)
+decides, and the upload dialog renders the notice when it returns true.
+
+The check is on the extension of the selected file, not on whether a sibling
+export already exists — the upload dialog takes one file at a time and does not
+hold a listing of the folder, so there is nothing to compare against without an
+extra round trip on every keystroke. The cost is that someone uploading the
+STEP second sees the notice on the first file. That is the right way round to be
+wrong: a redundant nudge is ignorable, a missing one leaves a file nobody can
+open.
 
 **Why not enforce it**, refusing check-in without a STEP export: the friction
 lands on the person mid-task, and the first time somebody is in a hurry they

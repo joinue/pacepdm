@@ -27,9 +27,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, Search, AlertTriangle } from "lucide-react";
+import { Upload, Search, AlertTriangle, Box } from "lucide-react";
 import { toast } from "sonner";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { needsNeutralExport } from "./vault-types";
 
 interface DuplicateFileInfo {
   id: string;
@@ -377,6 +378,27 @@ export function UploadFileDialog({
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                 />
               </div>
+
+              {/* A native SolidWorks file can only ever show its embedded 2D
+                  bitmap — occt-import-js reads neutral formats only, so no
+                  viewer work will ever make it rotate. Said here rather than
+                  enforced: refusing the upload puts the friction on somebody
+                  mid-task, and the first person in a hurry attaches a stale
+                  STEP, which is worse than none because it looks current.
+                  See docs/decisions/retention-and-formats.md. */}
+              {file && needsNeutralExport(file.name) && (
+                <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
+                  <Box className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">This file will not preview in 3D</p>
+                    <p className="text-xs text-muted-foreground">
+                      SolidWorks files can only show their saved thumbnail. Upload a STEP export
+                      alongside it and anyone — including a supplier on a share link — can open the
+                      model. Doing it now is far easier than going back over the vault later.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="partNumber">Part Number (optional)</Label>

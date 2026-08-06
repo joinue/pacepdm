@@ -307,7 +307,9 @@ Not refactors — real missing behaviour, worth their own tickets.
 
 **SolidWorks files can never render in 3D.** `.SLDPRT`/`.SLDDRW` are proprietary OLE binaries; occt-import-js is OpenCascade and reads neutral formats only (`step`, `stp`, `iges`, `igs`, `stl`, `obj`). Only the embedded 2D preview bitmap can be extracted.
 
-**Settled 2026-08-06: prompt, do not enforce.** Uploading a SolidWorks file with no neutral-format sibling shows a non-blocking nudge saying the file will be 2D-preview-only. Enforcing it — refusing check-in without a STEP — was rejected because the friction lands mid-task, and the first person in a hurry attaches a stale STEP, which is worse than none since it looks current. See [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md). **Still to build:** the prompt itself. Doing it now is the whole point — retrofitting exports onto 500 files is manual labour, from file #7 it is free.
+**~~Settled 2026-08-06: prompt, do not enforce.~~ Built 2026-08-06.** Selecting a SolidWorks file in the upload dialog now shows a non-blocking notice that it will not preview in 3D and that a STEP export alongside it fixes that. Enforcing — refusing check-in without a STEP — was rejected because the friction lands mid-task, and the first person in a hurry attaches a stale STEP, which is worse than none since it looks current. See [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md).
+
+The decision is on the selected file's extension only, not on whether a sibling export already exists: the dialog takes one file at a time and holds no folder listing. So uploading the STEP second shows the notice on the first file. That is the right way round to be wrong — a redundant nudge is ignorable, a missing one leaves a file nobody can open.
 
 ---
 
