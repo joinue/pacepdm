@@ -34,6 +34,22 @@ function MentionInput({
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Drop any search that has been scheduled but not yet fired.
+   *
+   * Leaving the mention context only sets `showDropdown` to false; a debounced
+   * search queued by the previous keystroke would still land ~200ms later and
+   * call `setShowDropdown(true)`, re-opening a picker the user had just
+   * dismissed. Reachable by pressing Escape, hitting Enter, or typing past the
+   * query cap within the debounce window.
+   */
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, []);
+
   const searchUsers = useCallback(async (query: string) => {
     if (query.length < 1) {
       setUsers([]);
@@ -76,12 +92,14 @@ function MentionInput({
       }
     }
 
+    cancelPendingSearch();
     setShowDropdown(false);
     setMentionStart(null);
   }
 
   function selectUser(user: MentionUser) {
     if (mentionStart === null) return;
+    cancelPendingSearch();
     const textarea = textareaRef.current;
     const cursorPos = textarea?.selectionStart ?? value.length;
 
@@ -118,6 +136,7 @@ function MentionInput({
       selectUser(users[selectedIndex]);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      cancelPendingSearch();
       setShowDropdown(false);
       setMentionStart(null);
     }

@@ -323,13 +323,14 @@ export function PartFormDialog({
             {/* Core fields */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs">
+                <Label htmlFor="part-number" className="text-xs">
                   Part Number
                   {!editingPart && partNumberMode === "AUTO" && (
                     <span className="ml-1 text-muted-foreground font-normal">(optional)</span>
                   )}
                 </Label>
                 <Input
+                  id="part-number"
                   value={formData.partNumber}
                   onChange={(e) => setFormData({ ...formData, partNumber: e.target.value })}
                   placeholder={
@@ -361,8 +362,11 @@ export function PartFormDialog({
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Name</Label>
+              <Label htmlFor="part-name" className="text-xs">
+                Name
+              </Label>
               <Input
+                id="part-name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Motor Housing"
@@ -371,8 +375,11 @@ export function PartFormDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Description</Label>
+              <Label htmlFor="part-description" className="text-xs">
+                Description
+              </Label>
               <Textarea
+                id="part-description"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Optional description..."
@@ -382,8 +389,11 @@ export function PartFormDialog({
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs">Material</Label>
+                <Label htmlFor="part-material" className="text-xs">
+                  Material
+                </Label>
                 <Input
+                  id="part-material"
                   value={formData.material}
                   onChange={(e) => setFormData({ ...formData, material: e.target.value })}
                   placeholder="304 SS"
@@ -391,8 +401,11 @@ export function PartFormDialog({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Unit Cost ($)</Label>
+                <Label htmlFor="part-unit-cost" className="text-xs">
+                  Unit Cost ($)
+                </Label>
                 <Input
+                  id="part-unit-cost"
                   type="number"
                   value={formData.unitCost}
                   onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
@@ -403,8 +416,11 @@ export function PartFormDialog({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Unit</Label>
+                <Label htmlFor="part-unit" className="text-xs">
+                  Unit
+                </Label>
                 <Input
+                  id="part-unit"
                   value={formData.unit}
                   onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                   placeholder="EA"
@@ -413,8 +429,11 @@ export function PartFormDialog({
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Notes</Label>
+              <Label htmlFor="part-notes" className="text-xs">
+                Notes
+              </Label>
               <Textarea
+                id="part-notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 placeholder="Internal notes..."

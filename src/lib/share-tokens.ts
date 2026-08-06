@@ -74,13 +74,34 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
+ * The exact shape `hashPassword` writes: 16 salt bytes and a 64-byte derived
+ * key, both hex. Verification checks the stored record against this before
+ * using any of it — see `verifyPassword`.
+ */
+const STORED_HASH_FORMAT = /^[0-9a-f]{32}:[0-9a-f]{128}$/i;
+
+/**
  * Verify a password against a stored `salt:hash`. Uses timingSafeEqual
  * so incorrect passwords all take the same time to reject — no timing
  * oracle for attackers fishing for the first matching byte.
+ *
+ * The format check is load-bearing, not tidiness. Two ways a malformed
+ * column would otherwise authenticate anything:
+ *
+ *   - `Buffer.from(s, "hex")` parses leniently: it stops at the first
+ *     invalid character and returns what it had. `"nothex:nothex"` yields
+ *     two empty buffers, scrypt derives a zero-length key, and
+ *     timingSafeEqual compares nothing and answers true.
+ *   - scrypt is prefix-stable — deriving 8 bytes gives the first 8 bytes of
+ *     the 64-byte derivation. Taking `keylen` from the stored value means a
+ *     truncated hash quietly shortens the comparison instead of failing it.
+ *
+ * Both come from letting the stored record decide how much to compare. The
+ * length now comes from a record already checked against the format we write.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!STORED_HASH_FORMAT.test(stored)) return false;
   const [saltHex, hashHex] = stored.split(":");
-  if (!saltHex || !hashHex) return false;
   try {
     const salt = Buffer.from(saltHex, "hex");
     const expected = Buffer.from(hashHex, "hex");

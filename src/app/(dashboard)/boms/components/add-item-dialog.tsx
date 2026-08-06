@@ -273,8 +273,11 @@ export function AddItemDialog({
 
             {/* Item # — always visible */}
             <div className="space-y-1">
-              <Label className="text-xs">Item #</Label>
+              <Label htmlFor="item-number" className="text-xs">
+                Item #
+              </Label>
               <Input
+                id="item-number"
                 value={newItem.itemNumber}
                 onChange={(e) => setNewItem({ ...newItem, itemNumber: e.target.value })}
                 placeholder="001"
@@ -355,8 +358,11 @@ export function AddItemDialog({
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs">Quantity</Label>
+                    <Label htmlFor="lib-quantity" className="text-xs">
+                      Quantity
+                    </Label>
                     <Input
+                      id="lib-quantity"
                       type="number"
                       value={newItem.quantity}
                       onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
@@ -366,8 +372,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Unit</Label>
+                    <Label htmlFor="lib-unit" className="text-xs">
+                      Unit
+                    </Label>
                     <Input
+                      id="lib-unit"
                       value={newItem.unit}
                       onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
                       placeholder="EA"
@@ -434,8 +443,11 @@ export function AddItemDialog({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-xs">Part Number</Label>
+                    <Label htmlFor="new-part-number" className="text-xs">
+                      Part Number
+                    </Label>
                     <Input
+                      id="new-part-number"
                       value={newItem.partNumber}
                       onChange={(e) => setNewItem({ ...newItem, partNumber: e.target.value })}
                       placeholder="PACE-1001"
@@ -443,8 +455,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Name</Label>
+                    <Label htmlFor="new-name" className="text-xs">
+                      Name
+                    </Label>
                     <Input
+                      id="new-name"
                       value={newItem.name}
                       onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
                       placeholder="Motor Housing"
@@ -453,8 +468,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Quantity</Label>
+                    <Label htmlFor="new-quantity" className="text-xs">
+                      Quantity
+                    </Label>
                     <Input
+                      id="new-quantity"
                       type="number"
                       value={newItem.quantity}
                       onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
@@ -464,8 +482,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Unit</Label>
+                    <Label htmlFor="new-unit" className="text-xs">
+                      Unit
+                    </Label>
                     <Input
+                      id="new-unit"
                       value={newItem.unit}
                       onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
                       placeholder="EA"
@@ -473,8 +494,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Material</Label>
+                    <Label htmlFor="new-material" className="text-xs">
+                      Material
+                    </Label>
                     <Input
+                      id="new-material"
                       value={newItem.material}
                       onChange={(e) => setNewItem({ ...newItem, material: e.target.value })}
                       placeholder="304 SS"
@@ -482,8 +506,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Vendor</Label>
+                    <Label htmlFor="new-vendor" className="text-xs">
+                      Vendor
+                    </Label>
                     <Input
+                      id="new-vendor"
                       value={newItem.vendor}
                       onChange={(e) => setNewItem({ ...newItem, vendor: e.target.value })}
                       placeholder="McMaster"
@@ -491,8 +518,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Unit Cost ($)</Label>
+                    <Label htmlFor="new-unit-cost" className="text-xs">
+                      Unit Cost ($)
+                    </Label>
                     <Input
+                      id="new-unit-cost"
                       type="number"
                       value={newItem.unitCost}
                       onChange={(e) => setNewItem({ ...newItem, unitCost: e.target.value })}
@@ -562,8 +592,11 @@ export function AddItemDialog({
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">Name</Label>
+                    <Label htmlFor="sub-name" className="text-xs">
+                      Name
+                    </Label>
                     <Input
+                      id="sub-name"
                       value={newItem.name}
                       onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
                       placeholder="Rotor Sub-Assembly"
@@ -572,8 +605,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Quantity</Label>
+                    <Label htmlFor="sub-quantity" className="text-xs">
+                      Quantity
+                    </Label>
                     <Input
+                      id="sub-quantity"
                       type="number"
                       value={newItem.quantity}
                       onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
@@ -583,8 +619,11 @@ export function AddItemDialog({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Unit</Label>
+                    <Label htmlFor="sub-unit" className="text-xs">
+                      Unit
+                    </Label>
                     <Input
+                      id="sub-unit"
                       value={newItem.unit}
                       onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
                       placeholder="EA"

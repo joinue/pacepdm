@@ -10,7 +10,7 @@ raw-fetch: 44
 generic-error-toast: 8
 swallowed-error: 6
 token-violations: 6
-component-tests: 6-->
+component-tests: 11-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -85,17 +85,17 @@ node scripts/lint-tokens.mjs --list
 npm run probe:rls                                      # live RLS posture
 ```
 
-| Metric                                | At session start | Now                                  | Target                                                |
-| ------------------------------------- | ---------------- | ------------------------------------ | ----------------------------------------------------- |
-| Token violations                      | 373              | **6**                                | 0 (the 6 are marketing gradient blobs; arguably done) |
-| Pages on `PageContainer`/`PageHeader` | 0                | **18**                               | — done                                                |
-| `StatusBadge` call sites              | 0                | **31**                               | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **42 / 110**                         | 110                                                   |
-| `raw-fetch` in client components      | 112              | **44**                               | 0                                                     |
-| `generic-error-toast`                 | 14               | **8**                                | 0                                                     |
-| `swallowed-error`                     | 11               | **6**                                | 0                                                     |
-| Component tests                       | 0                | **6** files (57 stateful components) | the ones with real logic                              |
-| Route segments with `error.tsx`       | 0                | **4** + `global-error`               | every segment that fetches                            |
+| Metric                                | At session start | Now                                   | Target                                                |
+| ------------------------------------- | ---------------- | ------------------------------------- | ----------------------------------------------------- |
+| Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
+| Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
+| `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
+| Routes on `withTenant`                | 0                | **42 / 110**                          | 110                                                   |
+| `raw-fetch` in client components      | 112              | **44**                                | 0                                                     |
+| `generic-error-toast`                 | 14               | **8**                                 | 0                                                     |
+| `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
+| Component tests                       | 0                | **11** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
+| Route segments with `error.tsx`       | 0                | **4** + `global-error`                | every segment that fetches                            |
 
 ### How the ratchet works
 
@@ -245,9 +245,16 @@ Do this **after** the route work. It touches import paths everywhere and would c
 
 ### 4. Component tests
 
-The jsdom project is configured and working. Two reference files now: `src/components/ui/status-badge.test.tsx` for a pure presentational mapping, and `src/app/(dashboard)/boms/components/import-bom-dialog.test.tsx` for a stateful dialog — the latter is the better model for the list below, since it drives real interactions with `userEvent` and asserts on behaviour (nothing is POSTed before confirmation, the server's own error text reaches the user) rather than markup.
+The jsdom project is configured and working. Two reference files now: `src/components/ui/status-badge.test.tsx` for a pure presentational mapping, and `src/app/(dashboard)/boms/components/import-bom-dialog.test.tsx` for a stateful dialog — the latter is the better model, since it drives real interactions with `userEvent` and asserts on behaviour (nothing is POSTed before confirmation, the server's own error text reaches the user) rather than markup.
 
-Worth testing, in order: `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing). Skip presentational primitives.
+**~~The five named components are done.~~** `vault-file-list` (selection, bulk actions), `part-form-dialog` (validation), `add-item-dialog` (quantity maths), `approval-timeline` (state rendering), `mention-input` (parsing) all have suites. Four things the next person should know:
+
+- **jsdom applies no CSS**, so `vault-file-list` renders both the `md:hidden` card view and the `hidden md:block` table. Scope queries with `within(screen.getByRole("table"))` or every `getByText` is ambiguous.
+- **base-ui menus and dialogs portal a tick late.** `findAllByRole("menuitem")` after clicking the trigger; the synchronous `getAllByRole` finds nothing and reads like the menu is broken.
+- **Two dialogs had no `htmlFor`/`id` on their labels**, so `getByLabelText` could not reach a single field. Both now pair them, matching `import-bom-dialog.tsx`. Check this first when a form test cannot find its inputs — the fix belongs in the component, not the query.
+- **Writing these found two defects**, both fixed in the same commit: `verifyPassword` accepted any password against a malformed stored hash, and `mention-input` let a queued search re-open a dropdown the user had just dismissed. Neither was reachable through the paths the old tests covered.
+
+Remaining stateful components are lower-value; take them opportunistically when touching one. Skip presentational primitives.
 
 `item-source-cell.test.tsx` is a useful third pattern alongside the other two: the component is trivial to render but encodes a precedence rule (sub-assembly before part before file) whose breakage is invisible — it sent every sub-assembly line to the parts list for a day. Small pure-decision components inside big files are worth exporting purely so the decision can be pinned. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
 

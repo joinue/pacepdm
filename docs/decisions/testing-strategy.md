@@ -53,8 +53,22 @@ New code produces style 1 automatically, because the scoped client from `withTen
 
 Tests colocate with their source as `*.test.ts(x)`. A test far from its subject gets stale.
 
+## What the coverage number counts
+
+`vitest.config.mts` sets `coverage.include` to all of `src`. Without it, V8 reports only the files a test happened to import — an untested file is **absent from the report rather than scored as zero**, so the headline percentage describes the tested corner of the codebase and says nothing about the rest. It read 55.89% while covering 67 of 345 source files; the same run over the whole tree read 13.35%.
+
+Excluded: test files, `__mocks__`, `src/types` (no runtime statements), and the `loading`/`error`/`not-found` segment shells, which are static markup or a one-line handoff to a covered primitive.
+
+Thresholds are set a point or two under the current numbers, so coverage cannot slide backwards unnoticed. **Raise them when you clear real ground; never lower one to go green.** They are a ratchet, not a goal — the list at the top of this file is still the goal.
+
+## Component tests: three things that bite
+
+- **jsdom applies no CSS.** A component with both a `md:hidden` mobile view and a `hidden md:block` desktop view renders both, so every `getByText` is ambiguous. Scope with `within(...)`.
+- **base-ui menus, dialogs and popovers portal asynchronously.** Use `findAllByRole` after opening one; the synchronous query finds nothing and reads like the component is broken.
+- **Query by label — and fix the component when you can't.** A `<Label>` with no `htmlFor` labels nothing, for a screen reader as much as for a test. Add the `htmlFor`/`id` pair rather than falling back to a placeholder or test id.
+
 ## Consequences
 
 - A PR touching `approval-engine`, `bom-rollup`, `folder-access`, or `permissions` without a test change should be questioned.
 - A new route that resolves a record by id adds a case to the tenant-isolation suite. That file is the registry of what is proven safe.
-- Coverage is not a target. The list at the top of this file is the target.
+- Coverage is not a target. The list at the top of this file is the target. The thresholds exist to stop regression, not to be chased.
