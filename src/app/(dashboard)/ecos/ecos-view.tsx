@@ -413,9 +413,18 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
 
       {/* Right: Detail Panel */}
       {selectedEco && (
-        <div className="flex-1 min-w-0 lg:border-l lg:pl-6 lg:ml-6">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-3 mb-5">
+        /*
+          A container, so everything inside measures this pane rather than the
+          window. Beside a `lg:max-w-md` list the pane is ~550px on a 1250px
+          window — and narrower again whenever the shell's sidebar is expanded,
+          which no viewport breakpoint can see.
+        */
+        <div className="@container flex-1 min-w-0 lg:border-l lg:pl-6 lg:ml-6">
+          {/* Header. Survives today only because the action cluster is three
+              icon buttons; the BOM pane had the same shape and broke as soon
+              as it grew labelled ones. Stacking below @2xl means adding one
+              here costs a wrap, not a truncated title. */}
+          <div className="mb-5 flex flex-col gap-3 @2xl:flex-row @2xl:items-start @2xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <span className="text-xs font-mono text-muted-foreground font-medium">
@@ -432,7 +441,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex flex-wrap items-center justify-end gap-1 @2xl:shrink-0">
               {releaseIdForSelected && (
                 <Link
                   href={`/releases/${releaseIdForSelected}`}

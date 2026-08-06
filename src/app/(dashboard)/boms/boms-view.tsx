@@ -606,9 +606,20 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
 
           {/* Selected BOM detail */}
           {selectedBomId && selectedBomData && (
-            <div className="flex-1 space-y-4 min-w-0">
-              {/* Detail header */}
-              <div className="flex items-start justify-between gap-3">
+            /*
+              A container, not a viewport consumer. Standing beside the BOM
+              list this pane is ~780px on a 1250px window, but every
+              responsive class inside it used to read the *viewport* — so at
+              1250px the action row rendered every label in full, claimed
+              ~500px of an 780px pane, and squeezed the title down to
+              "ZZ-TEST-A…". The pane is what got narrow, so the pane is what
+              the breakpoints have to measure.
+            */
+            <div className="@container flex-1 space-y-4 min-w-0">
+              {/* Detail header. Side by side only once the pane can hold both
+                  the name and the full action row; below that they stack and
+                  each gets the whole width. */}
+              <div className="flex flex-col gap-3 @4xl:flex-row @4xl:items-start @4xl:justify-between">
                 {/* The image sits beside the title, where it identifies the
                     assembly you are looking at. Click it to replace, and the
                     corner ✕ to clear — the same control the vendor dialog and
@@ -649,8 +660,10 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                         </Button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-semibold truncate">{selectedBomData.name}</h3>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h3 className="text-lg font-semibold truncate" title={selectedBomData.name}>
+                          {selectedBomData.name}
+                        </h3>
                         <Button
                           variant="ghost"
                           size="icon-xs"
@@ -658,17 +671,25 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                             setRenamingBom(selectedBomId);
                             setRenameValue(selectedBomData.name);
                           }}
-                          className="text-muted-foreground hover:text-foreground"
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
                         >
                           <Pencil className="w-3 h-3" />
                         </Button>
                       </div>
                     )}
-                    <div className="flex items-center gap-3 mt-1">
+                    {/* Three separate facts, not one sentence. As a single
+                        span this wrapped wherever it ran out of room — "Rev A
+                        · 0" on one line, "items · $0.00" on the next, which
+                        reads as a different number entirely. Each fact now
+                        keeps its separator and refuses to break internally. */}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                       <StatusBadge status={selectedBomData.status} kind="bom" />
-                      <span className="text-sm text-muted-foreground">
-                        Rev {selectedBomData.revision} &middot; {items.length} item
-                        {items.length !== 1 ? "s" : ""} &middot; ${totalCost.toFixed(2)}
+                      <span className="whitespace-nowrap">Rev {selectedBomData.revision}</span>
+                      <span className="whitespace-nowrap">
+                        &middot; {items.length} item{items.length !== 1 ? "s" : ""}
+                      </span>
+                      <span className="whitespace-nowrap tabular-nums">
+                        &middot; ${totalCost.toFixed(2)}
                       </span>
                     </div>
                     {/* A superseded revision is filtered out of the BOM list,
@@ -697,7 +718,9 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Wraps rather than squeezing the title, and right-aligns
+                    once it is on its own line. */}
+                <div className="flex flex-wrap items-center justify-end gap-2 @4xl:shrink-0">
                   {/* Status transitions. The current status is already shown
                       as a Badge in the header above, so the trigger is an
                       action-only "Change status" button — no duplication.
@@ -733,13 +756,13 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                   )}
                   <Button variant="outline" size="sm" onClick={() => handleExport(selectedBomId)}>
                     <Download className="w-4 h-4 mr-1" />
-                    <span className="hidden sm:inline">Export</span>
+                    <span className="hidden @sm:inline">Export</span>
                   </Button>
                   {isEditable && (
                     <>
                       <label className="inline-flex items-center justify-center rounded-full border border-border bg-background hover:bg-muted text-sm font-medium h-8 gap-1.5 px-2.5 cursor-pointer transition-all">
                         <Upload className="w-4 h-4" />
-                        <span className="hidden sm:inline">Import CSV</span>
+                        <span className="hidden @sm:inline">Import CSV</span>
                         <input
                           type="file"
                           accept=".csv"
@@ -749,7 +772,7 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
                       </label>
                       <Button size="sm" onClick={() => setShowAddItem(true)}>
                         <Plus className="w-4 h-4 mr-1" />
-                        <span className="hidden sm:inline">Add Item</span>
+                        <span className="hidden @sm:inline">Add Item</span>
                       </Button>
                     </>
                   )}

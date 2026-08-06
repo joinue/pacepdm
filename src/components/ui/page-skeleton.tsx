@@ -1,6 +1,7 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageContainer, type PageContainerProps } from "@/components/ui/page-container";
+import { cn } from "@/lib/utils";
 
 /**
  * Page-shaped loading skeletons.
@@ -134,29 +135,95 @@ export function ListRowsSkeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
+/** How much room the list column keeps once a record is selected. */
+const LIST_WIDTHS = {
+  /** BOMs: a 16rem tree of BOM names. */
+  narrow: "lg:w-64",
+  /** ECOs: wider, because each row carries a status and a priority badge. */
+  wide: "lg:max-w-md",
+} as const;
+
 /**
- * A record detail page: breadcrumb, title, and a main column beside a
- * metadata sidebar.
+ * A master-detail page: the list column beside the record it has selected.
+ *
+ * This is the shape BOMs and ECOs actually resolve to — list on the **left**,
+ * detail filling the rest. They both used to render the old
+ * `DetailPageSkeleton`, which put its aside on the *right* at a fixed
+ * `lg:w-72`, so the page appeared to swap sides and change width the moment
+ * real content arrived. A skeleton that lies is worse than a spinner.
+ *
+ * The detail column is a `@container` mirroring the real one, so the header
+ * placeholder stacks and unstacks at the same pane width the page does.
  */
-export function DetailPageSkeleton() {
+export function MasterDetailSkeleton({
+  listWidth = "narrow",
+  listRows = 6,
+  detailRows = 6,
+  detailColumns = 6,
+}: {
+  listWidth?: keyof typeof LIST_WIDTHS;
+  listRows?: number;
+  detailRows?: number;
+  detailColumns?: number;
+}) {
   return (
     <PageContainer>
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-40" />
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-5 w-20" />
-        </div>
-      </div>
+      <PageHeaderSkeleton description={false} actions />
       <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="min-w-0 flex-1 space-y-4">
-          <TableSkeleton rows={6} columns={4} />
+        <div className={cn("w-full space-y-2 lg:shrink-0", LIST_WIDTHS[listWidth])}>
+          <ListRowsSkeleton rows={listRows} />
         </div>
-        <div className="w-full space-y-4 lg:w-72 lg:shrink-0">
-          <FormSkeleton fields={4} />
+        <div className="@container min-w-0 flex-1 space-y-4">
+          <div className="flex flex-col gap-3 @4xl:flex-row @4xl:items-start @4xl:justify-between">
+            {/* Thumbnail, title, and the status/revision/cost line. */}
+            <div className="flex min-w-0 items-start gap-3">
+              <Skeleton className="h-14 w-14 shrink-0 rounded-lg" />
+              <div className="space-y-2">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-4 w-56" />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-28" />
+            </div>
+          </div>
+          <TableSkeleton rows={detailRows} columns={detailColumns} />
         </div>
       </div>
     </PageContainer>
+  );
+}
+
+/**
+ * A single record on its own page: title block, then stacked sections.
+ *
+ * Releases are the one detail page with no list beside them — they are opened
+ * from a link, not picked out of a column — so they get the page's own
+ * `max-w-5xl` reading width rather than a two-pane split.
+ */
+export function RecordPageSkeleton({ sections = 3 }: { sections?: number }) {
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-2">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Skeleton className="h-8 w-28" />
+          <Skeleton className="h-8 w-32" />
+        </div>
+      </div>
+      {Array.from({ length: sections }).map((_, i) => (
+        <section key={i} className="space-y-2">
+          <Skeleton className="h-4 w-32" />
+          <TableSkeleton rows={3} columns={4} />
+        </section>
+      ))}
+    </div>
   );
 }
 

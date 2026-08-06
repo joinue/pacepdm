@@ -130,12 +130,28 @@ instantly and then shifted hard into an unrelated layout, which reads as
 slower than showing nothing.
 
 Compose from [`src/components/ui/page-skeleton.tsx`](../../src/components/ui/page-skeleton.tsx)
-— `ListPageSkeleton`, `DetailPageSkeleton`, `FormSkeleton`, `TableSkeleton` —
-so a route-level `loading.tsx` is two or three lines.
+— `ListPageSkeleton`, `MasterDetailSkeleton`, `RecordPageSkeleton`,
+`FormSkeleton`, `TableSkeleton` — so a route-level `loading.tsx` is two or
+three lines.
+
+Pick by the shape the route resolves to, not by the word "detail":
+
+| Route shape                                               | Composition                           |
+| --------------------------------------------------------- | ------------------------------------- |
+| Header, toolbar, table                                    | `ListPageSkeleton`                    |
+| List column beside the record it selects (BOMs, ECOs)     | `MasterDetailSkeleton`                |
+| One record on its own page, opened from a link (releases) | `RecordPageSkeleton`                  |
+| A form                                                    | `PageHeaderSkeleton` + `FormSkeleton` |
 
 **Rule:** a route segment that fetches gets its own `loading.tsx`, shaped like
 what it resolves to — same header, same table columns, same card count. A
 skeleton that lies is worse than a spinner.
+
+This is easy to get subtly wrong. BOMs, ECOs and releases all rendered a single
+`DetailPageSkeleton` whose aside sat on the **right** at `lg:w-72`. All three
+are the mirror of that or not two-pane at all, so every one of them visibly
+swapped sides on load — the failure the rule exists to prevent, reintroduced by
+a composition whose name sounded close enough.
 
 ## 5. Keep heavy viewers out of the page bundle
 

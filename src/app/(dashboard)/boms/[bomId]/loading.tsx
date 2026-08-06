@@ -1,5 +1,6 @@
-import { DetailPageSkeleton } from "@/components/ui/page-skeleton";
+import { MasterDetailSkeleton } from "@/components/ui/page-skeleton";
 
+/** BOM tree on the left, the selected BOM's items table on the right. */
 export default function BomDetailLoading() {
-  return <DetailPageSkeleton />;
+  return <MasterDetailSkeleton listWidth="narrow" detailColumns={6} />;
 }
