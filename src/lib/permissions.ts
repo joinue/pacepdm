@@ -5,6 +5,13 @@ export const PERMISSIONS = {
   FILE_UPLOAD: "file.upload",
   FILE_EDIT: "file.edit",
   FILE_DELETE: "file.delete",
+  // Destroy a deleted file for good — the row and the storage blob. Separate
+  // from FILE_DELETE, which only moves a file to the trash and is reversible.
+  // Deliberately NOT in DEFAULT_ROLES: Admin holds it through "*", Manager
+  // holds FILE_DELETE and does not get this. Nothing in this app is more
+  // destructive, and the trash exists precisely so deletion is recoverable.
+  // See docs/decisions/retention-and-formats.md.
+  FILE_PURGE: "file.purge",
   FILE_CHECKOUT: "file.checkout",
   FILE_CHECKIN: "file.checkin",
   FILE_TRANSITION: "file.transition",
@@ -97,6 +104,11 @@ export const PERMISSION_INFO: Record<string, { label: string; description: strin
   [PERMISSIONS.FILE_DELETE]: {
     label: "Delete files",
     description: "Move files to the recycle bin and restore them.",
+  },
+  [PERMISSIONS.FILE_PURGE]: {
+    label: "Permanently delete files",
+    description:
+      "Destroy a file in the recycle bin for good, including its stored contents. Cannot be undone.",
   },
   [PERMISSIONS.FILE_CHECKOUT]: {
     label: "Check out files",

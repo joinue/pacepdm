@@ -3,8 +3,8 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 110
-routes-wrapped: 42
+routes-total: 111
+routes-wrapped: 43
 unwrapped-route: 319
 raw-fetch: 44
 generic-error-toast: 8
@@ -28,11 +28,12 @@ this plan was written under, and it reorders the priorities below.
   missing `tenantId` filter cannot leak to anyone. Still worth doing — it is
   what makes the routes readable and testable — but it is hygiene now, not
   urgency. The same goes for the RLS lockdown, share links, and SSO.
-- **~~Trash / undelete is promoted to the top.~~ Shipped 2026-08-05.** See
-  [Product gaps](#product-gaps-found-along-the-way) for what it does and does
-  not cover — notably folders are still hard-deleted. Retention is settled as of
-  2026-08-06 (nothing is destroyed on a timer); the 200-row listing cap is a
-  live bug and is still there.
+- **~~Trash / undelete is promoted to the top.~~ Shipped 2026-08-05, completed
+  2026-08-06.** Retention is settled (nothing is destroyed on a timer), the
+  200-row listing cap is gone, and permanent deletion exists behind
+  `FILE_PURGE`. See
+  [Product gaps](#product-gaps-found-along-the-way). Folders are still
+  hard-deleted and none of it applies to them.
 - **One operational item now ranks above everything in the queue: verified
   backups.** The separate development database was considered and deliberately
   declined on 2026-08-06 — see item 4 in
@@ -93,7 +94,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **42 / 110**                          | 110                                                   |
+| Routes on `withTenant`                | 0                | **43 / 111**                          | 111                                                   |
 | `raw-fetch` in client components      | 112              | **44**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
@@ -289,9 +290,18 @@ Not refactors — real missing behaviour, worth their own tickets.
 
 - It is **files only**. Folders have no `deletedAt` column, so deleting a folder is still one-way — the delete dialog now says so for folders and promises the trash for files. Extending soft-delete to folders is its own piece of work, and needs a decision about what happens to the files inside.
 - Migration 042 made `files_tenantId_folderId_name_key` **partial** on `deletedAt IS NULL`. That fixed a live bug (a deleted file kept reserving its name, so re-uploading the same filename failed with "already exists" about an invisible file) and introduced the collision undelete now returns a 409 for.
-- **Retention settled 2026-08-06: nothing is ever destroyed on a timer.** No auto-purge, no 90-day window. Permanent deletion is an admin-only act on one named file. Reasoning in [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md) — briefly, this is the BOM of record, the trash exists precisely so recovery does not need database access, and a timer that quietly destroys evidence is that failure in slower motion. Storage growing is the accepted cost.
+- **~~Retention.~~ Settled and built 2026-08-06: nothing is ever destroyed on a timer.** No auto-purge, no 90-day window. Reasoning in [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md) — this is the BOM of record, the trash exists precisely so recovery does not need database access, and a timer that quietly destroys evidence is that failure in slower motion. Storage growing is the accepted cost.
 
-  **Two things still to build:** the admin permanent-delete action, and removing the 200-row listing cap. The cap is the part that is actually a bug — past 200 deletions the oldest stop appearing in the UI while remaining in the database, so they are invisible, un-restorable and un-deletable through any supported route. A cap that hides data is worse than no cap, because it looks like the data is gone.
+  **The 200-row cap is gone**, replaced by offset paging with an exact total. That cap was the real bug: past 200 deletions the oldest rows stayed in the database and vanished from the UI — invisible, un-restorable and un-deletable through any supported route.
+
+  **`DELETE /api/files/[fileId]/purge`** destroys one named file for good, gated on the new `FILE_PURGE` permission. Four things the next person should know:
+
+  - **`FILE_PURGE` is deliberately absent from `DEFAULT_ROLES`.** Admin holds it through `"*"`; Manager holds `FILE_DELETE` and does not get this. That is why no backfill migration was needed — see [`../decisions/system-roles.md`](../decisions/system-roles.md) for when one is.
+  - **Storage is removed before any row.** If the rows went first and storage failed, the blobs would be orphaned with nothing pointing at them — unrecoverable _and_ invisible. Failing the other way leaves the file in the trash, whole and retryable.
+  - **A live file cannot be purged.** `loadDeletedFile` resolves only rows with `deletedAt` set, so destruction is always two separate decisions.
+  - **The audit row outlives the file.** Append-only and untouched by the route, so what existed and who destroyed it survives. A permanent deletion that erased its own evidence would be worse than none.
+
+  Still open: **folders are still hard-deleted** and have no `deletedAt`, so none of the above applies to them.
 
 **~~No confirm on multi-file delete.~~ Already fixed** before this plan was written — `showBulkDeleteConfirm` gates it and `VaultDialogs` renders the AlertDialog. The plan was stale on this point. Its copy claimed the delete was permanent, which is now corrected.
 

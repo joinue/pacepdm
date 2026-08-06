@@ -15,9 +15,19 @@ A deleted file is soft-deleted: the row stays and the storage blob stays.
 Permanent deletion is a deliberate act: an admin-only action on a specific file
 in the trash, one at a time.
 
-> **Decided, not yet built.** There is no permanent-delete action and the
-> listing cap is still in place — see below. Tracked in
-> [`../plans/codebase-hardening.md`](../plans/codebase-hardening.md).
+`DELETE /api/files/[fileId]/purge`, gated on `FILE_PURGE` — a permission
+deliberately absent from `DEFAULT_ROLES`, so Admin holds it through `"*"` and
+Manager, who can move files to the trash, does not.
+
+Storage blobs are removed before any row. Rows-first would orphan the blobs
+with nothing pointing at them: unrecoverable _and_ invisible. Failing this way
+round leaves the file in the trash, whole and retryable. A live file cannot be
+purged at all — only rows with `deletedAt` set resolve — so destruction is
+always two separate decisions.
+
+The audit row survives the file. It is append-only and this route never touches
+it, so what existed and who destroyed it outlives the deletion. A permanent
+delete that erased its own evidence would be worse than none.
 
 **Why not a 90-day auto-purge**, which is the obvious default and was rejected:
 this is the BOM of record. The whole reason the trash exists is that recovering
@@ -29,11 +39,21 @@ nobody discovers they needed a file on a schedule.
 That is a bill for keeping things, which is the correct thing to be paying for
 here. Revisit if it ever becomes a real number rather than a theoretical one.
 
-**The listing cap was the actual bug.** The trash listing was capped at 200
-rows, so past 200 deletions the oldest ones stopped appearing in the UI while
-remaining perfectly present in the database — invisible, undeletable, and
-un-restorable through any supported route. A cap that hides data is worse than
-no cap, because it looks like the data is gone.
+**The listing cap was the actual bug, and is fixed.** The trash listing was
+capped at a flat 200 rows, so past 200 deletions the oldest ones stopped
+appearing in the UI while remaining perfectly present in the database —
+invisible, undeletable, and un-restorable through any supported route. A cap
+that hides data is worse than no cap, because it looks like the data is gone.
+
+Now offset paging with an exact total, so the UI can say "1–100 of 3,412"
+rather than implying 200 is all there is. Offset rather than cursor
+deliberately: a bulk delete stamps every file in the batch with the same
+`deletedAt`, so a cursor on that column alone skips rows at a page boundary,
+and a compound cursor would mean building an `.or()` filter from a
+client-supplied string — the one Supabase builder that parses its argument as
+syntax rather than escaping it. `hasMore` is computed from the pre-ACL count,
+so a page emptied entirely by folder permissions does not read as the end of
+the list.
 
 ## 2. Neutral-format exports are prompted, never required
 

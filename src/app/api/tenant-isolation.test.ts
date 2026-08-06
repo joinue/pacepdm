@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 // ── Hoisted mock state so vi.mock factories can reach it ────────────────────
 
@@ -52,6 +53,7 @@ const { mockTenantUser, supabaseResponses, mockSupabaseFrom } = vi.hoisted(() =>
       "not",
       "order",
       "limit",
+      "range",
       "match",
     ] as const) {
       chain[m] = (...args: unknown[]) => {
@@ -208,8 +210,15 @@ const userInTenantA = {
   role: { id: "role-a", name: "Admin", permissions: ["*"] },
 };
 
-function makeRequest(url = "http://test.local/api/x"): Request {
-  return new Request(url);
+/**
+ * A `NextRequest`, not a bare `Request`. The wrapper reads
+ * `request.nextUrl.searchParams` for any route that declares a query schema,
+ * and a plain Request has no `nextUrl` — which surfaced as a 500 the moment
+ * the trash listing gained pagination. Real handlers always receive a
+ * NextRequest, so the helper should produce one too.
+ */
+function makeRequest(url = "http://test.local/api/x"): NextRequest {
+  return new NextRequest(url);
 }
 
 beforeEach(() => {

@@ -15,30 +15,42 @@ const { tableResults, lastQuery, mockFrom } = vi.hoisted(() => {
     tenantId?: unknown;
     deletedState?: "null" | "notNull";
     limit?: number;
+    range?: { from: number; to: number };
+    countMode?: string;
     order?: { column: string; ascending?: boolean };
+    orders?: Array<{ column: string; ascending?: boolean }>;
   };
 
-  const tableResults: Record<string, { data: unknown; error: unknown }> = {};
+  const tableResults: Record<string, { data: unknown; error: unknown; count?: number }> = {};
   const lastQuery: Query = {};
 
   function makeChain(table: string) {
     lastQuery.table = table;
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
 
-    const resolvable = () => tableResults[table] ?? { data: null, error: null };
+    const resolvable = () => tableResults[table] ?? { data: null, error: null, count: 0 };
 
-    for (const m of ["select", "eq", "in", "is", "not", "order", "limit"] as const) {
+    for (const m of ["select", "eq", "in", "is", "not", "order", "limit", "range"] as const) {
       chain[m] = (...args: unknown[]) => {
+        if (m === "select")
+          lastQuery.countMode = (args[1] as { count?: string } | undefined)?.count;
         if (m === "eq" && args[0] === "tenantId") lastQuery.tenantId = args[1];
         if (m === "not" && args[0] === "deletedAt") lastQuery.deletedState = "notNull";
         if (m === "is" && args[0] === "deletedAt" && args[1] === null)
           lastQuery.deletedState = "null";
         if (m === "limit") lastQuery.limit = args[0] as number;
-        if (m === "order")
-          lastQuery.order = {
+        if (m === "range") lastQuery.range = { from: args[0] as number, to: args[1] as number };
+        if (m === "order") {
+          const entry = {
             column: args[0] as string,
             ascending: (args[1] as { ascending?: boolean } | undefined)?.ascending,
           };
+          // First order() wins for `order`; `orders` keeps the full sequence,
+          // because the tie-break on id is what makes paging stable across a
+          // bulk delete that stamped every row with the same timestamp.
+          if (!lastQuery.order) lastQuery.order = entry;
+          (lastQuery.orders ??= []).push(entry);
+        }
         return chain;
       };
     }
@@ -92,8 +104,8 @@ vi.mock("@/lib/folder-access", async () => {
 
 import { GET } from "./route";
 
-function makeRequest(): NextRequest {
-  return new NextRequest("http://localhost/api/files/deleted");
+function makeRequest(search = ""): NextRequest {
+  return new NextRequest(`http://localhost/api/files/deleted${search}`);
 }
 
 const engineer = {
@@ -125,6 +137,7 @@ beforeEach(() => {
   mockScope.visibleFolders = null;
   for (const key of Object.keys(tableResults)) delete tableResults[key];
   for (const key of Object.keys(lastQuery)) delete (lastQuery as Record<string, unknown>)[key];
+  lastQuery.orders = undefined;
 });
 
 describe("GET /api/files/deleted", () => {
@@ -140,7 +153,7 @@ describe("GET /api/files/deleted", () => {
 
   it("asks only for deleted rows, scoped to the caller's tenant, newest first", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = { data: rows, error: null };
+    tableResults["files"] = { data: rows, error: null, count: 2 };
 
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
@@ -149,23 +162,118 @@ describe("GET /api/files/deleted", () => {
     expect(lastQuery.tenantId).toBe("tenant-1");
     expect(lastQuery.deletedState).toBe("notNull");
     expect(lastQuery.order).toEqual({ column: "deletedAt", ascending: false });
-    expect(lastQuery.limit).toBe(200);
+  });
+
+  /**
+   * A bulk delete stamps every file in the batch with the same `deletedAt`.
+   * Without a tie-break the order of those rows is undefined between requests,
+   * so a row can appear on two pages or on none.
+   */
+  it("breaks ties on id so paging is stable across a bulk delete", async () => {
+    mockTenantUser.current = engineer;
+    tableResults["files"] = { data: rows, error: null, count: 2 };
+    await GET(makeRequest());
+    expect(lastQuery.orders).toEqual([
+      { column: "deletedAt", ascending: false },
+      { column: "id", ascending: false },
+    ]);
   });
 
   it("drops files in folders the caller cannot view", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = { data: rows, error: null };
+    tableResults["files"] = { data: rows, error: null, count: 2 };
     mockScope.visibleFolders = ["folder-1"];
 
     const body = await (await GET(makeRequest())).json();
-    expect(body.map((f: { id: string }) => f.id)).toEqual(["f1"]);
+    expect(body.files.map((f: { id: string }) => f.id)).toEqual(["f1"]);
   });
 
   it("returns an empty list rather than null when the trash is empty", async () => {
     mockTenantUser.current = engineer;
-    tableResults["files"] = { data: null, error: null };
+    tableResults["files"] = { data: null, error: null, count: 0 };
 
     const body = await (await GET(makeRequest())).json();
-    expect(body).toEqual([]);
+    expect(body.files).toEqual([]);
+    expect(body.total).toBe(0);
+    expect(body.hasMore).toBe(false);
+  });
+});
+
+/**
+ * The listing used to be a flat 200-row cap with no way past it. Nothing
+ * purges the trash — deliberately — so past 200 deletions the oldest rows sat
+ * in the database and vanished from the UI: invisible, un-restorable and
+ * un-deletable through any supported route. A cap that hides data is worse
+ * than no cap, because it looks like the data is gone.
+ */
+describe("GET /api/files/deleted — paging", () => {
+  beforeEach(() => {
+    mockTenantUser.current = engineer;
+  });
+
+  it("requests the first page by default", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 2 };
+    await GET(makeRequest());
+    expect(lastQuery.range).toEqual({ from: 0, to: 99 });
+  });
+
+  it("honours an explicit offset", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 500 };
+    await GET(makeRequest("?offset=300"));
+    expect(lastQuery.range).toEqual({ from: 300, to: 399 });
+  });
+
+  it("honours an explicit limit", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 500 };
+    await GET(makeRequest("?limit=25&offset=50"));
+    expect(lastQuery.range).toEqual({ from: 50, to: 74 });
+  });
+
+  it("refuses a limit above the maximum rather than silently clamping", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 500 };
+    expect((await GET(makeRequest("?limit=5000"))).status).toBe(400);
+  });
+
+  it("refuses a negative offset", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 500 };
+    expect((await GET(makeRequest("?offset=-1"))).status).toBe(400);
+  });
+
+  it("asks for an exact count so the UI can say how many are hidden", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 412 };
+    const body = await (await GET(makeRequest())).json();
+    expect(lastQuery.countMode).toBe("exact");
+    expect(body.total).toBe(412);
+  });
+
+  it("reports more pages when the count exceeds what was returned", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 412 };
+    const body = await (await GET(makeRequest())).json();
+    expect(body.hasMore).toBe(true);
+  });
+
+  it("reports no more pages on the last one", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 2 };
+    const body = await (await GET(makeRequest())).json();
+    expect(body.hasMore).toBe(false);
+  });
+
+  /**
+   * `hasMore` is computed from the pre-ACL row count, not from the filtered
+   * list. A page where every row is filtered out by folder access would
+   * otherwise report the end of the list and strand everything after it.
+   */
+  it("keeps paging when the ACL filter empties an entire page", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 412 };
+    mockScope.visibleFolders = []; // sees nothing
+    const body = await (await GET(makeRequest())).json();
+    expect(body.files).toEqual([]);
+    expect(body.hasMore).toBe(true);
+  });
+
+  it("echoes the offset and limit it used", async () => {
+    tableResults["files"] = { data: rows, error: null, count: 412 };
+    const body = await (await GET(makeRequest("?offset=100&limit=50"))).json();
+    expect(body).toMatchObject({ offset: 100, limit: 50 });
   });
 });
