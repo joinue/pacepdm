@@ -4,6 +4,10 @@ import {
   validateEffectivity,
   toDateInputValue,
   fromDateInputValue,
+  EFFECTIVITY_TYPES,
+  EFFECTIVITY_LABELS,
+  isComputable,
+  deferralNote,
 } from "./effectivity";
 
 describe("validateEffectivity", () => {
@@ -81,5 +85,86 @@ describe("date input round trip", () => {
     expect(toDateInputValue(null)).toBe("");
     expect(toDateInputValue(undefined)).toBe("");
     expect(toDateInputValue("not a date")).toBe("");
+  });
+});
+
+// ── USE_UP, and what this app can and cannot answer ────────────────────────
+//
+// The enum offered IMMEDIATE, DATE and SERIAL, and the most common case in
+// equipment manufacture is none of them: a change usually takes effect when
+// existing stock of the old design is used up. With no value for it, anyone
+// recording such a change invented a date reality would not honour, or left
+// the field blank.
+
+describe("USE_UP", () => {
+  it("is offered as an option", () => {
+    expect(EFFECTIVITY_TYPES).toContain("USE_UP");
+  });
+
+  it("describes itself in the terms production actually uses", () => {
+    expect(EFFECTIVITY_LABELS.USE_UP).toBe("When existing stock is used up");
+    expect(formatEffectivity({ effectivityType: "USE_UP" })).toBe("When existing stock is used up");
+  });
+
+  /** It needs no companion field — there is nothing to enter. */
+  it("needs no extra value to be valid", () => {
+    expect(validateEffectivity({ effectivityType: "USE_UP" })).toBeNull();
+  });
+
+  /**
+   * DATE and SERIAL stay even though PACE will mostly use IMMEDIATE and
+   * USE_UP. Serial effectivity is standard in aerospace and medical devices,
+   * and date cutoffs are normal wherever a regulation sets one. This is a
+   * multi-tenant product; removing an option because one customer does not use
+   * it is not a product decision.
+   */
+  it("does not displace the other types", () => {
+    expect(EFFECTIVITY_TYPES).toEqual(["IMMEDIATE", "DATE", "SERIAL", "USE_UP"]);
+  });
+});
+
+describe("isComputable", () => {
+  it.each(["IMMEDIATE", "DATE"] as const)("says this app can resolve %s", (type) => {
+    expect(isComputable(type)).toBe(true);
+  });
+
+  /**
+   * The trigger for both is in the ERP — a unit's serial number, or an
+   * inventory level. No query here can resolve them, and one that appeared to
+   * would give a confident answer that is wrong in practice.
+   */
+  it.each(["SERIAL", "USE_UP"] as const)("says this app cannot resolve %s", (type) => {
+    expect(isComputable(type)).toBe(false);
+  });
+
+  it("treats an unset type as not computable", () => {
+    expect(isComputable(null)).toBe(false);
+    expect(isComputable(undefined)).toBe(false);
+  });
+});
+
+describe("deferralNote", () => {
+  it("sends a serial question to the ERP", () => {
+    expect(deferralNote({ effectivityType: "SERIAL" })).toMatch(/serial number in your ERP/i);
+  });
+
+  it("sends a use-up question to inventory", () => {
+    expect(deferralNote({ effectivityType: "USE_UP" })).toMatch(/inventory in your ERP/i);
+  });
+
+  it.each(["IMMEDIATE", "DATE"] as const)("adds nothing for %s, which resolves here", (type) => {
+    expect(deferralNote({ effectivityType: type })).toBeNull();
+  });
+
+  it("adds nothing when no effectivity is set", () => {
+    expect(deferralNote({})).toBeNull();
+  });
+
+  /** Every non-computable type must have a note, or the UI goes silent on it. */
+  it("covers exactly the types isComputable rejects", () => {
+    for (const type of EFFECTIVITY_TYPES) {
+      const hasNote = deferralNote({ effectivityType: type }) !== null;
+      expect(hasNote).toBe(!isComputable(type));
+    }
   });
 });

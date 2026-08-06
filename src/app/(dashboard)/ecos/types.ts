@@ -14,7 +14,7 @@ export interface ECO {
   /** Free-text note. Kept for the caveats that never fit a schema. */
   effectivity: string | null;
   /** Typed effectivity — see ./effectivity.ts. Null on ECOs predating migration 046. */
-  effectivityType: "IMMEDIATE" | "DATE" | "SERIAL" | null;
+  effectivityType: "IMMEDIATE" | "DATE" | "SERIAL" | "USE_UP" | null;
   effectiveFrom: string | null;
   effectiveSerial: string | null;
   createdAt: string;

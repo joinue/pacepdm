@@ -22,15 +22,22 @@ const UpdateEcoSchema = z
     disposition: optionalString,
     effectivity: optionalString,
     /**
-     * Typed effectivity. The prose `effectivity` field above stays for
-     * notes, but it cannot be queried, so "what is in effect on 1 March"
-     * and "which BOM shipped on unit 47" were both unanswerable.
+     * Typed effectivity. The prose `effectivity` field above stays for notes.
      *
-     * IMMEDIATE — in effect the moment the ECO is implemented
-     * DATE      — in effect from `effectiveFrom`
-     * SERIAL    — in effect from unit `effectiveSerial` onward
+     *   IMMEDIATE — in effect the moment the ECO is implemented
+     *   DATE      — in effect from `effectiveFrom`
+     *   SERIAL    — in effect from unit `effectiveSerial` onward
+     *   USE_UP    — in effect once existing stock of the old design is consumed
+     *
+     * Only the first two are answerable here. SERIAL needs the unit's serial
+     * and USE_UP needs inventory levels; both live in the ERP, so the app
+     * displays those and defers rather than computing an answer that would be
+     * wrong in practice. See docs/decisions/erp-ownership.md.
+     *
+     * USE_UP is the common case in equipment manufacture and was missing, so
+     * anyone recording such a change invented a date or left the field blank.
      */
-    effectivityType: z.enum(["IMMEDIATE", "DATE", "SERIAL"]).nullable().optional(),
+    effectivityType: z.enum(["IMMEDIATE", "DATE", "SERIAL", "USE_UP"]).nullable().optional(),
     effectiveFrom: z.string().datetime().nullable().optional(),
     effectiveSerial: optionalString,
   })

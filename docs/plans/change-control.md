@@ -162,21 +162,31 @@ fictional date or leaves it blank.
 
 **So the work is:**
 
-1. **Add `USE_UP` to `EffectivityType`.** One enum value, one label, a CHECK
-   constraint update. It makes the field record something true, which it
-   currently cannot for the most common case.
-2. **Answer only what is answerable.** For `IMMEDIATE` and `DATE`, resolve which
-   revision was in effect on a given date. For `SERIAL` and `USE_UP`, display
-   the recorded intent and say where the answer lives — _"from serial N1S-0470 —
-   check the unit in your ERP"_. **Do not calculate.** A query that looks right
-   and is wrong in practice is worse than no query.
-3. **Do not remove `DATE` or `SERIAL`.** PACE mostly will not use them, but this
-   is a multi-tenant product: serial effectivity is standard in aerospace and
-   medical devices, and date cutoffs are normal wherever a regulation or a
-   supplier contract sets one. Removing an option because one tenant does not
-   use it is the mistake
-   [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md) was rewritten
-   to prevent.
+1. **~~Add `USE_UP` to `EffectivityType`.~~ Done 2026-08-06** —
+   [`migration-053`](../../supabase/migrations/migration-053-use-up-effectivity.sql)
+   widens the CHECK constraint; the type, label, formatter and route schema all
+   carry it. **Migration written, not yet applied.**
+2. **~~Say where the answer lives when it is not here.~~ Done 2026-08-06** —
+   `isComputable()` and `deferralNote()` in
+   [`effectivity.ts`](<../../src/app/(dashboard)/ecos/effectivity.ts>). Choosing
+   `SERIAL` or `USE_UP` in the ECO form now shows _"check the unit's serial
+   number in your ERP"_ / _"check inventory in your ERP"_ at the point of
+   choosing, rather than implying the app will work it out later. A test pins
+   that every non-computable type has a note, so the UI cannot go silent on a
+   type someone adds later.
+3. **Still open: the date lookup.** For `IMMEDIATE` and `DATE` only, resolve
+   which revision was in effect on a given date. Genuinely useful for a tenant
+   whose changes are date-driven; for PACE it will mostly answer "determined
+   outside PACE", which is the correct output rather than a failure.
+   Deliberately left until somebody wants it — building it now is building on
+   spec.
+
+**Do not remove `DATE` or `SERIAL`.** PACE mostly will not use them, but this is
+a multi-tenant product: serial effectivity is standard in aerospace and medical
+devices, and date cutoffs are normal wherever a regulation or a supplier contract
+sets one. Removing an option because one tenant does not use it is the mistake
+[`../decisions/erp-ownership.md`](../decisions/erp-ownership.md) was rewritten to
+prevent.
 
 **Related, undocumented, and worth deciding separately:** `implement_eco` does
 not read effectivity at all. Implementing an ECO releases the carried revision

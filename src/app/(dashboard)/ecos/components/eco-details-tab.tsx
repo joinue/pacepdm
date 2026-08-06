@@ -22,6 +22,7 @@ import { fetchJson, errorMessage } from "@/lib/api-client";
 import {
   EFFECTIVITY_LABELS,
   EFFECTIVITY_TYPES,
+  deferralNote,
   formatEffectivity,
   fromDateInputValue,
   toDateInputValue,
@@ -280,6 +281,16 @@ export function EcoDetailsTab({ eco, onUpdated }: EcoDetailsTabProps) {
                   onChange={(e) => setEffectiveSerial(e.target.value)}
                   placeholder="e.g., SN-500"
                 />
+              )}
+              {/* SERIAL and USE_UP are declarations, not calculations: their
+                  trigger is a unit serial or an inventory level, both of which
+                  live in the ERP. Saying so at the point of choosing beats an
+                  app that looks like it will work it out and then cannot.
+                  See docs/decisions/erp-ownership.md. */}
+              {deferralNote({ effectivityType: effectivityType || null }) && (
+                <p className="text-xs text-muted-foreground">
+                  {deferralNote({ effectivityType: effectivityType || null })}
+                </p>
               )}
             </div>
             <div className="space-y-2">
