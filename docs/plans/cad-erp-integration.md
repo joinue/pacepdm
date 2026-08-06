@@ -1,6 +1,6 @@
 # SolidWorks and NetSuite integration — decisions to make before loading real data
 
-**Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress — importer built, item master next
+**Started:** 2026-08-04 · **Last updated:** 2026-08-06 · **Status:** in progress — decisions settled, item master next
 
 <!-- plan-metrics
 bom-import-route: 1
@@ -228,18 +228,17 @@ about the shape (`-R` followed by digits, at the end). `PS-24V-LRS75-24` and
 genuinely ends in `-R<n>` without meaning a revision; `sourcePartNumber` is
 retained through the parse so such a case stays traceable.
 
-### ~~2. Add `externalId` to `parts` and `boms`~~ Written 2026-08-06 — apply it
+### ~~2. Add `externalId` to `parts` and `boms`~~ Applied 2026-08-06
 
 [`migration-051-erp-external-id.sql`](../../supabase/migrations/migration-051-erp-external-id.sql).
 Nullable `text` on both tables, unique per tenant via a partial index so the
 nulls do not collide.
 
-**Not yet applied.** Migrations here are hand-pasted into the Supabase SQL
-editor, so this is written and reviewed but not live until someone runs it. The
-migration ends with a verify block to paste afterwards. Until it is applied,
-treat this item as open —
+**Live and verified**, by reading the column list out of PostgREST rather than
+trusting the file — `parts.externalId` and `boms.externalId` are both present.
 [`../decisions/hand-applied-migrations.md`](../decisions/hand-applied-migrations.md)
-is explicit that the files are not a ledger.
+is explicit that the migration files are not a ledger, so this is the only
+reading that counts.
 
 Nothing writes the column yet, and no route accepts it: both PUT handlers
 validate against a Zod allowlist (`UpdatePartSchema`, `UpdateBomSchema`) and
@@ -253,11 +252,13 @@ to be reconstructed from `concat(partNumber, '-', revision)`.
 
 ## Sequencing
 
-1. ~~**The two decisions above.**~~ Revision handling settled (split).
-   `externalId` migration written (051) — **paste it into the Supabase SQL
-   editor**; it is not live until you do. Part number authority between PACE
-   and NetSuite is the one still genuinely open, and it is a policy call rather
-   than code.
+1. ~~**The two decisions above.**~~ Both settled 2026-08-06. Revision handling
+   is a split; part-number authority and cost belong to NetSuite →
+   [`../decisions/erp-ownership.md`](../decisions/erp-ownership.md). Migration
+   051 applied and verified live. One workflow question is left over and is not
+   blocking: a newly designed part has no number until NetSuite issues one, so
+   either the engineer waits or PACE holds a placeholder. Answer it when parts
+   start being created in anger.
 2. ~~**BOM CSV import.**~~ Built — see above.
 3. **Import the item master.** Now the top item: the build list gave structure
    but no cost, description, material or vendor, so every BOM currently rolls

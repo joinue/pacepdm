@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-08-05 · **Status:** phase 1 complete
+**Started:** 2026-08-05 · **Last updated:** 2026-08-06 · **Status:** items 1, 2 and 4 closed; item 3 open by nature
 
 <!-- plan-metrics
 unchecked-delete: 0-->
@@ -265,6 +265,27 @@ everything else there held up:
 Nothing is now entirely unwalked, but the coverage is uneven: this pass read
 routes and schema rather than exercising flows against real data. Anything
 depending on volume, concurrency, or a populated vault is still unproven.
+
+**This is the one item in this plan still open, and it is open by nature.**
+Items 1, 2 and 4 are closed. This one cannot be finished by reading — it needs
+flows exercised against a populated vault, which means it stays open until the
+item master is imported and real BOMs are in use. Do not mark it done on the
+strength of another code read.
+
+Two findings since, both of which support the point that reading is not enough:
+
+- **The BOM rollup ignored every cost in the parts library.** It read
+  `bom_items.unitCost` and had no fallback to the part at all, so a priced part
+  contributed zero to every total it appeared in. Found while adding
+  `estimatedCost`, not by auditing — it looks entirely correct in the source.
+  Fixed 2026-08-06.
+- **The trash listing hid its own contents past 200 rows.** A flat cap with no
+  paging, so the oldest deletions stayed in the database and vanished from the
+  UI. Also invisible to a code read; it only shows up with volume. Fixed
+  2026-08-06.
+
+Both are the shape this item is about: correct-looking code whose defect only
+appears once there is data in it.
 
 ### ~~4. Self-approval is still permitted~~ Settled and built 2026-08-06
 

@@ -1,6 +1,6 @@
 # Codebase hardening — continuation plan
 
-**Started:** 2026-08-04 · **Last updated:** 2026-08-05 · **Status:** in progress
+**Started:** 2026-08-04 · **Last updated:** 2026-08-06 · **Status:** in progress
 
 <!-- plan-metrics
 routes-total: 111

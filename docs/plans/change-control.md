@@ -1,6 +1,6 @@
 # Change control — what the workflow review found, and what is left
 
-**Started:** 2026-08-05 · **Last updated:** 2026-08-05 · **Status:** in progress
+**Started:** 2026-08-05 · **Last updated:** 2026-08-06 · **Status:** in progress — one item left (effectivity is stored and nothing reads it)
 
 <!-- plan-metrics
 bom-revise-route: 1
