@@ -307,6 +307,38 @@ to be reconstructed from `concat(partNumber, '-', revision)`.
    `N1S-M-001-R2` at $332.13 from PACE Kunshan for the part the library holds at
    R2, and raises the `N1S-M-006` collision unprompted.
 
+   **The vendor half of it never landed, and was fixed 2026-08-07.** Of the
+   three things this import exists to bring across — description, cost, vendor —
+   the first two worked and the third had never once succeeded. The route wrote
+   `part_vendors.vendorName` and no `vendorId`, which has been NOT NULL behind a
+   RESTRICT FK since migration 009, so Postgres rejected every insert with 23502. The result was not bound, so nothing saw the error and the row was
+   still reported as `updated`.
+
+   Four things worth knowing before touching it:
+
+   - **`npm run probe:schema` found this, not a code read.** It is the guard
+     [`functional-audit.md`](functional-audit.md#guards-added) added for exactly
+     this shape, and it names the column and the insert. Run it after any
+     import work.
+   - **The importer now creates vendors.** A QuickBooks preferred vendor is a
+     name, not an id, and most of them are not in the vendor list yet. New ones
+     are created through the shared resolver in
+     [`src/lib/vendors.ts`](../../src/lib/vendors.ts) and counted back as
+     `vendorsCreated`, so an import that adds thirty vendors says so rather
+     than leaving them to be discovered.
+   - **A failed link is a `warning`, not an `error`.** The part's cost and
+     description are already written by the time the vendor is attempted, so
+     the row landed — calling it a failure would misreport what happened. Same
+     distinction the reserved-letter warning draws.
+   - **An existing link is left alone**, so re-running is safe. That also means
+     the importer does not refresh a stale price on a link somebody already
+     made by hand. Deliberate for now, and the obvious next question if ERP
+     prices start drifting from what is stored here.
+
+   The test that covered this passed throughout, because the mock accepted any
+   object. It now enforces the NOT NULL columns, which is the only reason the
+   assertion means anything.
+
 4. **Add `externalId`** (item 2 under decisions above). More urgent after the
    revision split, since part numbers no longer match the ERP verbatim.
 5. ~~**Require `partId` on every line before `DRAFT → IN_REVIEW`.**~~ Done

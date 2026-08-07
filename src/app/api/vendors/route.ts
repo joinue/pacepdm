@@ -4,13 +4,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, optionalString } from "@/lib/validation";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
-
-// Canonicalize vendor names so "Digi-Key", "digi-key", "Digi  Key " all
-// resolve to the same vendor. The DB unique index is exact-match on `name`,
-// so we MUST normalize before insert/lookup or we'll create duplicates.
-function normalizeVendorName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ");
-}
+import { normalizeVendorName } from "@/lib/vendors";
 
 const ListQuerySchema = z.object({
   q: z.string().optional(),

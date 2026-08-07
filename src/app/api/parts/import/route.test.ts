@@ -21,23 +21,61 @@ const { tableResults, inserts, updates, mockFrom } = vi.hoisted(() => {
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
 
+  /**
+   * The NOT NULL columns this mock enforces, so an insert that would be
+   * rejected by Postgres is rejected here too.
+   *
+   * This exists because it did not. `part_vendors.vendorId` has been NOT NULL
+   * with a RESTRICT FK since migration 009, the QuickBooks path omitted it,
+   * and a mock that accepted any object made the test that covers this pass
+   * against an insert the database refused on every call.
+   */
+  const NOT_NULL: Record<string, string[]> = {
+    part_vendors: ["partId", "vendorId", "vendorName"],
+    vendors: ["name"],
+    parts: ["partNumber"],
+  };
+
+  function notNullViolation(table: string, data: Record<string, unknown>) {
+    for (const col of NOT_NULL[table] ?? []) {
+      if (data[col] === undefined || data[col] === null) {
+        return {
+          code: "23502",
+          message: `null value in column "${col}" of relation "${table}" violates not-null constraint`,
+        };
+      }
+    }
+    return null;
+  }
+
   function makeChain(table: string) {
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
     const resolvable = () => tableResults[table] ?? { data: null, error: null };
     // `range` is what the QuickBooks path uses to page the tenant's own parts
     // rather than querying by 6,000 part numbers.
-    for (const m of ["select", "eq", "in", "is", "order", "limit", "range"] as const)
+    for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "range"] as const)
       chain[m] = () => chain;
     chain.single = () => resolvable();
     chain.maybeSingle = () => resolvable();
     chain.insert = (data: unknown) => {
-      inserts.push(data as Record<string, unknown>);
-      return Promise.resolve({ data: null, error: null });
+      const row = data as Record<string, unknown>;
+      inserts.push({ __table: table, ...row });
+      const error = notNullViolation(table, row);
+      const result = { data: error ? null : { ...row }, error };
+      // An insert is awaited directly in some places and chained through
+      // `.select().single()` in others, so the mock has to be both.
+      const ins: Record<string, (...a: unknown[]) => unknown> = {};
+      ins.select = () => ins;
+      ins.single = () => Promise.resolve(result);
+      ins.maybeSingle = () => Promise.resolve(result);
+      ins.then = ((r: (v: unknown) => void) => r(result)) as never;
+      return ins;
     };
     chain.update = (data: unknown) => {
-      updates.push(data as Record<string, unknown>);
+      updates.push({ __table: table, ...(data as Record<string, unknown>) });
       const u: Record<string, (...a: unknown[]) => unknown> = {};
       u.eq = () => u;
+      u.neq = () => u;
       u.then = ((r: (v: unknown) => void) => r({ data: null, error: null })) as never;
       return u;
     };
@@ -279,6 +317,15 @@ describe("POST /api/parts/import — QuickBooks export", () => {
     return `,"${active}","Inventory Part","${item}","${desc}","Tax","Sales:Equipment","COGS","Inventory Asset",0.00,,0,${cost},"${vendor}",,900.00,"","","","0","1"`;
   }
 
+  /**
+   * The last write to a named table. The QuickBooks path now updates two —
+   * the part itself, and `part_vendors` when it demotes a previous primary —
+   * so "the last update" is ambiguous without saying which.
+   */
+  function lastUpdateTo(table: string) {
+    return [...updates].reverse().find((u) => u.__table === table)!;
+  }
+
   /** The PDM's own library — the QuickBooks path only touches what is here. */
   function givenLibrary(
     parts: Array<{ id: string; partNumber: string; revision: string | null; name: string }>
@@ -289,6 +336,7 @@ describe("POST /api/parts/import — QuickBooks export", () => {
   beforeEach(() => {
     givenLibrary([{ id: "p1", partNumber: "N1S-M-001", revision: "R2", name: "N1S-M-001" }]);
     tableResults.part_vendors = { data: null, error: null };
+    tableResults.vendors = { data: [], error: null };
   });
 
   it("is recognised and reported as a QuickBooks import", async () => {
@@ -314,7 +362,7 @@ describe("POST /api/parts/import — QuickBooks export", () => {
     const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
 
     expect(body.updated).toBe(1);
-    const update = updates.at(-1)!;
+    const update = lastUpdateTo("parts");
     expect(update.unitCost).toBe(332.13);
     // The ERP's identifier for this exact revision — the join key.
     expect(update.externalId).toBe("N1S-M-001-R2");
@@ -363,7 +411,7 @@ describe("POST /api/parts/import — QuickBooks export", () => {
         `${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "NANO-1000S Base Casting", "332.13", "Kunshan")}`
       )
     );
-    expect(updates.at(-1)!.name).toBe("NANO-1000S Base Casting");
+    expect(lastUpdateTo("parts").name).toBe("NANO-1000S Base Casting");
   });
 
   it("leaves a name somebody curated alone", async () => {
@@ -375,15 +423,105 @@ describe("POST /api/parts/import — QuickBooks export", () => {
         `${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "NANO-1000S Base Casting", "332.13", "Kunshan")}`
       )
     );
-    expect(updates.at(-1)!.name).toBeUndefined();
+    expect(lastUpdateTo("parts").name).toBeUndefined();
   });
 
-  it("records the preferred vendor against the part", async () => {
+  /**
+   * `part_vendors.vendorId` is NOT NULL behind a RESTRICT FK (migration 009).
+   * The importer wrote only the legacy `vendorName` text column, so every one
+   * of these inserts was rejected with 23502 — and the result was never bound,
+   * so the row still counted as `updated` and the import reported success.
+   *
+   * The mock enforces the NOT NULL columns for exactly this reason: without
+   * that, this assertion passes against an insert the database refuses.
+   */
+  it("links the preferred vendor by id, not by name alone", async () => {
     await POST(
       csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
     );
-    const link = inserts.find((i) => i.vendorName);
-    expect(link).toMatchObject({ partId: "p1", vendorName: "Kunshan", unitCost: 332.13 });
+    const link = inserts.find((i) => i.__table === "part_vendors");
+    expect(link).toMatchObject({
+      partId: "p1",
+      vendorId: "mock-uuid",
+      vendorName: "Kunshan",
+      unitCost: 332.13,
+      isPrimary: true,
+    });
+  });
+
+  it("creates the vendor the export names, and says how many it created", async () => {
+    const body = await (
+      await POST(
+        csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+      )
+    ).json();
+    expect(inserts.find((i) => i.__table === "vendors")).toMatchObject({ name: "Kunshan" });
+    expect(body.vendorsCreated).toBe(1);
+  });
+
+  it("reuses a vendor the tenant already has rather than duplicating it", async () => {
+    // The unique index is exact-match on name, so the match has to be made
+    // here — case and whitespace included.
+    tableResults.vendors = { data: [{ id: "v-existing", name: "kunshan" }], error: null };
+    const body = await (
+      await POST(
+        csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "  Kunshan  ")}`)
+      )
+    ).json();
+
+    expect(inserts.find((i) => i.__table === "vendors")).toBeUndefined();
+    expect(body.vendorsCreated).toBe(0);
+    expect(inserts.find((i) => i.__table === "part_vendors")).toMatchObject({
+      vendorId: "v-existing",
+    });
+  });
+
+  /**
+   * A part carries at most one primary vendor — `/api/boms/[bomId]/items`
+   * keys its primary-cost lookup by partId and would otherwise pick one of
+   * two arbitrarily.
+   */
+  it("demotes a previous primary vendor after linking the new one", async () => {
+    await POST(
+      csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+    );
+    expect(lastUpdateTo("part_vendors")).toMatchObject({ isPrimary: false });
+    // After, not before: demoting first leaves the part with no primary at
+    // all if the insert then fails.
+    const linkIndex = inserts.findIndex((i) => i.__table === "part_vendors");
+    expect(linkIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it("leaves an existing link to the same vendor alone", async () => {
+    tableResults.vendors = { data: [{ id: "v-existing", name: "Kunshan" }], error: null };
+    tableResults.part_vendors = { data: { id: "pv-1" }, error: null };
+    await POST(
+      csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+    );
+    expect(inserts.find((i) => i.__table === "part_vendors")).toBeUndefined();
+    expect(updates.find((u) => u.__table === "part_vendors")).toBeUndefined();
+  });
+
+  /**
+   * The part's own cost and description were already written by the time the
+   * vendor link is attempted, so the row landed — a failed link is a warning,
+   * not a failure. Silently discarding it is what hid this for as long as it
+   * was hidden.
+   */
+  it("warns rather than failing when the vendor link cannot be made", async () => {
+    tableResults.vendors = { data: null, error: { code: "42501", message: "permission denied" } };
+    const body = await (
+      await POST(
+        csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+      )
+    ).json();
+
+    expect(body.updated).toBe(1);
+    expect(body.failed).toBe(0);
+    expect(body.warned).toBe(1);
+    expect(body.results[0].action).toBe("updated");
+    expect(body.results[0].warning).toMatch(/Kunshan/);
+    expect(body.results[0].warning).toMatch(/permission denied/);
   });
 
   /**

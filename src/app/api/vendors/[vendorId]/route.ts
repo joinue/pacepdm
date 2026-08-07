@@ -3,10 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { z, optionalString, uuid } from "@/lib/validation";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
-
-function normalizeVendorName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ");
-}
+import { normalizeVendorName } from "@/lib/vendors";
 
 const UpdateVendorSchema = z
   .object({

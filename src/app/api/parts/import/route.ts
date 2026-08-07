@@ -6,6 +6,7 @@ import { getApiTenantUser, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { parseCsvRecords } from "@/lib/csv";
 import { usesReservedLetter } from "@/lib/revision";
+import { createVendorResolver, normalizeVendorName } from "@/lib/vendors";
 import {
   looksLikeQuickBooksExport,
   parseQuickBooksExport,
@@ -214,6 +215,98 @@ function decodeCsv(bytes: ArrayBuffer): string {
 }
 
 /**
+ * Point a part at the vendor QuickBooks calls its preferred one.
+ *
+ * Returns a note when the link could not be made, and null when there was
+ * nothing to do or it worked. The note is a **warning** rather than an error
+ * on purpose: the part's own cost and description have already been written by
+ * the time this runs, so the row landed — the vendor is the part of it that
+ * did not.
+ *
+ * This used to write `vendorName` and no `vendorId`. `vendorId` has been NOT
+ * NULL with a RESTRICT foreign key since migration 009, so every one of those
+ * inserts was rejected with 23502 — and because the result was never bound,
+ * the row was still reported as `updated` and the import looked clean. The
+ * vendor column of a QuickBooks export is one of the three things this import
+ * exists to bring across, and none of it had ever landed.
+ */
+async function linkPreferredVendor(
+  db: ScopedDb,
+  vendors: ReturnType<typeof createVendorResolver>,
+  partId: string,
+  rawVendorName: string,
+  unitCost: number | null,
+  now: string
+): Promise<string | null> {
+  let vendorId: string | null;
+  const vendorName = normalizeVendorName(rawVendorName);
+  try {
+    vendorId = await vendors.resolve(rawVendorName, now);
+  } catch (err) {
+    return `Preferred vendor "${vendorName}" could not be recorded: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
+  }
+  if (!vendorId) return null;
+
+  // lint-conventions-allow: child-table-direct-query — part_vendors has no
+  // tenantId; the parent part was resolved through a tenant-filtered query
+  // above, so partId is already known to belong to this tenant, and vendorId
+  // came from the tenant-scoped resolver.
+  const { data: link } = await db
+    .from("part_vendors")
+    .select("id")
+    .eq("partId", partId)
+    .eq("vendorId", vendorId)
+    .maybeSingle();
+
+  // An existing link is left exactly as it is. Re-running the import is safe,
+  // and a price or a primary flag somebody set by hand is not this importer's
+  // to overwrite.
+  if (link) return null;
+
+  const linkId = uuid();
+  // lint-conventions-allow: child-table-direct-query — same parent as the
+  // lookup directly above.
+  const { error } = await db.from("part_vendors").insert({
+    id: linkId,
+    partId,
+    vendorId,
+    // The legacy free-text column, kept in sync until migration 010 drops it.
+    vendorName,
+    unitCost,
+    currency: "USD",
+    isPrimary: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  if (error) {
+    return `Preferred vendor "${vendorName}" could not be linked: ${error.message}`;
+  }
+
+  // A part has at most one primary vendor — `/api/boms/[bomId]/items` keys its
+  // primary-cost lookup by partId and would otherwise pick one of two
+  // arbitrarily. Demote after inserting, not before: doing it first leaves the
+  // part with no primary at all if the insert then fails.
+  //
+  // The ERP's preferred vendor wins over one set here, which is the same
+  // ownership split cost follows → docs/decisions/erp-ownership.md.
+  // lint-conventions-allow: child-table-direct-query — same parent again.
+  const { error: demoteError } = await db
+    .from("part_vendors")
+    .update({ isPrimary: false, updatedAt: now })
+    .eq("partId", partId)
+    .neq("id", linkId);
+
+  if (demoteError) {
+    return `Vendor "${vendorName}" was linked, but an earlier primary vendor on this part could not be demoted: ${demoteError.message}`;
+  }
+
+  return null;
+}
+
+/**
  * Import a raw QuickBooks item export.
  *
  * **Update-only, and that is the design rather than a limitation.** The export
@@ -256,6 +349,7 @@ async function importFromQuickBooks(
   }
 
   const now = new Date().toISOString();
+  const vendors = createVendorResolver(db);
   const results: RowResult[] = [];
   let updated = 0;
   let failed = 0;
@@ -319,29 +413,8 @@ async function importFromQuickBooks(
     }
 
     if (row.vendor) {
-      // lint-conventions-allow: child-table-direct-query — part_vendors has no
-      // tenantId; the parent part was resolved through a tenant-filtered query
-      // above, so partId is already known to belong to this tenant.
-      const { data: link } = await db
-        .from("part_vendors")
-        .select("id")
-        .eq("partId", part.id)
-        .eq("vendorName", row.vendor)
-        .maybeSingle();
-      if (!link) {
-        // lint-conventions-allow: child-table-direct-query — same parent as the
-        // lookup directly above; partId is already known to be in this tenant.
-        await db.from("part_vendors").insert({
-          id: uuid(),
-          partId: part.id,
-          vendorName: row.vendor,
-          unitCost: row.unitCost,
-          currency: "USD",
-          isPrimary: true,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      const note = await linkPreferredVendor(db, vendors, part.id, row.vendor, row.unitCost, now);
+      if (note) notes.push(note);
     }
 
     const warning = notes.length > 0 ? notes.join(" ") : undefined;
@@ -356,7 +429,15 @@ async function importFromQuickBooks(
     action: "parts.import",
     entityType: "part",
     entityId: "bulk",
-    details: { source: "quickbooks", updated, failed, warned, notInLibrary, rows: records.length },
+    details: {
+      source: "quickbooks",
+      updated,
+      failed,
+      warned,
+      notInLibrary,
+      vendorsCreated: vendors.created,
+      rows: records.length,
+    },
   });
 
   return NextResponse.json({
@@ -365,6 +446,13 @@ async function importFromQuickBooks(
     updated,
     failed,
     warned,
+    /**
+     * Vendors this import brought into existence. The export names a preferred
+     * vendor per item and most of them are not in the vendor list yet, so an
+     * import that creates thirty of them should say so rather than leaving
+     * them to be found later.
+     */
+    vendorsCreated: vendors.created,
     /** Rows that are parts but name something this PDM does not carry. */
     notInLibrary,
     /** Rows that were never parts — services, sales tax items, inactive. */
