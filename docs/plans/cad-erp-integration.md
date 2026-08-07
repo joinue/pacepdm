@@ -137,9 +137,11 @@ Four things block automating it today.
 **1. No external identifier.** Any sync would key on `partNumber` string
 matching, which breaks the first time someone edits a part number — and is
 already broken by the revision split, before anyone has edited anything.
-Migration 051 adds `externalId` to `parts` and `boms`; **it is written but not
-applied**, and `bom_items` deliberately does not get one (a line is identified
-by its parent BOM plus its `partId`, not independently). → gated below.
+Migration 051 adds `externalId` to `parts` and `boms`, and is **applied and
+verified live**. `bom_items` deliberately does not get one — a line is
+identified by its parent BOM plus its `partId`, not independently. The
+QuickBooks importer now populates `externalId` with the full ERP item name
+(`N1S-M-001-R2`), which is the join key. → see item 3 under Sequencing.
 
 **~~2. BOM lines can be free text.~~ Closed 2026-08-06.**
 `DRAFT → IN_REVIEW` on `PUT /api/boms/[bomId]` now refuses while any line has
