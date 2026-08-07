@@ -64,11 +64,20 @@ export async function POST(request: NextRequest) {
     // If marking as default, unset other defaults first — only one default
     // lifecycle per tenant.
     if (isDefault) {
-      await db
+      // Refuse rather than create a second default. Nothing in the schema
+      // enforces one-per-tenant, so a discarded failure here leaves two, and
+      // which one a new file gets depends on row order.
+      const { error: clearError } = await db
         .from("lifecycles")
         .update({ isDefault: false, updatedAt: now })
         .eq("tenantId", tenantUser.tenantId)
         .eq("isDefault", true);
+      if (clearError) {
+        return NextResponse.json(
+          { error: `Could not clear the existing default lifecycle: ${clearError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const { data: lifecycle, error } = await db

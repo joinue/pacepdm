@@ -155,7 +155,17 @@ export async function POST(
     }
     if (toStateName === "Obsolete") updateData.isFrozen = true;
 
-    await db.from("files").update(updateData).eq("id", fileId);
+    // Refuse before the audit row and the notification. A transition that
+    // reports success without moving the file leaves everyone downstream —
+    // the timeline, the notification, the frozen flag a release depends on —
+    // describing a state the file is not in.
+    const { error: transitionError } = await db.from("files").update(updateData).eq("id", fileId);
+    if (transitionError) {
+      return NextResponse.json(
+        { error: `Could not move the file to ${toStateName}: ${transitionError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

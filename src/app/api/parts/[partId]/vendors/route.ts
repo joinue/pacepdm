@@ -52,7 +52,19 @@ export async function POST(
 
     // If setting as primary, unset others on this part
     if (body.isPrimary) {
-      await db.from("part_vendors").update({ isPrimary: false }).eq("partId", partId);
+      // `/api/boms/[bomId]/items` keys its primary-cost lookup by partId and
+      // assumes at most one. Two primaries means the rollup price depends on
+      // row order.
+      const { error: demoteError } = await db
+        .from("part_vendors")
+        .update({ isPrimary: false })
+        .eq("partId", partId);
+      if (demoteError) {
+        return NextResponse.json(
+          { error: `Could not demote the existing primary vendor: ${demoteError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const { data: link, error } = await db

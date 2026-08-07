@@ -227,7 +227,15 @@ export const PUT = withTenant(
         });
 
         if (workflow) {
-          await db.from("ecos").update({ status, updatedAt: now }).eq("id", ecoId);
+          // The ECO has to reach this status before the workflow starts, or
+          // the approval request references a state the ECO is not in.
+          const { error: statusError } = await db
+            .from("ecos")
+            .update({ status, updatedAt: now })
+            .eq("id", ecoId);
+          if (statusError) {
+            throw new Error(`Could not move the ECO to ${status}: ${statusError.message}`);
+          }
 
           const result = await startWorkflow({
             tenantId: tenantUser.tenantId,

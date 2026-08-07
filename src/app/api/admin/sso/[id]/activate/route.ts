@@ -72,18 +72,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const message = err instanceof Error ? err.message : String(err);
       // Park the row in `error` so the admin can see what went wrong
       // instead of the UI silently rolling back.
-      await db
+      const { error: parkError } = await db
         .from("tenant_sso_domains")
         .update({
           status: "error",
           updatedAt: new Date().toISOString(),
         })
         .eq("id", id);
+      // The provider failure is the one worth returning — this is only the
+      // record of it — but a parking failure means the row keeps its old
+      // status and the admin sees no sign anything went wrong.
+      if (parkError) {
+        console.error(`[sso] could not park domain ${id} in error state:`, parkError.message);
+      }
       return NextResponse.json({ error: message }, { status: 400 });
     }
 
     const now = new Date().toISOString();
-    await db
+    // The provider now exists upstream. If this row does not record it, the
+    // domain stays inactive here while SSO is live there — and re-activating
+    // would create a second provider for the same domain.
+    const { error: activateError } = await db
       .from("tenant_sso_domains")
       .update({
         status: "active",
@@ -93,6 +102,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       })
       .eq("id", id)
       .eq("tenantId", tenantUser.tenantId);
+    if (activateError) {
+      return NextResponse.json(
+        {
+          error:
+            `The SSO provider was created (${provider.id}) but this domain could not be ` +
+            `marked active: ${activateError.message}. Do not retry — remove the provider first.`,
+        },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

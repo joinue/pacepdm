@@ -53,11 +53,15 @@ export const PUT = withTenant(
       }
     }
 
-    await db.from("tenants").update({
+    // `blockSelfApproval` lives in here, so a discarded failure means an
+    // admin turns on a control, is told it saved, and every approval keeps
+    // running without it.
+    const { error } = await db.from("tenants").update({
       name: body.name,
       settings: sanitized,
       updatedAt: new Date().toISOString(),
     });
+    if (error) throw new Error(error.message);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

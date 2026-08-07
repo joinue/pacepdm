@@ -101,7 +101,7 @@ export async function POST(
     }
 
     // Create version record
-    await db.from("file_versions").insert({
+    const { error: versionError } = await db.from("file_versions").insert({
       id: uuid(),
       fileId,
       version: newVersion,
@@ -113,8 +113,19 @@ export async function POST(
       createdAt: now,
     });
 
+    // Refuse before the file row is bumped. `files.currentVersion` pointing
+    // at a version row that was never written aims every read at a blob
+    // nothing can resolve; leaving the file on its previous version leaves it
+    // whole and the upload retryable.
+    if (versionError) {
+      return NextResponse.json(
+        { error: `Could not record the new version: ${versionError.message}` },
+        { status: 500 }
+      );
+    }
+
     // Update file record — clear any checkout and bump version
-    await db
+    const { error: bumpError } = await db
       .from("files")
       .update({
         currentVersion: newVersion,
@@ -125,6 +136,12 @@ export async function POST(
         thumbnailKey,
       })
       .eq("id", fileId);
+    if (bumpError) {
+      return NextResponse.json(
+        { error: `The version was stored but the file could not be updated: ${bumpError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

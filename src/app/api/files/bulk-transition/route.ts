@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { canEditFolder, canViewFolder, getFolderAccessScope } from "@/lib/folder-access";
+import { nextRevision } from "@/lib/revision";
 
 const BulkTransitionSchema = z.object({
   fileIds: z.array(nonEmptyString).min(1, "At least one fileId is required"),
@@ -117,12 +118,30 @@ export async function POST(request: NextRequest) {
 
       if (transition.toState.name === "Released") updateData.isFrozen = true;
       if (transition.fromState.name === "Released" && transition.toState.name === "WIP") {
-        updateData.revision = String.fromCharCode(file.revision.charCodeAt(0) + 1);
+        // The third path to reopening a released file, and the third copy of
+        // the arithmetic `src/lib/revision.ts` replaced. `charCodeAt(0) + 1`
+        // turns Z into "[" and R2 into "S" — a wrong value written into the
+        // field a release is identified by. Skip the file rather than guess;
+        // this loop already reports per-file reasons.
+        const next = nextRevision(file.revision);
+        if (!next) {
+          errors.push(
+            `${file.name}: cannot work out the revision after "${file.revision}" — set it by hand, then reopen`
+          );
+          continue;
+        }
+        updateData.revision = next.next;
         updateData.isFrozen = false;
       }
       if (transition.toState.name === "Obsolete") updateData.isFrozen = true;
 
-      await db.from("files").update(updateData).eq("id", fileId);
+      // Per-file, like every other refusal in this loop — one file that will
+      // not move must not stop the rest, and must not be counted as moved.
+      const { error: transitionError } = await db.from("files").update(updateData).eq("id", fileId);
+      if (transitionError) {
+        errors.push(`${file.name}: ${transitionError.message}`);
+        continue;
+      }
 
       await logAudit({
         tenantId: tenantUser.tenantId,

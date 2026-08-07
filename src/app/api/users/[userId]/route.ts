@@ -121,12 +121,22 @@ export async function PATCH(
 
       if (checkedOut && checkedOut.length > 0) {
         const now = new Date().toISOString();
-        await db
+        // Refuse before the count and the audit rows below. Reporting N
+        // checkouts released while the files stay locked to a user who has
+        // just been deactivated leaves those files unreachable, with
+        // everything on screen saying they were freed.
+        const { error: releaseError } = await db
           .from("files")
           .update({ isCheckedOut: false, checkedOutById: null, checkedOutAt: null, updatedAt: now })
           .eq("tenantId", tenantUser.tenantId)
           .eq("checkedOutById", userId)
           .eq("isCheckedOut", true);
+        if (releaseError) {
+          return NextResponse.json(
+            { error: `Could not release this user's checked-out files: ${releaseError.message}` },
+            { status: 500 }
+          );
+        }
         releasedCheckouts = checkedOut.length;
 
         for (const file of checkedOut) {
@@ -277,12 +287,22 @@ export async function DELETE(
 
     if (checkedOut && checkedOut.length > 0) {
       const now = new Date().toISOString();
-      await db
+      // Refuse before the count and the audit rows below. Reporting N
+      // checkouts released while the files stay locked to a user who no
+      // longer has access is the worst version of this: the files are
+      // unreachable and everything says they were freed.
+      const { error: releaseError } = await db
         .from("files")
         .update({ isCheckedOut: false, checkedOutById: null, checkedOutAt: null, updatedAt: now })
         .eq("tenantId", tenantUser.tenantId)
         .eq("checkedOutById", userId)
         .eq("isCheckedOut", true);
+      if (releaseError) {
+        return NextResponse.json(
+          { error: `Could not release this user's checked-out files: ${releaseError.message}` },
+          { status: 500 }
+        );
+      }
       releasedCheckouts = checkedOut.length;
 
       for (const file of checkedOut) {

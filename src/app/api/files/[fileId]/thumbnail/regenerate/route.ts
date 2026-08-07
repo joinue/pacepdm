@@ -100,10 +100,16 @@ export async function POST(
       // costs are pennies and the new key/null path is clearer than
       // deletion + race-free cleanup).
       const now = new Date().toISOString();
-      await db
+      const { error: clearError } = await db
         .from("files")
         .update({ thumbnailKey: null, thumbnailAttemptedAt: now, updatedAt: now })
         .eq("id", fileId);
+      if (clearError) {
+        return NextResponse.json(
+          { error: `Could not clear the stale thumbnail: ${clearError.message}` },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({
         regenerated: false,
         cleared: !!file.thumbnailKey,
@@ -130,10 +136,16 @@ export async function POST(
     }
 
     const now = new Date().toISOString();
-    await db
+    const { error: linkError } = await db
       .from("files")
       .update({ thumbnailKey, thumbnailAttemptedAt: now, updatedAt: now })
       .eq("id", fileId);
+    if (linkError) {
+      return NextResponse.json(
+        { error: `The thumbnail was regenerated but not applied: ${linkError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

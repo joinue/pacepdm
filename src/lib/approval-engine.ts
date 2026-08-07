@@ -8,6 +8,7 @@ import {
 } from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
+import { nextRevision } from "@/lib/revision";
 
 /**
  * Core approval workflow engine.
@@ -200,7 +201,7 @@ export async function startWorkflow(params: StartWorkflowParams) {
     }
 
     for (let seat = 0; seat < seats; seat++) {
-      await db.from("approval_decisions").insert({
+      const { error } = await db.from("approval_decisions").insert({
         id: uuid(),
         requestId,
         groupId: step.groupId,
@@ -211,6 +212,21 @@ export async function startWorkflow(params: StartWorkflowParams) {
         status: isFirst ? "PENDING" : "WAITING", // WAITING = not yet active
         createdAt: now,
       });
+
+      // Hard failure, for the same reason the empty-group check above is one:
+      // a request holding fewer decision rows than the step has seats can
+      // never satisfy ALL or MAJORITY. It would sit PENDING with no exit but
+      // a recall, and the entity would be stranded pre-transition — which is
+      // finding 4 in docs/plans/functional-audit.md, arrived at by a
+      // different route.
+      if (error) {
+        return {
+          success: false,
+          error:
+            `Could not create approval seat ${seat + 1} of ${seats} for step ` +
+            `${step.stepOrder}: ${error.message}`,
+        };
+      }
     }
   }
 
@@ -419,14 +435,18 @@ export async function processDecision({
 
   if (!stepApproved) {
     // Step rejected — reject the entire request
-    await db
-      .from("approval_requests")
-      .update({
-        status: "REJECTED",
-        updatedAt: now,
-        completedAt: now,
-      })
-      .eq("id", requestId);
+    const rejectFailed = await applied(
+      db
+        .from("approval_requests")
+        .update({
+          status: "REJECTED",
+          updatedAt: now,
+          completedAt: now,
+        })
+        .eq("id", requestId),
+      "Your rejection was recorded, but the request could not be closed"
+    );
+    if (rejectFailed) return { error: rejectFailed };
 
     await addHistory(
       requestId,
@@ -448,7 +468,7 @@ export async function processDecision({
     });
 
     // Execute rejection side effects
-    await handleRequestCompletion(request, "REJECTED", tenantId, userId);
+    const rejectionEffect = await handleRequestCompletion(request, "REJECTED", tenantId, userId);
 
     await logAudit({
       tenantId,
@@ -459,7 +479,12 @@ export async function processDecision({
       details: { title: request.title, comment: comment || null },
     });
 
-    return { success: true, requestComplete: true, requestStatus: "REJECTED" };
+    return {
+      success: true,
+      requestComplete: true,
+      requestStatus: "REJECTED",
+      warning: rejectionEffect ?? undefined,
+    };
   }
 
   // Step approved — check if there's a next step
@@ -484,7 +509,14 @@ export async function processDecision({
     // decision row when the workflow was started, so we only need to flip
     // the status from BLOCKED to PENDING.
     for (const nd of nextStepDecisions) {
-      await db.from("approval_decisions").update({ status: "PENDING" }).eq("id", nd.id);
+      // A seat left WAITING is a seat nobody can act on. In ALL or MAJORITY
+      // mode that is enough to stall the step permanently, since the count it
+      // needs can never be reached.
+      const activateFailed = await applied(
+        db.from("approval_decisions").update({ status: "PENDING" }).eq("id", nd.id),
+        "Your approval was recorded, but the next step could not be activated"
+      );
+      if (activateFailed) return { error: activateFailed };
     }
 
     // Look up the step's deadline
@@ -497,17 +529,29 @@ export async function processDecision({
     if (nextStepFull?.deadlineHours) {
       const deadlineAt = new Date(Date.now() + nextStepFull.deadlineHours * 3600000).toISOString();
       for (const nd of nextStepDecisions) {
-        await db.from("approval_decisions").update({ deadlineAt }).eq("id", nd.id);
+        // The step is already active by this point, so a missing deadline is
+        // a lesser fault than a missing activation — but it is the whole of
+        // what the reminder job reads, so a silent miss means a step that is
+        // never chased.
+        const deadlineFailed = await applied(
+          db.from("approval_decisions").update({ deadlineAt }).eq("id", nd.id),
+          "The next step was activated, but its deadline could not be set"
+        );
+        if (deadlineFailed) return { error: deadlineFailed };
       }
     }
 
-    await db
-      .from("approval_requests")
-      .update({
-        currentStepOrder: nextStepData.stepOrder,
-        updatedAt: now,
-      })
-      .eq("id", requestId);
+    const advanceFailed = await applied(
+      db
+        .from("approval_requests")
+        .update({
+          currentStepOrder: nextStepData.stepOrder,
+          updatedAt: now,
+        })
+        .eq("id", requestId),
+      "The next step was activated, but the request still points at the previous one"
+    );
+    if (advanceFailed) return { error: advanceFailed };
 
     await addHistory(
       requestId,
@@ -552,14 +596,22 @@ export async function processDecision({
   }
 
   // No more steps — workflow complete, request approved
-  await db
-    .from("approval_requests")
-    .update({
-      status: "APPROVED",
-      updatedAt: now,
-      completedAt: now,
-    })
-    .eq("id", requestId);
+  const completeFailed = await applied(
+    db
+      .from("approval_requests")
+      .update({
+        status: "APPROVED",
+        updatedAt: now,
+        completedAt: now,
+      })
+      .eq("id", requestId),
+    "Your approval was recorded, but the request could not be completed"
+  );
+  // Returned before the side effects below, deliberately. Releasing the file
+  // or the ECO while the request that authorises it is still PENDING is the
+  // worse of the two half-states — it is the one that changes what people
+  // build from.
+  if (completeFailed) return { error: completeFailed };
 
   await addHistory(requestId, "COMPLETED", userId, "All approval steps completed — approved");
 
@@ -576,7 +628,7 @@ export async function processDecision({
   });
 
   // Execute approval side effects
-  await handleRequestCompletion(request, "APPROVED", tenantId, userId);
+  const approvalEffect = await handleRequestCompletion(request, "APPROVED", tenantId, userId);
 
   await logAudit({
     tenantId,
@@ -587,7 +639,12 @@ export async function processDecision({
     details: { title: request.title, signatureLabel: decision.signatureLabel },
   });
 
-  return { success: true, requestComplete: true, requestStatus: "APPROVED" };
+  return {
+    success: true,
+    requestComplete: true,
+    requestStatus: "APPROVED",
+    warning: approvalEffect ?? undefined,
+  };
 }
 
 /** Recall a pending approval request (by the requester) */
@@ -616,17 +673,25 @@ export async function recallRequest({
   if (request.requestedById !== userId) return { error: "Only the requester can recall" };
   if (request.status !== "PENDING") return { error: "Can only recall pending requests" };
 
-  await db
-    .from("approval_requests")
-    .update({ status: "RECALLED", updatedAt: now, completedAt: now })
-    .eq("id", requestId);
+  const recallFailed = await applied(
+    db
+      .from("approval_requests")
+      .update({ status: "RECALLED", updatedAt: now, completedAt: now })
+      .eq("id", requestId),
+    "The request could not be recalled"
+  );
+  if (recallFailed) return { error: recallFailed };
 
   // Reset all pending/waiting decisions
-  await db
-    .from("approval_decisions")
-    .update({ status: "RECALLED" })
-    .eq("requestId", requestId)
-    .in("status", ["PENDING", "WAITING"]);
+  const clearFailed = await applied(
+    db
+      .from("approval_decisions")
+      .update({ status: "RECALLED" })
+      .eq("requestId", requestId)
+      .in("status", ["PENDING", "WAITING"]),
+    "The request was recalled, but its outstanding approvals are still open"
+  );
+  if (clearFailed) return { error: clearFailed };
 
   void userFullName; // UI renders actor from user.fullName — don't double it
   await addHistory(requestId, "RECALLED", userId, `Request recalled`);
@@ -681,25 +746,30 @@ export async function rejectForRework({
   }
 
   // Mark decision as rework
-  await db
-    .from("approval_decisions")
-    .update({
-      status: "REWORK",
-      deciderId: userId,
-      comment,
-      decidedAt: now,
-    })
-    .eq("id", decisionId);
+  const markFailed = await applied(
+    db
+      .from("approval_decisions")
+      .update({
+        status: "REWORK",
+        deciderId: userId,
+        comment,
+        decidedAt: now,
+      })
+      .eq("id", decisionId),
+    "The rework request could not be recorded"
+  );
+  if (markFailed) return { error: markFailed };
 
   // Clear the decider's own "Approval Required" notification now that
   // they've acted on this request.
   await markNotificationsReadByRef({ tenantId, userId, refId: request.id });
 
   // Set request to REWORK status
-  await db
-    .from("approval_requests")
-    .update({ status: "REWORK", updatedAt: now })
-    .eq("id", request.id);
+  const statusFailed = await applied(
+    db.from("approval_requests").update({ status: "REWORK", updatedAt: now }).eq("id", request.id),
+    "Rework was recorded on the step, but the request is still marked pending"
+  );
+  if (statusFailed) return { error: statusFailed };
 
   await addHistory(request.id, "REWORK_REQUESTED", userId, `Rework requested: "${comment}"`);
 
@@ -766,27 +836,37 @@ export async function resubmitAfterRework({
         ? new Date(Date.now() + step.deadlineHours * 3600000).toISOString()
         : null;
 
-    await db
-      .from("approval_decisions")
-      .update({
-        status: step.stepOrder === 1 ? "PENDING" : "WAITING",
-        deciderId: null,
-        comment: null,
-        decidedAt: null,
-        deadlineAt,
-      })
-      .eq("id", d.id);
+    // A seat that keeps its old decider and REWORK status is a seat the
+    // resubmitted request can never collect again.
+    const resetFailed = await applied(
+      db
+        .from("approval_decisions")
+        .update({
+          status: step.stepOrder === 1 ? "PENDING" : "WAITING",
+          deciderId: null,
+          comment: null,
+          decidedAt: null,
+          deadlineAt,
+        })
+        .eq("id", d.id),
+      "The request could not be reset for resubmission"
+    );
+    if (resetFailed) return { error: resetFailed };
   }
 
-  await db
-    .from("approval_requests")
-    .update({
-      status: "PENDING",
-      currentStepOrder: 1,
-      updatedAt: now,
-      completedAt: null,
-    })
-    .eq("id", requestId);
+  const resubmitFailed = await applied(
+    db
+      .from("approval_requests")
+      .update({
+        status: "PENDING",
+        currentStepOrder: 1,
+        updatedAt: now,
+        completedAt: null,
+      })
+      .eq("id", requestId),
+    "The approval steps were reset, but the request is still marked as rework"
+  );
+  if (resubmitFailed) return { error: resubmitFailed };
 
   void userFullName;
   await addHistory(requestId, "RESUBMITTED", userId, `Resubmitted after rework`);
@@ -813,14 +893,26 @@ export async function resubmitAfterRework({
 }
 
 /** Handle side effects when a request completes (approved/rejected) */
+/**
+ * Apply what the decision actually decides — the file transition, or the ECO
+ * status.
+ *
+ * Returns null when everything landed, or a message when it did not. The
+ * caller surfaces that as a `warning` rather than an error, because by this
+ * point the approval itself is genuinely complete and telling the approver
+ * their approval failed would be false. What is not complete is the effect,
+ * and that is worth saying out loud: an approved request whose file never
+ * moved looks, from every screen, exactly like one that did.
+ */
 async function handleRequestCompletion(
   request: { entityType: string; entityId: string; transitionId: string | null },
   status: "APPROVED" | "REJECTED",
   tenantId: string,
   userId: string
-) {
+): Promise<string | null> {
   const db = getServiceClient();
   const now = new Date().toISOString();
+  let revisionNote: string | null = null;
 
   if (status === "APPROVED" && request.entityType === "file" && request.transitionId) {
     const { data: transition } = await db
@@ -848,14 +940,36 @@ async function handleRequestCompletion(
 
       if (transition.toState.name === "Released") updateData.isFrozen = true;
       if (transition.fromState.name === "Released" && transition.toState.name === "WIP") {
+        // This is the second path to reopening a released file, and it had
+        // been left on the arithmetic `src/lib/revision.ts` exists to
+        // replace: `charCodeAt(0) + 1` turns Z into "[" and R2 into "S",
+        // writing a wrong value into the field a release is identified by.
+        // The direct route (files/[fileId]/transition) was fixed; this one,
+        // reached when the same transition requires approval, was not.
+        //
+        // It cannot refuse the way the route does — the approval has already
+        // happened and there is nothing left to decline. So it leaves the
+        // revision alone and says so, which is recoverable by hand. Guessing
+        // is not.
         if (file?.revision) {
-          updateData.revision = String.fromCharCode(file.revision.charCodeAt(0) + 1);
+          const next = nextRevision(file.revision);
+          if (next) {
+            updateData.revision = next.next;
+          } else {
+            revisionNote =
+              `The file was reopened but its revision was left at "${file.revision}" — ` +
+              `that is not a revision this can sequence. Set the next revision by hand.`;
+          }
         }
         updateData.isFrozen = false;
       }
       if (transition.toState.name === "Obsolete") updateData.isFrozen = true;
 
-      await db.from("files").update(updateData).eq("id", request.entityId);
+      const transitionFailed = await applied(
+        db.from("files").update(updateData).eq("id", request.entityId),
+        `The request was approved, but the file did not move to ${transition.toState.name}`
+      );
+      if (transitionFailed) return transitionFailed;
 
       if (file) {
         // Use the actor's display name from the completion context — the
@@ -888,14 +1002,40 @@ async function handleRequestCompletion(
   }
 
   if (request.entityType === "eco") {
-    await db
-      .from("ecos")
-      .update({
-        status: status === "APPROVED" ? "APPROVED" : "REJECTED",
-        updatedAt: now,
-      })
-      .eq("id", request.entityId);
+    const ecoFailed = await applied(
+      db
+        .from("ecos")
+        .update({
+          status: status === "APPROVED" ? "APPROVED" : "REJECTED",
+          updatedAt: now,
+        })
+        .eq("id", request.entityId),
+      `The request was ${status.toLowerCase()}, but the ECO's status did not change`
+    );
+    if (ecoFailed) return ecoFailed;
   }
+
+  return revisionNote;
+}
+
+/**
+ * Apply one write, and describe the failure rather than discarding it.
+ *
+ * Returns null when the write landed, and a message naming what did not
+ * happen when it did not. Callers turn that into their own `{ error }`.
+ *
+ * A rejected UPDATE is the quietest of the three write failures: nothing is
+ * missing afterwards, the row still reads fine, and the only symptom is that
+ * it holds the value it held before. In this file that means a request that
+ * reports approved and stays PENDING, or a step that reports activated while
+ * every seat on it is still WAITING and nobody can act.
+ */
+async function applied(
+  write: PromiseLike<{ error: { message: string } | null }>,
+  what: string
+): Promise<string | null> {
+  const { error } = await write;
+  return error ? `${what}: ${error.message}` : null;
 }
 
 async function addHistory(
@@ -905,7 +1045,7 @@ async function addHistory(
   details: string
 ) {
   const db = getServiceClient();
-  await db.from("approval_history").insert({
+  const { error } = await db.from("approval_history").insert({
     id: uuid(),
     requestId,
     event,
@@ -913,6 +1053,14 @@ async function addHistory(
     details,
     createdAt: new Date().toISOString(),
   });
+
+  // Logged rather than thrown, on the same reasoning as logAudit: every
+  // caller runs this *after* the decision it describes, so throwing would
+  // fail a transition that already happened. A gap in the timeline is bad;
+  // an approval that reports failure after approving is worse.
+  if (error) {
+    console.error(`[approvals] failed to record ${event} on request ${requestId}:`, error.message);
+  }
 }
 
 /** Get the approval history timeline for a request */

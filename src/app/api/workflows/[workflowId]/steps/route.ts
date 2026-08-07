@@ -155,10 +155,23 @@ export async function DELETE(
 
     if (remaining) {
       for (let i = 0; i < remaining.length; i++) {
-        await db
+        // A partial renumber leaves a gap or a duplicate in `stepOrder`,
+        // which is what the engine walks to find the next step. Stop and say
+        // so rather than leave the sequence half-applied.
+        const { error: reorderError } = await db
           .from("approval_workflow_steps")
           .update({ stepOrder: i + 1 })
           .eq("id", remaining[i].id);
+        if (reorderError) {
+          return NextResponse.json(
+            {
+              error:
+                `The step was deleted but the remaining steps could not be renumbered: ` +
+                `${reorderError.message}. Check the step order before using this workflow.`,
+            },
+            { status: 500 }
+          );
+        }
       }
     }
 

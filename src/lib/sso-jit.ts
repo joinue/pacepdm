@@ -76,7 +76,12 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
     .maybeSingle();
   if (byEmail) {
     const now = new Date().toISOString();
-    await db
+    // The adoption path: this is what attaches the existing member row —
+    // and all of its history — to the identity that just signed in. If it
+    // does not land, returning success hands back a tenantUserId that is not
+    // linked to this auth user, and the next sign-in provisions a second row
+    // with none of the history.
+    const { error } = await db
       .from("tenant_users")
       .update({
         authUserId: params.authUserId,
@@ -85,6 +90,7 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
         updatedAt: now,
       })
       .eq("id", byEmail.id);
+    if (error) throw new Error(`Could not link the SSO identity to this member: ${error.message}`);
     return { tenantId: byEmail.tenantId, tenantUserId: byEmail.id };
   }
 

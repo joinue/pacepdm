@@ -20,8 +20,15 @@ const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFr
       [];
     /** What the compare-and-swap claim in `processDecision` returns. */
     const claimResult = { current: { data: { id: "dec-1" }, error: null } as QueryResult };
-    /** Error returned by the next `approval_requests` insert, for the 23505 race. */
-    const insertError = { current: null as { code?: string } | null };
+    /**
+     * Error returned by the next insert into `table`, which defaults to
+     * `approval_requests` for the 23505 race. Point it at another table to
+     * make that table's write fail instead.
+     */
+    const insertError = {
+      current: null as { code?: string; message?: string } | null,
+      table: "approval_requests",
+    };
 
     function makeChain(table: string) {
       const filters: Record<string, unknown> = {};
@@ -45,7 +52,7 @@ const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFr
 
       chain.insert = (data: unknown) => {
         insertCalls.push({ table, data });
-        const error = table === "approval_requests" ? insertError.current : null;
+        const error = table === insertError.table ? insertError.current : null;
         return Promise.resolve({ data: null, error });
       };
 
@@ -121,6 +128,7 @@ function resetMockState() {
   updateCalls.length = 0;
   claimResult.current = { data: { id: "dec-1" }, error: null };
   insertError.current = null;
+  insertError.table = "approval_requests";
   for (const key of Object.keys(tableResults)) delete tableResults[key];
 }
 
@@ -241,6 +249,47 @@ describe("startWorkflow", () => {
     expect((step1!.data as Record<string, unknown>).status).toBe("PENDING");
     expect((step2!.data as Record<string, unknown>).status).toBe("WAITING");
     expect((step2!.data as Record<string, unknown>).deadlineAt).toBeNull();
+  });
+
+  /**
+   * A request holding fewer decision rows than its step has seats can never
+   * satisfy ALL or MAJORITY — the first approver claims the only row, the
+   * "everyone approved" test never sees a second decider, and the request
+   * sits PENDING with no exit but a recall. That is finding 4 of
+   * docs/plans/functional-audit.md, and a discarded insert error reintroduces
+   * it one seat at a time.
+   */
+  it("fails the whole workflow when a decision seat cannot be created", async () => {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ALL",
+          signatureLabel: "Review",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Reviewers" },
+        },
+      ],
+      error: null,
+    };
+    tableResults["approval_group_members"] = {
+      data: [{ userId: "u-1" }, { userId: "u-2" }],
+      error: null,
+    };
+    insertError.table = "approval_decisions";
+    insertError.current = { message: "deadlock detected" };
+
+    const result = await startWorkflow(baseParams);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/seat 1 of 2/);
+    expect(result.error).toMatch(/deadlock detected/);
+
+    // It stops at the first failed seat rather than writing the rest around
+    // the gap — a request half-populated with seats is the deadlock.
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(1);
   });
 
   it("notifies step 1 approval group members", async () => {
@@ -1251,6 +1300,42 @@ describe("processDecision — file transition side effects", () => {
       revision: "B",
       isFrozen: false,
     });
+  });
+
+  /**
+   * `src/lib/revision.ts` replaced `charCodeAt(0) + 1` because it corrupted
+   * rather than failed — R2 became "S", dropping the digit entirely.
+   *
+   * The fix reached `/api/files/[fileId]/transition` and not this path, so a
+   * reopen that required approval went on writing the wrong value while the
+   * same reopen done directly was correct. The A → B case both versions get
+   * right, which is why the existing test above never caught it.
+   */
+  it("sequences a prefixed revision instead of mangling it", async () => {
+    givenTransition("Released", "WIP", { revision: "R2" });
+    await processDecision(approve);
+    // The old arithmetic produced "S" here.
+    expect(lastUpdate("files")!.data).toMatchObject({ revision: "R3", isFrozen: false });
+  });
+
+  /**
+   * Z has no successor under ASME Y14.35. Unlike the direct route, this path
+   * cannot refuse — the approval has already happened — so it thaws the file
+   * and leaves the revision alone rather than writing "[".
+   */
+  it("thaws but leaves an unsequenceable revision alone, and says so", async () => {
+    givenTransition("Released", "WIP", { revision: "Z" });
+    const result = await processDecision(approve);
+
+    const data = lastUpdate("files")!.data as Record<string, unknown>;
+    expect(data.isFrozen).toBe(false);
+    expect(data.lifecycleState).toBe("WIP");
+    expect(data.revision).toBeUndefined();
+
+    // The approval itself succeeded; only the revision needs a human.
+    expect(result).toMatchObject({ success: true, requestStatus: "APPROVED" });
+    expect(result.warning).toMatch(/"Z"/);
+    expect(result.warning).toMatch(/by hand/);
   });
 
   it("thaws without a revision bump when the file has no revision recorded", async () => {

@@ -47,12 +47,21 @@ export async function PUT(
 
     // If marking as default, unset other defaults first
     if (isDefault) {
-      await db
+      // See POST /api/lifecycle — one default per tenant is an app-level
+      // invariant with no constraint behind it, so a silent failure here is
+      // how a tenant ends up with two.
+      const { error: clearError } = await db
         .from("lifecycles")
         .update({ isDefault: false, updatedAt: now })
         .eq("tenantId", tenantUser.tenantId)
         .eq("isDefault", true)
         .neq("id", lifecycleId);
+      if (clearError) {
+        return NextResponse.json(
+          { error: `Could not clear the existing default lifecycle: ${clearError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const updates: Record<string, unknown> = { updatedAt: now };

@@ -36,7 +36,10 @@ export const PUT = withTenant(
       }
     }
 
-    await db
+    // Wrapped route, so a genuine write failure throws and the wrapper
+    // surfaces the message. What must not happen is the audit row below
+    // recording a permission change that did not take effect.
+    const { error } = await db
       .from("roles")
       .update({
         name: body.name ?? role.name,
@@ -45,6 +48,7 @@ export const PUT = withTenant(
         updatedAt: new Date().toISOString(),
       })
       .eq("id", params.roleId);
+    if (error) throw new Error(error.message);
 
     await logAudit({
       tenantId: tenantUser.tenantId,

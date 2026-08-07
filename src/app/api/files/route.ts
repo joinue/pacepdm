@@ -207,10 +207,19 @@ export async function GET(request: NextRequest) {
             if (!thumb) {
               // Extraction failed or returned no preview. Stamp the
               // attempt timestamp without a key so we don't retry.
-              await db
+              const { error } = await db
                 .from("files")
                 .update({ thumbnailAttemptedAt: attemptedAt })
                 .eq("id", file.id);
+              // Best-effort backfill during a list read — never fails the
+              // listing. But an unstamped file is retried on every single
+              // request, so a persistent failure here is a silent loop.
+              if (error) {
+                console.warn(
+                  `[files/list] could not stamp thumbnail attempt on ${file.id}:`,
+                  error.message
+                );
+              }
               return;
             }
 
@@ -220,10 +229,20 @@ export async function GET(request: NextRequest) {
               .upload(newKey, thumb.data, { contentType: thumb.mimeType, upsert: false });
             if (upErr) return;
 
-            await db
+            const { error: stampError } = await db
               .from("files")
               .update({ thumbnailKey: newKey, thumbnailAttemptedAt: attemptedAt })
               .eq("id", file.id);
+            if (stampError) {
+              // The thumbnail is in storage but nothing points at it. Do not
+              // claim it below, or this response advertises a key the next
+              // one will not have.
+              console.warn(
+                `[files/list] thumbnail saved but not linked for ${file.id}:`,
+                stampError.message
+              );
+              return;
+            }
             // Mutate the in-memory object so this same response includes
             // the new thumbnailKey — no second fetch required.
             (file as { thumbnailKey: string | null }).thumbnailKey = newKey;
@@ -232,6 +251,11 @@ export async function GET(request: NextRequest) {
             // Still stamp the attempt so a transient error (network,
             // storage flake) doesn't trap the file in a reprocess loop.
             // The manual regenerate path will retry on demand.
+            //
+            // lint-conventions-allow: unchecked-update — last-resort stamp
+            // inside the handler for the failure it is reacting to, which has
+            // already been logged on the line above. A second warning here
+            // would say nothing the first did not.
             await db
               .from("files")
               .update({ thumbnailAttemptedAt: attemptedAt })
@@ -485,7 +509,7 @@ export async function POST(request: NextRequest) {
       throw fileError;
     }
 
-    await db.from("file_versions").insert({
+    const { error: versionError } = await db.from("file_versions").insert({
       id: uuid(),
       fileId,
       version: 1,
@@ -495,6 +519,29 @@ export async function POST(request: NextRequest) {
       comment: "Initial upload",
       createdAt: now,
     });
+
+    // The file row is already committed and says `currentVersion: 1`, so
+    // without this row the vault shows a file that can never be opened or
+    // downloaded. Remove it rather than leaving that behind, and report the
+    // upload as the failure it was.
+    //
+    // The uploaded blob is left in storage. That is the right way round here:
+    // it is unreferenced garbage from a request the user will simply retry,
+    // not the "orphaned and unrecoverable" case that decides the ordering in
+    // the purge route — there, the blob was the only copy of something real.
+    if (versionError) {
+      const { error: cleanupError } = await db.from("files").delete().eq("id", fileId);
+      if (cleanupError) {
+        console.error(
+          `[files] version row failed for ${fileId} and the file row could not be removed:`,
+          cleanupError.message
+        );
+      }
+      return NextResponse.json(
+        { error: `Could not record the initial version: ${versionError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

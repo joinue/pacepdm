@@ -56,11 +56,19 @@ export async function POST(
 
     // If marking as initial, unset other initial states
     if (isInitial) {
-      await db
+      // Two initial states means a new file's starting state depends on row
+      // order. Refuse rather than leave that to chance.
+      const { error: clearError } = await db
         .from("lifecycle_states")
         .update({ isInitial: false })
         .eq("lifecycleId", lifecycleId)
         .eq("isInitial", true);
+      if (clearError) {
+        return NextResponse.json(
+          { error: `Could not clear the existing initial state: ${clearError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     // Get next sort order if not provided
@@ -142,12 +150,19 @@ export async function PUT(
 
     // If marking as initial, unset other initial states
     if (isInitial) {
-      await db
+      // Same invariant as the POST above.
+      const { error: clearError } = await db
         .from("lifecycle_states")
         .update({ isInitial: false })
         .eq("lifecycleId", lifecycleId)
         .eq("isInitial", true)
         .neq("id", stateId);
+      if (clearError) {
+        return NextResponse.json(
+          { error: `Could not clear the existing initial state: ${clearError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const updates: Record<string, unknown> = {};

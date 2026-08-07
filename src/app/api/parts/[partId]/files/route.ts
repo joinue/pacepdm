@@ -69,7 +69,16 @@ export async function POST(
 
     // If setting as primary, unset others
     if (body.isPrimary) {
-      await db.from("part_files").update({ isPrimary: false }).eq("partId", partId);
+      const { error: demoteError } = await db
+        .from("part_files")
+        .update({ isPrimary: false })
+        .eq("partId", partId);
+      if (demoteError) {
+        return NextResponse.json(
+          { error: `Could not demote the existing primary file: ${demoteError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const { data: pf, error } = await db

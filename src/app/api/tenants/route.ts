@@ -22,6 +22,31 @@ function slugify(text: string): string {
     .trim();
 }
 
+/**
+ * Run one write in the tenant setup sequence, and stop the whole thing if it
+ * did not land.
+ *
+ * Every step below depends on the ones before it — roles are referenced by
+ * the Admin user, the lifecycle by its states, the states by the transitions,
+ * the group and workflow by the assignment. A discarded failure anywhere in
+ * that chain produced a workspace that looked created and was not: a tenant
+ * with no Admin cannot be signed into, a lifecycle with no states renders as
+ * an empty dropdown, and a missing assignment means the release workflow
+ * never fires and files transition unreviewed.
+ *
+ * The label is what the message names, because "workspace setup failed" with
+ * no step is not something anyone can act on.
+ */
+async function setupStep(
+  label: string,
+  write: PromiseLike<{ error: { message: string } | null }>
+): Promise<void> {
+  const { error } = await write;
+  if (error) {
+    throw new Error(`Workspace setup failed while creating ${label}: ${error.message}`);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -76,223 +101,283 @@ export async function POST(request: NextRequest) {
     });
     if (tenantError) throw tenantError;
 
-    // 2. Create default roles
-    const roles: Record<string, string> = {};
-    for (const [roleName, roleData] of Object.entries(DEFAULT_ROLES)) {
-      const roleId = uuid();
-      await db.from("roles").insert({
-        id: roleId,
-        tenantId,
-        name: roleName,
-        description: roleData.description,
-        permissions: roleData.permissions,
-        isSystem: true,
-        createdAt: now,
-        updatedAt: now,
-      });
-      roles[roleName] = roleId;
-    }
+    // Everything from here on depends on the tenant row, and every FK to it
+    // is ON DELETE CASCADE. So a failure part-way is cleaned up by removing
+    // that one row — which matters because this is the signup path: without
+    // it the caller is left holding a tenant they cannot sign into, under a
+    // slug that stops them retrying.
+    try {
+      // 2. Create default roles
+      const roles: Record<string, string> = {};
+      for (const [roleName, roleData] of Object.entries(DEFAULT_ROLES)) {
+        const roleId = uuid();
+        await setupStep(
+          `the ${roleName} role`,
+          db.from("roles").insert({
+            id: roleId,
+            tenantId,
+            name: roleName,
+            description: roleData.description,
+            permissions: roleData.permissions,
+            isSystem: true,
+            createdAt: now,
+            updatedAt: now,
+          })
+        );
+        roles[roleName] = roleId;
+      }
 
-    // 3. Create the user as Admin
-    await db.from("tenant_users").insert({
-      id: uuid(),
-      tenantId,
-      authUserId,
-      email,
-      fullName,
-      roleId: roles["Admin"],
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+      // 3. Create the user as Admin
+      await setupStep(
+        "your user account",
+        db.from("tenant_users").insert({
+          id: uuid(),
+          tenantId,
+          authUserId,
+          email,
+          fullName,
+          roleId: roles["Admin"],
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+      );
 
-    // 4. Create root folder
-    await db.from("folders").insert({
-      id: uuid(),
-      tenantId,
-      name: "Vault",
-      parentId: null,
-      path: "/",
-      createdAt: now,
-      updatedAt: now,
-    });
+      // 4. Create root folder
+      await setupStep(
+        "the root folder",
+        db.from("folders").insert({
+          id: uuid(),
+          tenantId,
+          name: "Vault",
+          parentId: null,
+          path: "/",
+          createdAt: now,
+          updatedAt: now,
+        })
+      );
 
-    // 5. Create default lifecycle
-    const lifecycleId = uuid();
-    await db.from("lifecycles").insert({
-      id: lifecycleId,
-      tenantId,
-      name: "Standard",
-      isDefault: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+      // 5. Create default lifecycle
+      const lifecycleId = uuid();
+      await setupStep(
+        "the default lifecycle",
+        db.from("lifecycles").insert({
+          id: lifecycleId,
+          tenantId,
+          name: "Standard",
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+      );
 
-    const wipId = uuid();
-    const inReviewId = uuid();
-    const releasedId = uuid();
-    const obsoleteId = uuid();
+      const wipId = uuid();
+      const inReviewId = uuid();
+      const releasedId = uuid();
+      const obsoleteId = uuid();
 
-    await db.from("lifecycle_states").insert([
-      {
-        id: wipId,
-        lifecycleId,
-        name: "WIP",
-        color: "#F59E0B",
-        isInitial: true,
-        isFinal: false,
-        sortOrder: 0,
-      },
-      {
-        id: inReviewId,
-        lifecycleId,
-        name: "In Review",
-        color: "#3B82F6",
-        isInitial: false,
-        isFinal: false,
-        sortOrder: 1,
-      },
-      {
-        id: releasedId,
-        lifecycleId,
-        name: "Released",
-        color: "#10B981",
-        isInitial: false,
-        isFinal: false,
-        sortOrder: 2,
-      },
-      {
-        id: obsoleteId,
-        lifecycleId,
-        name: "Obsolete",
-        color: "#EF4444",
-        isInitial: false,
-        isFinal: true,
-        sortOrder: 3,
-      },
-    ]);
+      await setupStep(
+        "the lifecycle states",
+        db.from("lifecycle_states").insert([
+          {
+            id: wipId,
+            lifecycleId,
+            name: "WIP",
+            color: "#F59E0B",
+            isInitial: true,
+            isFinal: false,
+            sortOrder: 0,
+          },
+          {
+            id: inReviewId,
+            lifecycleId,
+            name: "In Review",
+            color: "#3B82F6",
+            isInitial: false,
+            isFinal: false,
+            sortOrder: 1,
+          },
+          {
+            id: releasedId,
+            lifecycleId,
+            name: "Released",
+            color: "#10B981",
+            isInitial: false,
+            isFinal: false,
+            sortOrder: 2,
+          },
+          {
+            id: obsoleteId,
+            lifecycleId,
+            name: "Obsolete",
+            color: "#EF4444",
+            isInitial: false,
+            isFinal: true,
+            sortOrder: 3,
+          },
+        ])
+      );
 
-    const approveReleaseId = uuid();
-    await db.from("lifecycle_transitions").insert([
-      {
-        id: uuid(),
-        lifecycleId,
-        fromStateId: wipId,
-        toStateId: inReviewId,
-        name: "Submit for Review",
-        requiresApproval: false,
-      },
-      {
-        id: uuid(),
-        lifecycleId,
-        fromStateId: inReviewId,
-        toStateId: wipId,
-        name: "Return to WIP",
-        requiresApproval: false,
-      },
-      {
-        id: approveReleaseId,
-        lifecycleId,
-        fromStateId: inReviewId,
-        toStateId: releasedId,
-        name: "Approve & Release",
-        requiresApproval: true,
-        approvalRoles: ["Admin", "Engineer"],
-      },
-      {
-        id: uuid(),
-        lifecycleId,
-        fromStateId: releasedId,
-        toStateId: wipId,
-        name: "Revise",
-        requiresApproval: false,
-      },
-      {
-        id: uuid(),
-        lifecycleId,
-        fromStateId: releasedId,
-        toStateId: obsoleteId,
-        name: "Mark Obsolete",
-        requiresApproval: false,
-      },
-    ]);
+      const approveReleaseId = uuid();
+      await setupStep(
+        "the lifecycle transitions",
+        db.from("lifecycle_transitions").insert([
+          {
+            id: uuid(),
+            lifecycleId,
+            fromStateId: wipId,
+            toStateId: inReviewId,
+            name: "Submit for Review",
+            requiresApproval: false,
+          },
+          {
+            id: uuid(),
+            lifecycleId,
+            fromStateId: inReviewId,
+            toStateId: wipId,
+            name: "Return to WIP",
+            requiresApproval: false,
+          },
+          {
+            id: approveReleaseId,
+            lifecycleId,
+            fromStateId: inReviewId,
+            toStateId: releasedId,
+            name: "Approve & Release",
+            requiresApproval: true,
+            approvalRoles: ["Admin", "Engineer"],
+          },
+          {
+            id: uuid(),
+            lifecycleId,
+            fromStateId: releasedId,
+            toStateId: wipId,
+            name: "Revise",
+            requiresApproval: false,
+          },
+          {
+            id: uuid(),
+            lifecycleId,
+            fromStateId: releasedId,
+            toStateId: obsoleteId,
+            name: "Mark Obsolete",
+            requiresApproval: false,
+          },
+        ])
+      );
 
-    // Default approval group, workflow, and assignment so a fresh tenant
-    // can release files immediately. The Admin (creator) is the initial
-    // sole member of "Approvers"; they can add real reviewers later.
-    // Migration 018 backfills the same shape for existing tenants.
-    const approversGroupId = uuid();
-    await db.from("approval_groups").insert({
-      id: approversGroupId,
-      tenantId,
-      name: "Approvers",
-      description: "Default approval group. Add members in Admin → Approval Groups.",
-      createdAt: now,
-      updatedAt: now,
-    });
+      // Default approval group, workflow, and assignment so a fresh tenant
+      // can release files immediately. The Admin (creator) is the initial
+      // sole member of "Approvers"; they can add real reviewers later.
+      // Migration 018 backfills the same shape for existing tenants.
+      const approversGroupId = uuid();
+      await setupStep(
+        "the default approval group",
+        db.from("approval_groups").insert({
+          id: approversGroupId,
+          tenantId,
+          name: "Approvers",
+          description: "Default approval group. Add members in Admin → Approval Groups.",
+          createdAt: now,
+          updatedAt: now,
+        })
+      );
 
-    const { data: creatorUser } = await db
-      .from("tenant_users")
-      .select("id")
-      .eq("tenantId", tenantId)
-      .eq("authUserId", authUserId)
-      .single();
+      const { data: creatorUser } = await db
+        .from("tenant_users")
+        .select("id")
+        .eq("tenantId", tenantId)
+        .eq("authUserId", authUserId)
+        .single();
 
-    if (creatorUser) {
-      await db.from("approval_group_members").insert({
-        id: uuid(),
-        groupId: approversGroupId,
-        userId: creatorUser.id,
-        createdAt: now,
-      });
-    }
+      if (creatorUser) {
+        await setupStep(
+          "your membership of the Approvers group",
+          db.from("approval_group_members").insert({
+            id: uuid(),
+            groupId: approversGroupId,
+            userId: creatorUser.id,
+            createdAt: now,
+          })
+        );
+      }
 
-    const defaultWorkflowId = uuid();
-    await db.from("approval_workflows").insert({
-      id: defaultWorkflowId,
-      tenantId,
-      name: "Standard Release Approval",
-      description: "Default single-step release approval. Edit in Admin → Workflows.",
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+      const defaultWorkflowId = uuid();
+      await setupStep(
+        "the default release workflow",
+        db.from("approval_workflows").insert({
+          id: defaultWorkflowId,
+          tenantId,
+          name: "Standard Release Approval",
+          description: "Default single-step release approval. Edit in Admin → Workflows.",
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+      );
 
-    await db.from("approval_workflow_steps").insert({
-      id: uuid(),
-      workflowId: defaultWorkflowId,
-      groupId: approversGroupId,
-      stepOrder: 1,
-      approvalMode: "ANY",
-      signatureLabel: "Released",
-      deadlineHours: null,
-      createdAt: now,
-    });
+      await setupStep(
+        "the release workflow's approval step",
+        db.from("approval_workflow_steps").insert({
+          id: uuid(),
+          workflowId: defaultWorkflowId,
+          groupId: approversGroupId,
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Released",
+          deadlineHours: null,
+          createdAt: now,
+        })
+      );
 
-    await db.from("approval_workflow_assignments").insert({
-      id: uuid(),
-      tenantId,
-      workflowId: defaultWorkflowId,
-      transitionId: approveReleaseId,
-      ecoTrigger: null,
-      createdAt: now,
-    });
+      // Without this row `findWorkflowForTrigger` finds nothing and falls
+      // through to a direct status update — the file reaches Released with
+      // nobody approving it. Losing it silently is finding 2 of
+      // docs/plans/functional-audit.md, in a workspace that looked set up.
+      await setupStep(
+        "the release workflow's assignment",
+        db.from("approval_workflow_assignments").insert({
+          id: uuid(),
+          tenantId,
+          workflowId: defaultWorkflowId,
+          transitionId: approveReleaseId,
+          ecoTrigger: null,
+          createdAt: now,
+        })
+      );
 
-    // 6. Create default metadata fields
-    for (const field of DEFAULT_METADATA_FIELDS) {
-      await db.from("metadata_fields").insert({
-        id: uuid(),
-        tenantId,
-        name: field.name,
-        fieldType: field.fieldType,
-        options: "options" in field ? field.options : null,
-        isRequired: false,
-        isSystem: true,
-        sortOrder: field.sortOrder,
-        appliesTo: [],
-        createdAt: now,
-        updatedAt: now,
-      });
+      // 6. Create default metadata fields
+      for (const field of DEFAULT_METADATA_FIELDS) {
+        await setupStep(
+          `the "${field.name}" metadata field`,
+          db.from("metadata_fields").insert({
+            id: uuid(),
+            tenantId,
+            name: field.name,
+            fieldType: field.fieldType,
+            options: "options" in field ? field.options : null,
+            isRequired: false,
+            isSystem: true,
+            sortOrder: field.sortOrder,
+            appliesTo: [],
+            createdAt: now,
+            updatedAt: now,
+          })
+        );
+      }
+    } catch (setupError) {
+      // Undo the half-built workspace. Every tenant-scoped FK cascades from
+      // this row, so removing it takes the roles, user, folder, lifecycle and
+      // workflow with it — and frees the slug, so the caller can just try
+      // again rather than being stuck outside a workspace that half exists.
+      const { error: cleanupError } = await db.from("tenants").delete().eq("id", tenantId);
+      if (cleanupError) {
+        console.error(
+          `[tenants] setup failed for ${tenantId} and the partial workspace could not be removed:`,
+          cleanupError.message
+        );
+      }
+      throw setupError;
     }
 
     return NextResponse.json({ tenantId, slug });

@@ -109,7 +109,7 @@ export async function POST(
           "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
       }
 
-      await db.from("file_versions").insert({
+      const { error: versionError } = await db.from("file_versions").insert({
         id: uuid(),
         fileId,
         version: newVersion,
@@ -121,7 +121,22 @@ export async function POST(
         createdAt: now,
       });
 
-      await db
+      // Stop before bumping the file. `files.currentVersion` is what every
+      // read resolves the current blob through, so setting it to a version
+      // row that does not exist points the vault at nothing — and the file
+      // stays checked out, which is the recoverable state: the user still
+      // holds the checkout and can simply check in again.
+      if (versionError) {
+        return NextResponse.json(
+          { error: `Could not record the new version: ${versionError.message}` },
+          { status: 500 }
+        );
+      }
+
+      // The version row exists now, so failing here leaves the file pointing
+      // at the previous version and still checked out — consistent, and the
+      // user keeps the checkout they need to try again.
+      const { error: bumpError } = await db
         .from("files")
         .update({
           currentVersion: newVersion,
@@ -132,8 +147,19 @@ export async function POST(
           thumbnailKey,
         })
         .eq("id", fileId);
+      if (bumpError) {
+        return NextResponse.json(
+          {
+            error: `The version was stored but the file could not be updated: ${bumpError.message}`,
+          },
+          { status: 500 }
+        );
+      }
     } else {
-      await db
+      // Undo checkout. Reporting success on a failed release leaves the file
+      // locked to a user who has been told they released it — and nobody
+      // else can check it out.
+      const { error: releaseError } = await db
         .from("files")
         .update({
           isCheckedOut: false,
@@ -142,6 +168,12 @@ export async function POST(
           updatedAt: now,
         })
         .eq("id", fileId);
+      if (releaseError) {
+        return NextResponse.json(
+          { error: `Could not release the checkout: ${releaseError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     await logAudit({

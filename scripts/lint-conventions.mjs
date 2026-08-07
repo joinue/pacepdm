@@ -156,6 +156,50 @@ const RULES = [
       matchAll(source, /(?<!=\s)(?<!\w)await\s+db\s*\.from\([^)]*\)\s*\.delete\s*\(/g),
   },
   {
+    id: "unchecked-insert",
+    message:
+      "insert() result is discarded — a rejected write then reports success, and the row it was meant to create simply is not there",
+    applies: (path) => path.includes("/api/") || path.includes("/lib/"),
+    // The sibling of unchecked-delete, and found the same way: by a defect
+    // that had already shipped.
+    //
+    // POST /api/parts/import wrote part_vendors without `vendorId`, NOT NULL
+    // behind a RESTRICT FK since migration 009. Postgres rejected every insert
+    // with 23502, the result was never bound, and the row was still reported
+    // as `updated` — so the vendor column of a QuickBooks import, one of the
+    // three things that import exists to bring across, had never once landed.
+    //
+    // A discarded insert is worse than a discarded delete in one respect: a
+    // failed delete leaves data that should be gone, which is recoverable,
+    // while a failed insert leaves a gap that nothing points at.
+    //
+    // Matches only the discarded form. `const { error } = await db...` and
+    // `const { data, error } = await db...` both bind the result and pass, as
+    // does anything chained into `.select()`, which cannot be used without
+    // binding what it returns.
+    find: (source) =>
+      matchAll(source, /(?<!=\s)(?<!\w)await\s+db\s*\.from\([^)]*\)\s*\.insert\s*\(/g),
+  },
+  {
+    id: "unchecked-update",
+    message:
+      "update() result is discarded — the write is reported as applied, and the row keeps its old values",
+    applies: (path) => path.includes("/api/") || path.includes("/lib/"),
+    // Third of the set, after unchecked-delete and unchecked-insert, and the
+    // one with the quietest failure: a rejected update leaves a row that
+    // already existed and still reads fine. Nothing is missing, so nothing
+    // looks wrong — the value is simply the old one.
+    //
+    // The status transitions are the reason this is worth a rule. Every
+    // lifecycle, BOM and ECO state change is an update, and one that reports
+    // success without applying leaves the entity in its previous state while
+    // the audit row, the notification and the UI all say it moved.
+    //
+    // Matches only the discarded form; anything binding `{ error }` passes.
+    find: (source) =>
+      matchAll(source, /(?<!=\s)(?<!\w)await\s+db\s*\.from\([^)]*\)\s*\.update\s*\(/g),
+  },
+  {
     id: "swallowed-error",
     message: "empty catch — a swallowed error becomes a spinner that never stops",
     applies: () => true,

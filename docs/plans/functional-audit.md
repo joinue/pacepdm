@@ -1,9 +1,11 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-08-06 · **Status:** items 1, 2 and 4 closed; item 3 open by nature
+**Started:** 2026-08-05 · **Last updated:** 2026-08-07 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature
 
 <!-- plan-metrics
-unchecked-delete: 0-->
+unchecked-delete: 0
+unchecked-insert: 0
+unchecked-update: 0-->
 
 A workflow-by-workflow audit against the **live database**, not against the
 migration files or the tests. Prompted by `eco_items.bomId`: the column, the
@@ -162,6 +164,15 @@ it shipped.
 When you add a guard, grep for every route that does the same _act_, not the
 same _thing_.
 
+It has since happened twice more, which promotes it from a pattern to the
+thing to check first. Self-approval needed the same guard on the approval
+engine _and_ the direct ECO path (item 4). And the revision fix reached one of
+**three** copies of the same reopen — see item 6. In every case the fix was
+written at the call site the bug was found in, and no one looked for the
+others. Neither the tests nor the linters can see this: each path is
+individually correct-looking, and the one that was fixed proves the rule
+exists.
+
 ---
 
 ## Guards added
@@ -170,6 +181,8 @@ same _thing_.
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `npm run probe:schema`            | columns, NOT NULL, tables and RPCs that disagree with the live database |
 | `unchecked-delete` lint rule      | a discarded `delete()` result — finding 5's shape                       |
+| `unchecked-insert` lint rule      | a discarded `insert()` result — the QuickBooks vendor bug's shape       |
+| `unchecked-update` lint rule      | a discarded `update()` result — the row silently keeps its old value    |
 | `unenforced-permission` lint rule | a permission granted and described but never read — finding 2's shape   |
 | `status-flows.test.ts`            | the SQL and TypeScript copies of the ECO-release rule drifting          |
 
@@ -284,8 +297,146 @@ Two findings since, both of which support the point that reading is not enough:
   UI. Also invisible to a code read; it only shows up with volume. Fixed
   2026-08-06.
 
-Both are the shape this item is about: correct-looking code whose defect only
-appears once there is data in it.
+- **The QuickBooks importer never linked a single vendor.** It wrote
+  `part_vendors.vendorName` and omitted `vendorId`, NOT NULL behind a RESTRICT
+  FK since migration 009, so every insert was rejected with 23502 — and the
+  result was never bound, so the row still counted as `updated`. Fixed
+  2026-08-07; details in
+  [`cad-erp-integration.md`](cad-erp-integration.md#sequencing).
+
+Both of the first two are the shape this item is about: correct-looking code
+whose defect only appears once there is data in it. **The third is a different
+and more encouraging shape** — `npm run probe:schema`, the guard this plan
+added, found it by name without anyone auditing anything. Two lessons carried
+forward:
+
+- **A discarded write result is the common factor across four findings now**
+  (1, 5, the `unchecked-delete` burn-down, and this one). ~~An unbound
+  `insert()` is the same defect and is not yet linted.~~ **`unchecked-insert`
+  added and burned down 2026-08-07 — see [item 5](#5-burn-down-unchecked-insert--23-sites-done-2026-08-07).**
+- **A mock that accepts any object turns a test into decoration.** The test
+  asserting the vendor link was written against the shape the code produced,
+  not the shape the database requires, so it passed for as long as the bug
+  existed. Its mock now enforces the NOT NULL columns.
+
+### ~~5. Burn down `unchecked-insert` — 23 sites~~ Done 2026-08-07
+
+The sibling of `unchecked-delete`, added after the QuickBooks importer turned
+out to have never linked a vendor. Same ratchet, same rule shape. All 23 sites
+now bind the result — but **not all the same way**, and the split is the part
+worth keeping:
+
+**Refuse the request** where the missing row makes what follows wrong.
+
+- **`file_versions` × 4** (`files`, `checkin`, `upload-version`, `restore`).
+  Each inserted the version row and then bumped `files.currentVersion`, which
+  is what every read resolves the current blob through. A discarded failure
+  aimed the vault at a version row that was never written. All four now stop
+  before the bump, which leaves the file whole and the upload retryable. The
+  initial-upload case additionally deletes the file row it had already
+  committed, since a file at `currentVersion: 1` with no version row shows in
+  the vault and can never be opened.
+- **`approval_decisions`** in `startWorkflow`. A request with fewer decision
+  rows than the step has seats can never satisfy ALL or MAJORITY — which is
+  finding 4, arrived at from a different direction. Now returns
+  `{ success: false }` naming the seat, and a test pins it.
+- **`metadata_values`**. Reported `{ success: true }` over a value the user
+  watches vanish on their next refresh. Now collects every field that failed
+  and names them, rather than abandoning the loop at the first.
+- **Tenant creation × 12.** The whole signup sequence. Each step feeds the
+  next — the Admin references a role, the transitions reference the states,
+  the assignment references the group and the workflow — so a discarded
+  failure produced a workspace that looked created and was not. They run
+  through a local `setupStep` helper that names the step in its message, and
+  a failure now **deletes the tenant row**, which cascades the partial
+  workspace away and frees the slug so the caller can retry. Without that,
+  signup failing halfway left someone outside a workspace that half existed.
+
+**Log and carry on** where the row records something that already happened, so
+throwing would fail a request that succeeded.
+
+- `logAudit`, `notify`, `addHistory`, mentions, share-token access. This is
+  finding 1's lesson applied: the fix for a deliberately-soft path is not to
+  make it throw, it is to make it noticeable.
+- `notify` additionally skips its email loop when the rows did not land —
+  `sendNotificationEmail` writes back onto a notification row that would not
+  exist.
+
+One of these was worse than a plain discarded result. **`logShareAccess`
+already had a try/catch that logged**, and it had never once fired: PostgREST
+_returns_ a rejected write rather than throwing, so a refused insert walked
+straight past the handler. An error path that cannot be reached reads as
+coverage, which is how it survived review.
+
+Verified the rule can fail by adding a throwaway unchecked insert and watching
+it fire at the right line.
+
+### ~~6. Burn down `unchecked-update` — 49 sites~~ Done 2026-08-07
+
+The third and last of the set. Same rule shape, and by far the biggest — 49
+sites across 28 files, more than `delete` and `insert` combined.
+
+It is also the quietest of the three. A rejected delete leaves data that
+should be gone; a rejected insert leaves a gap. A rejected **update** leaves a
+row that already existed and still reads perfectly well — the only symptom is
+that it holds the value it held before. Nothing is missing, so nothing looks
+wrong.
+
+Four shapes came out of it:
+
+- **The approval engine, 13 sites.** The largest cluster and the worst
+  consequences: a request that reports approved and stays PENDING, a next step
+  reported active while every seat on it is still WAITING and nobody can act,
+  a recall that leaves its approvals open. They run through a local `applied`
+  helper that names what did not happen. The two writes that actually move
+  the entity — the file transition and the ECO status, both in
+  `handleRequestCompletion` — are a deliberate exception: they return a
+  **warning** rather than an error, because by then the approval genuinely is
+  complete and telling the approver it failed would be false. What failed is
+  the effect, and an approved request whose file never moved looks identical
+  to one that did.
+- **Exclusive-flag clears, 6 sites** (default lifecycle ×2, initial state ×2,
+  primary vendor, primary file). All of the form "unset the other one, then
+  set this one". No constraint enforces any of these, so a discarded failure
+  leaves two defaults and the winner depends on row order.
+- **State transitions**, in `files/[fileId]/transition`, `bulk-transition`,
+  `ecos/[ecoId]`, and the checkout releases in `users/[userId]`. All now
+  refuse before the audit row, which is finding 5's lesson on the update side:
+  a false audit entry is worse than the failed write.
+- **Log-like write-backs** (email delivery status, notification read flags,
+  share access counts) — logged, never fatal.
+
+One left deliberately unbound, with an allow-comment: the last-resort
+`thumbnailAttemptedAt` stamp inside the handler for the failure it is
+reacting to. A second warning there would say nothing the first did not.
+
+**This burn-down found a live bug, which is the argument for doing it by hand
+rather than mechanically.** See below.
+
+## The revision fix had reached one of three paths
+
+`src/lib/revision.ts` exists because `String.fromCharCode(rev.charCodeAt(0) + 1)`
+corrupted rather than failed — Z became `[`, R2 became `S`, written straight
+into the field a release is identified by. [`change-control.md`](change-control.md)
+records that as fixed.
+
+It was fixed in `POST /api/files/[fileId]/transition`. Reading the update
+sites turned up **two more copies still running the old arithmetic**:
+
+- `approval-engine.ts` — the same reopen, when the transition requires
+  approval. So a released file reopened directly got the right revision and
+  one reopened through a workflow did not.
+- `files/bulk-transition` — the same reopen, in bulk.
+
+Both now use `nextRevision`. They cannot refuse identically: the route returns
+409 and stops, the bulk loop skips that file with a per-file reason, and the
+approval path has nothing left to decline — the approval already happened — so
+it thaws the file, leaves the revision alone, and returns a warning naming it.
+
+This is the plan's own headline pattern for the fourth time: **a rule applied
+to one of the paths that need it** (findings 2 and 6, self-approval, and now
+this). The existing test covered A → B, which both the old and new code get
+right, so it never fired. The new tests use R2 and Z.
 
 ### ~~4. Self-approval is still permitted~~ Settled and built 2026-08-06
 

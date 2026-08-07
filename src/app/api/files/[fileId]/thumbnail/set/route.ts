@@ -104,7 +104,18 @@ export async function POST(
     }
 
     const now = new Date().toISOString();
-    await db.from("files").update({ thumbnailKey, updatedAt: now }).eq("id", fileId);
+    // The image is in storage; without this row nothing points at it, so the
+    // user is told their thumbnail was set and sees the old one.
+    const { error: linkError } = await db
+      .from("files")
+      .update({ thumbnailKey, updatedAt: now })
+      .eq("id", fileId);
+    if (linkError) {
+      return NextResponse.json(
+        { error: `The thumbnail was uploaded but not applied: ${linkError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

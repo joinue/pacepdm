@@ -262,13 +262,19 @@ export async function bumpAccessCount(tokenId: string): Promise<void> {
   // = accessCount + 1 via a Postgres RPC.
   const { data } = await db.from("share_tokens").select("accessCount").eq("id", tokenId).single();
   const current = (data?.accessCount as number | undefined) ?? 0;
-  await db
+  const { error } = await db
     .from("share_tokens")
     .update({
       accessCount: current + 1,
       lastAccessedAt: new Date().toISOString(),
     })
     .eq("id", tokenId);
+  // A counter, not a control — never fail a guest's view over it. But a
+  // share link that reports zero accesses when it has been opened is the
+  // kind of wrong that gets believed.
+  if (error) {
+    console.warn(`[share] could not bump the access count for ${tokenId}:`, error.message);
+  }
 }
 
 // ─── Per-access audit log ─────────────────────────────────────────────────
@@ -321,7 +327,11 @@ export function logShareAccess(input: LogShareAccessInput): void {
   void (async () => {
     try {
       const db = getServiceClient();
-      await db.from("share_token_access").insert({
+      // The try/catch around this only ever caught a thrown error — a network
+      // fault or a bad client. PostgREST *returns* a rejected write rather
+      // than throwing, so a refused insert walked straight past the handler
+      // below and logged nothing at all. Bind it.
+      const { error } = await db.from("share_token_access").insert({
         id: uuid(),
         tenantId: input.tenantId,
         tokenId: input.tokenId,
@@ -335,6 +345,12 @@ export function logShareAccess(input: LogShareAccessInput): void {
         userAgent: input.userAgent ? input.userAgent.slice(0, 500) : null,
         createdAt: new Date().toISOString(),
       });
+      if (error) {
+        console.warn(
+          `share access log failed for token ${input.tokenId} (${input.action}):`,
+          error.message
+        );
+      }
     } catch (err) {
       // Logger failure is non-fatal; surface it for server logs.
       console.warn("share access log failed:", err);

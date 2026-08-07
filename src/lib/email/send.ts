@@ -129,22 +129,49 @@ export async function sendNotificationEmail(
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const err = `resend ${res.status}: ${body.slice(0, 200)}`;
-      await db.from("notifications").update({ emailError: err }).eq("id", params.notificationId);
+      // These three write-backs record what happened to the send; the send
+      // itself has already succeeded or failed and the return value below is
+      // the authority on that. So a failed write-back is logged, never
+      // returned — but it is what makes `emailError` trustworthy, and a
+      // delivery column that is quietly sometimes-blank is worse than one
+      // that is always blank.
+      const { error: writeBackError } = await db
+        .from("notifications")
+        .update({ emailError: err })
+        .eq("id", params.notificationId);
+      if (writeBackError) {
+        console.warn(
+          `[email] could not record the send failure on ${params.notificationId}:`,
+          writeBackError.message
+        );
+      }
       return { ok: false, reason: err };
     }
 
     const data = (await res.json().catch(() => ({}))) as { id?: string };
-    await db
+    const { error: sentError } = await db
       .from("notifications")
       .update({ emailSentAt: new Date().toISOString(), emailError: null })
       .eq("id", params.notificationId);
+    if (sentError) {
+      console.warn(
+        `[email] sent, but could not stamp emailSentAt on ${params.notificationId}:`,
+        sentError.message
+      );
+    }
     return { ok: true, providerId: data.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await db
+    const { error: writeBackError } = await db
       .from("notifications")
       .update({ emailError: `fetch: ${msg.slice(0, 200)}` })
       .eq("id", params.notificationId);
+    if (writeBackError) {
+      console.warn(
+        `[email] could not record the send failure on ${params.notificationId}:`,
+        writeBackError.message
+      );
+    }
     return { ok: false, reason: msg };
   }
 }

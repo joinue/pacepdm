@@ -119,10 +119,19 @@ export async function DELETE(
       .eq("workflowId", workflowId);
 
     if (historyCount && historyCount > 0) {
-      await db
+      // Checked for the same reason the assignment delete below is: an
+      // archive that reports success while `isActive` stays true leaves the
+      // workflow in every picker it was meant to leave.
+      const { error: archiveError } = await db
         .from("approval_workflows")
         .update({ isActive: false, updatedAt: new Date().toISOString() })
         .eq("id", workflowId);
+      if (archiveError) {
+        return NextResponse.json(
+          { error: `Could not archive the workflow: ${archiveError.message}` },
+          { status: 409 }
+        );
+      }
 
       // Drop the assignments so it's no longer wired to any transition
       // or ECO trigger — archiving means "don't use for new requests".

@@ -73,7 +73,7 @@ export async function POST(
     const newVersion = file.currentVersion + 1;
     const now = new Date().toISOString();
 
-    await db.from("file_versions").insert({
+    const { error: versionError } = await db.from("file_versions").insert({
       id: uuid(),
       fileId,
       version: newVersion,
@@ -85,7 +85,21 @@ export async function POST(
       createdAt: now,
     });
 
-    await db
+    // Refuse before bumping the file. A restore that failed here but bumped
+    // anyway would leave the file claiming a version nothing wrote — and this
+    // is the recovery path, so it is the last place that should invent a new
+    // way to lose a version.
+    if (versionError) {
+      return NextResponse.json(
+        { error: `Could not create the restored version: ${versionError.message}` },
+        { status: 500 }
+      );
+    }
+
+    // Refuse before the audit row. A restore that reports success without
+    // moving `currentVersion` leaves the file on the version the user was
+    // trying to replace, and an audit entry saying otherwise.
+    const { error: bumpError } = await db
       .from("files")
       .update({
         currentVersion: newVersion,
@@ -93,6 +107,12 @@ export async function POST(
         thumbnailKey: file.thumbnailKey, // keep current thumbnail
       })
       .eq("id", fileId);
+    if (bumpError) {
+      return NextResponse.json(
+        { error: `The restored version was created but not made current: ${bumpError.message}` },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

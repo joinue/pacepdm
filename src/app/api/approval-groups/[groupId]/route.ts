@@ -59,10 +59,19 @@ export async function DELETE(
 
     if (inUse) {
       // Archive — preserves audit trail, removes from group pickers.
-      await db
+      // Refuse before the audit row: a discarded failure here writes an
+      // `approval_group.archive` entry for a group still offered in every
+      // picker, which is finding 5's shape on the update side.
+      const { error: archiveError } = await db
         .from("approval_groups")
         .update({ isActive: false, updatedAt: new Date().toISOString() })
         .eq("id", groupId);
+      if (archiveError) {
+        return NextResponse.json(
+          { error: `Could not archive the group: ${archiveError.message}` },
+          { status: 409 }
+        );
+      }
 
       await logAudit({
         tenantId: tenantUser.tenantId,

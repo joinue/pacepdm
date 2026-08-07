@@ -46,7 +46,7 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     }
 
     const now = new Date().toISOString();
-    await db
+    const { error: verifyError } = await db
       .from("tenant_sso_domains")
       .update({
         status: "verified",
@@ -55,6 +55,14 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       })
       .eq("id", id)
       .eq("tenantId", tenantUser.tenantId);
+    if (verifyError) {
+      return NextResponse.json(
+        {
+          error: `The domain checked out, but could not be marked verified: ${verifyError.message}`,
+        },
+        { status: 500 }
+      );
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

@@ -64,7 +64,22 @@ export async function notify({
   }));
 
   if (notifications.length > 0) {
-    await db.from("notifications").insert(notifications);
+    const { error } = await db.from("notifications").insert(notifications);
+    // Non-fatal — a notification that cannot be written must not fail the
+    // action that triggered it. Logged rather than swallowed: without this,
+    // an entire tenant silently stops receiving approval notifications and
+    // the only symptom is people saying nobody told them.
+    //
+    // The email loop below is skipped rather than attempted anyway.
+    // sendNotificationEmail writes emailSentAt/emailError back onto the
+    // notification row, and those rows do not exist.
+    if (error) {
+      console.error(
+        `[notify] failed to write ${notifications.length} ${type} notification(s) for tenant ${tenantId}:`,
+        error.message
+      );
+      return;
+    }
 
     // Fire-and-forget per-recipient email. sendNotificationEmail enforces
     // user/tenant opt-out and writes emailSentAt/emailError back to the
@@ -162,13 +177,19 @@ export async function markNotificationsReadByRef({
   refId: string;
 }) {
   const db = getServiceClient();
-  await db
+  const { error } = await db
     .from("notifications")
     .update({ isRead: true })
     .eq("tenantId", tenantId)
     .eq("userId", userId)
     .eq("refId", refId)
     .eq("isRead", false);
+  // Clearing a nag that has been acted on. Not worth failing the decision
+  // that just succeeded, but a silent failure means the approver keeps being
+  // asked for a decision they already made.
+  if (error) {
+    console.warn(`[notify] could not clear notifications for ${refId}:`, error.message);
+  }
 }
 
 export async function notifyApprovalGroupMembers({

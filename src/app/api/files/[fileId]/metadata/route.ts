@@ -87,7 +87,19 @@ export async function PUT(
     if (description !== undefined) updates.description = description;
     if (category) updates.category = category;
 
-    await db.from("files").update(updates).eq("id", fileId);
+    const { error: fileError } = await db.from("files").update(updates).eq("id", fileId);
+    if (fileError) {
+      return NextResponse.json(
+        { error: `Could not update the file: ${fileError.message}` },
+        { status: 500 }
+      );
+    }
+
+    // Fields that could not be written. Collected rather than thrown on the
+    // first one, so a single bad field does not silently abandon the rest —
+    // and reported, because the alternative is `{ success: true }` over a
+    // value the user watches disappear on their next refresh.
+    const unsaved: string[] = [];
 
     if (metadata && Array.isArray(metadata)) {
       for (const { fieldId, value } of metadata) {
@@ -99,19 +111,31 @@ export async function PUT(
           .single();
 
         if (existing) {
-          await db
+          const { error } = await db
             .from("metadata_values")
             .update({ value: String(value) })
             .eq("id", existing.id);
+          if (error) unsaved.push(fieldId);
         } else {
-          await db.from("metadata_values").insert({
+          const { error } = await db.from("metadata_values").insert({
             id: uuid(),
             fileId,
             fieldId,
             value: String(value),
           });
+          if (error) unsaved.push(fieldId);
         }
       }
+    }
+
+    if (unsaved.length > 0) {
+      return NextResponse.json(
+        {
+          error: `${unsaved.length} metadata field(s) could not be saved`,
+          fieldIds: unsaved,
+        },
+        { status: 500 }
+      );
     }
 
     await logAudit({

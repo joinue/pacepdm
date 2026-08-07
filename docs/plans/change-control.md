@@ -51,6 +51,29 @@ into `S`, writing a wrong value into the field a release is identified by
 rather than failing. Fixed by [`src/lib/revision.ts`](../../src/lib/revision.ts),
 which follows ASME Y14.35 and refuses rather than guessing.
 
+~~Fixed.~~ **Fixed in one of three places, and completed 2026-08-07.** The
+call site this was found in — `POST /api/files/[fileId]/transition` — was
+converted. Two others kept the old arithmetic and were only spotted while
+reading every `update()` in the codebase for the `unchecked-update` burn-down:
+
+- **`approval-engine.ts`**, which runs the identical reopen when the
+  transition requires approval. A released file reopened directly got the
+  right revision; the same file reopened through a workflow did not. Given
+  that reopening a release is exactly the sort of change most likely to be
+  gated behind approval, this was probably the more travelled of the two
+  paths.
+- **`files/bulk-transition`**, the same reopen in bulk.
+
+They refuse in three different ways, which is correct rather than
+inconsistent: the route returns 409 and stops, the bulk loop skips that file
+with a per-file reason, and the approval path cannot refuse at all — the
+approval has already happened — so it thaws the file, leaves the revision
+untouched and returns a warning naming it.
+
+**The test that covered this used A → B**, which the old arithmetic also gets
+right. That is why three copies could disagree for a month with a green suite.
+The new tests use `R2` (old code: `S`) and `Z` (old code: `[`).
+
 **4. Effectivity was free text.** "What is in effect on 1 March" and "which
 BOM shipped on unit 47" were both unanswerable. Fixed by typed
 `effectivityType` / `effectiveFrom` / `effectiveSerial`, with the prose
@@ -162,10 +185,15 @@ fictional date or leaves it blank.
 
 **So the work is:**
 
-1. **~~Add `USE_UP` to `EffectivityType`.~~ Done 2026-08-06** —
+1. **~~Add `USE_UP` to `EffectivityType`.~~ Done 2026-08-06, applied
+   2026-08-07** —
    [`migration-053`](../../supabase/migrations/migration-053-use-up-effectivity.sql)
    widens the CHECK constraint; the type, label, formatter and route schema all
-   carry it. **Migration written, not yet applied.**
+   carry it. The migration is now live, so the option the form offers is one
+   the database accepts. Until it was applied, choosing "on use-up" was
+   rejected with 23514 — the same shape as `eco_items.bomId` below, and the
+   reason a shipped UI option and an unapplied CHECK is a combination worth
+   checking for deliberately.
 2. **~~Say where the answer lives when it is not here.~~ Done 2026-08-06** —
    `isComputable()` and `deferralNote()` in
    [`effectivity.ts`](<../../src/app/(dashboard)/ecos/effectivity.ts>). Choosing

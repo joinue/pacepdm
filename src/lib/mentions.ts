@@ -47,7 +47,17 @@ export async function processMentions(ctx: MentionContext): Promise<void> {
     createdAt: new Date().toISOString(),
   }));
 
-  await db.from("comment_mentions").insert(mentions);
+  const { error } = await db.from("comment_mentions").insert(mentions);
+  // Non-fatal — the comment itself is already saved, and losing the mention
+  // record must not lose the comment. The notification below still goes out:
+  // being told you were mentioned is the part the user actually sees, and it
+  // does not depend on this row.
+  if (error) {
+    console.error(
+      `[mentions] failed to record ${mentions.length} mention(s) on ${ctx.entityType} ${ctx.entityId}:`,
+      error.message
+    );
+  }
 
   // Send notifications
   await notify({
