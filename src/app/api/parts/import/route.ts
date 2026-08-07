@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { v4 as uuid } from "uuid";
 import { withTenant } from "@/lib/api-route";
 import type { ScopedDb } from "@/lib/tenant-db";
