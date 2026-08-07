@@ -51,3 +51,10 @@ next-env.d.ts
 # postinstall script in scripts/copy-occt-wasm.mjs. Kept out of git so
 # the repo doesn't balloon; the script is idempotent and safe to re-run.
 /public/occt/
+
+# QuickBooks exports. The full item list carries every cost, preferred vendor
+# and sales price in the business — commercially sensitive, and there is no
+# reason for it to be in version control. Keep samples out of the repo; the
+# parser is pinned by a small synthetic fixture instead.
+*-qb-parts-export.CSV
+*-qb-parts-export.csv

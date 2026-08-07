@@ -165,7 +165,7 @@
     "unwrapped-route": 4
   },
   "src/app/api/parts/import/route.ts": {
-    "unwrapped-route": 4
+    "unwrapped-route": 2
   },
   "src/app/api/parts/route.ts": {
     "unwrapped-route": 6

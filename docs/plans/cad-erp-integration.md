@@ -260,12 +260,51 @@ to be reconstructed from `concat(partNumber, '-', revision)`.
    either the engineer waits or PACE holds a placeholder. Answer it when parts
    start being created in anger.
 2. ~~**BOM CSV import.**~~ Built — see above.
-3. **Import the item master.** Now the top item: the build list gave structure
-   but no cost, description, material or vendor, so every BOM currently rolls
-   up to zero. Export items from QuickBooks/NetSuite and run
-   `POST /api/parts/import`, which already upserts by part number. Watch the
-   revision split — ERP part numbers will carry the `-R<n>` the PACE ones no
-   longer have.
+3. **Import the item master.** Still the top item, and the importer is now
+   ready for the file QuickBooks actually produces —
+   [`src/lib/quickbooks-import.ts`](../../src/lib/quickbooks-import.ts).
+
+   **The export cannot be narrowed on the QuickBooks side.** You get the whole
+   catalogue or nothing: PACE's is 7,226 rows covering consumables, services,
+   sales tax items and every machine. So `POST /api/parts/import` detects a
+   QuickBooks export and does the filtering itself. Six things about that file
+   are not guessable from its header row, and every one of them breaks an
+   importer that does not expect it:
+
+   - **`Item` is a colon-delimited path**, not a part number —
+     `PACE Equipment:NANO-1000S-parts:Mechanical Components:N1S-M-001`. The
+     part number is the last segment.
+   - **There is no `Name` column at all.** The generic path requires one and
+     would have rejected the entire file. The description becomes the name.
+   - **A part number appears once per revision.** `N1S-M-001` has four entries
+     — bare, `-R1`, `-R2`, `-R3` — with a different vendor on each as sourcing
+     moved. Applying them all lets the last row win, which is how a current
+     casting silently acquires a superseded vendor.
+   - **`Type` and `Active Status` are load-bearing.** 699 of the 7,226 rows are
+     services, sales tax items, discounts or inactive.
+   - **The file is Windows-1252.** Decoding as UTF-8 does not throw, it
+     substitutes — so µm becomes garbage across a catalogue full of micron
+     sizes.
+   - **Vendor names contain a literal `\n`** — `DongGuan RX\n& LinFeiTeng` — an
+     escape nobody un-escaped upstream.
+
+   **Update-only, by design.** 6,096 distinct part numbers in the file against
+   a library of 135. The filter is "parts this PDM already knows about", which
+   is exactly the set the BOM import created. Everything else is counted and
+   ignored, and reported as `notInLibrary`.
+
+   **What it refuses to decide.** When the library holds a revision the file has
+   no entry for and every entry is versioned, nothing is applied — picking the
+   highest would be a guess about what is physically on the shelf. And when the
+   entries under one number describe visibly different components, it says so:
+   `N1S-M-006-R1` is a "Control Box Swivel Connector" while `-R2` is a "Faucet
+   hose retracted mechanism". That is two parts sharing a number, not a
+   revision, and no importer may quietly pick one.
+
+   Verified end to end against the real 7,226-row export: it selects
+   `N1S-M-001-R2` at $332.13 from PACE Kunshan for the part the library holds at
+   R2, and raises the `N1S-M-006` collision unprompted.
+
 4. **Add `externalId`** (item 2 under decisions above). More urgent after the
    revision split, since part numbers no longer match the ERP verbatim.
 5. ~~**Require `partId` on every line before `DRAFT → IN_REVIEW`.**~~ Done

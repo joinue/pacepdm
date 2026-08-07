@@ -24,7 +24,10 @@ const { tableResults, inserts, updates, mockFrom } = vi.hoisted(() => {
   function makeChain(table: string) {
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
     const resolvable = () => tableResults[table] ?? { data: null, error: null };
-    for (const m of ["select", "eq", "in", "is", "order", "limit"] as const) chain[m] = () => chain;
+    // `range` is what the QuickBooks path uses to page the tenant's own parts
+    // rather than querying by 6,000 part numbers.
+    for (const m of ["select", "eq", "in", "is", "order", "limit", "range"] as const)
+      chain[m] = () => chain;
     chain.single = () => resolvable();
     chain.maybeSingle = () => resolvable();
     chain.insert = (data: unknown) => {
@@ -124,8 +127,22 @@ describe("POST /api/parts/import — access and shape", () => {
     expect((await res.json()).error).toMatch(/name/i);
   });
 
-  it("refuses more than 1000 rows rather than hammering the database", async () => {
-    const rows = Array.from({ length: 1001 }, (_, i) => `PN-${i},Part ${i},A`).join("\n");
+  /**
+   * The cap was 1000 and is now 20000. It moved because a QuickBooks item
+   * export cannot be narrowed on the QuickBooks side — you get the whole
+   * catalogue or nothing, and PACE's is over 7,000 rows. A cap below that
+   * would reject the only file the user can actually produce.
+   *
+   * Writes stay bounded far lower and separately: the QuickBooks path only
+   * touches parts already in the library.
+   */
+  it("accepts a file far larger than the old 1000-row cap", async () => {
+    const rows = Array.from({ length: 8000 }, (_, i) => `PN-${i},Part ${i},A`).join("\n");
+    expect((await POST(csv(`${HEADER}\n${rows}`))).status).toBe(200);
+  });
+
+  it("still refuses a runaway file", async () => {
+    const rows = Array.from({ length: 20001 }, (_, i) => `PN-${i},Part ${i},A`).join("\n");
     const res = await POST(csv(`${HEADER}\n${rows}`));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/too many rows/i);
@@ -241,5 +258,169 @@ describe("POST /api/parts/import — row outcomes", () => {
   it("numbers rows from 2, so a row number matches the spreadsheet", async () => {
     const body = await (await POST(csv(`${HEADER}\nPN-1,Bracket,A\nPN-2,Housing,B`))).json();
     expect(body.results.map((r: { row: number }) => r.row)).toEqual([2, 3]);
+  });
+});
+
+/**
+ * A raw QuickBooks item export takes a different path through this route.
+ *
+ * The constraint driving all of it: QuickBooks will not filter the export, so
+ * the file is the whole catalogue — services, sales tax items, inactive rows,
+ * every machine — and the filtering has to happen here.
+ */
+describe("POST /api/parts/import — QuickBooks export", () => {
+  const QB_HEADER =
+    `,"Active Status","Type","Item","Description","Sales Tax Code","Account","COGS Account",` +
+    `"Asset Account","Accumulated Depreciation","Purchase Description","Quantity On Hand",` +
+    `"Cost","Preferred Vendor","Tax Agency","Price","Reorder Pt (Min)","MPN","Barcode",` +
+    `"Schedule B tariff code","Weight"`;
+
+  function qbRow(item: string, desc: string, cost: string, vendor: string, active = "Active") {
+    return `,"${active}","Inventory Part","${item}","${desc}","Tax","Sales:Equipment","COGS","Inventory Asset",0.00,,0,${cost},"${vendor}",,900.00,"","","","0","1"`;
+  }
+
+  /** The PDM's own library — the QuickBooks path only touches what is here. */
+  function givenLibrary(
+    parts: Array<{ id: string; partNumber: string; revision: string | null; name: string }>
+  ) {
+    tableResults.parts = { data: parts, error: null };
+  }
+
+  beforeEach(() => {
+    givenLibrary([{ id: "p1", partNumber: "N1S-M-001", revision: "R2", name: "N1S-M-001" }]);
+    tableResults.part_vendors = { data: null, error: null };
+  });
+
+  it("is recognised and reported as a QuickBooks import", async () => {
+    const body = await (
+      await POST(
+        csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+      )
+    ).json();
+    expect(body.source).toBe("quickbooks");
+  });
+
+  /**
+   * Four QuickBooks entries, one part. Applying them all would let the last
+   * row win, which is how a current casting acquires a superseded vendor.
+   */
+  it("applies the entry matching the revision the library holds", async () => {
+    const rows = [
+      qbRow("A:B:N1S-M-001", "Base Casting", "332.13", "DongGuan"),
+      qbRow("A:B:N1S-M-001-R1", "Base Casting machined", "332.13", "DongGuan"),
+      qbRow("A:B:N1S-M-001-R2", "Base Casting machined and coated", "332.13", "Kunshan"),
+      qbRow("A:B:N1S-M-001-R3", "Base Casting machined and coated", "332.13", "Suzhou"),
+    ].join("\n");
+    const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
+
+    expect(body.updated).toBe(1);
+    const update = updates.at(-1)!;
+    expect(update.unitCost).toBe(332.13);
+    // The ERP's identifier for this exact revision — the join key.
+    expect(update.externalId).toBe("N1S-M-001-R2");
+  });
+
+  it("says which entries it passed over", async () => {
+    const rows = [
+      qbRow("A:B:N1S-M-001", "Base Casting", "332.13", "DongGuan"),
+      qbRow("A:B:N1S-M-001-R2", "Base Casting machined", "332.13", "Kunshan"),
+    ].join("\n");
+    const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
+    expect(body.warned).toBe(1);
+    expect(body.results[0].warning).toContain("N1S-M-001-R2");
+  });
+
+  /**
+   * The whole reason for update-only. The export carries thousands of items
+   * the engineering library has no business acquiring.
+   */
+  it("ignores parts the library does not carry, and counts them", async () => {
+    const rows = [
+      qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan"),
+      qbRow("Consumables:ALD-0110E-BULK", "Alumina powder", "5245.83", "Baikowski"),
+    ].join("\n");
+    const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
+    expect(body.updated).toBe(1);
+    expect(body.notInLibrary).toBe(1);
+    expect(body.inserted).toBe(0);
+  });
+
+  it("counts rows that were never parts", async () => {
+    const service = `,"Active","Service","Labor","","Tax","Sales:Labor",,,0.00,,"",0.00,,,125.00,"",,"","",""`;
+    const inactive = qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan", "Not-active");
+    const body = await (await POST(csv(`${QB_HEADER}\n${service}\n${inactive}`))).json();
+    expect(body.notParts).toBe(2);
+    expect(body.updated).toBe(0);
+  });
+
+  /**
+   * Only a placeholder name is replaced. The BOM importer sets name = part
+   * number when it has nothing better; a curated name is left alone.
+   */
+  it("replaces a placeholder name with the QuickBooks description", async () => {
+    await POST(
+      csv(
+        `${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "NANO-1000S Base Casting", "332.13", "Kunshan")}`
+      )
+    );
+    expect(updates.at(-1)!.name).toBe("NANO-1000S Base Casting");
+  });
+
+  it("leaves a name somebody curated alone", async () => {
+    givenLibrary([
+      { id: "p1", partNumber: "N1S-M-001", revision: "R2", name: "Base casting (machined)" },
+    ]);
+    await POST(
+      csv(
+        `${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "NANO-1000S Base Casting", "332.13", "Kunshan")}`
+      )
+    );
+    expect(updates.at(-1)!.name).toBeUndefined();
+  });
+
+  it("records the preferred vendor against the part", async () => {
+    await POST(
+      csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+    );
+    const link = inserts.find((i) => i.vendorName);
+    expect(link).toMatchObject({ partId: "p1", vendorName: "Kunshan", unitCost: 332.13 });
+  });
+
+  /**
+   * The library is on a revision QuickBooks has no entry for, and every
+   * QuickBooks entry is versioned. Picking the highest would be a guess about
+   * what is physically on the shelf.
+   */
+  it("applies nothing when no entry matches and there is no unversioned one", async () => {
+    givenLibrary([{ id: "p1", partNumber: "N1S-M-001", revision: "R9", name: "N1S-M-001" }]);
+    const rows = [
+      qbRow("A:B:N1S-M-001-R1", "Base Casting", "332.13", "DongGuan"),
+      qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan"),
+    ].join("\n");
+    const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
+
+    expect(body.updated).toBe(0);
+    expect(body.failed).toBe(1);
+    expect(body.results[0].error).toMatch(/reconcile the revision/i);
+    expect(updates).toHaveLength(0);
+  });
+
+  /** Two components under one number is not something an importer may resolve. */
+  it("flags entries that describe different components", async () => {
+    const rows = [
+      qbRow("A:B:N1S-M-001-R1", "Control Box Swivel Connector", "5.67", "Kunshan"),
+      qbRow("A:B:N1S-M-001-R2", "Faucet hose retracted mechanism base", "5.67", "Lucent"),
+    ].join("\n");
+    const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
+    expect(body.results[0].warning).toMatch(/two parts sharing a number/i);
+  });
+
+  it("does not fall through to the generic importer's Name requirement", async () => {
+    // A QuickBooks export has no Name column at all. The generic path would
+    // reject the whole file; this one must not.
+    const res = await POST(
+      csv(`${QB_HEADER}\n${qbRow("A:B:N1S-M-001-R2", "Base Casting", "332.13", "Kunshan")}`)
+    );
+    expect(res.status).toBe(200);
   });
 });

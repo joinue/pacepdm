@@ -4,8 +4,8 @@
 
 <!-- plan-metrics
 routes-total: 111
-routes-wrapped: 43
-unwrapped-route: 319
+routes-wrapped: 44
+unwrapped-route: 317
 raw-fetch: 44
 generic-error-toast: 8
 swallowed-error: 6
@@ -94,7 +94,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **43 / 111**                          | 111                                                   |
+| Routes on `withTenant`                | 0                | **44 / 111**                          | 111                                                   |
 | `raw-fetch` in client components      | 112              | **44**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
