@@ -577,7 +577,6 @@ AUTO numbers were already safe (a compare-and-swap counter on `tenants`).
 To find a tenant wedged by this before deploy:
 `select "tenantId", count(*), max(substring("ecoNumber" from '^ECO-(\d+)$')::int) from ecos group by 1 having count(*) <> max(substring("ecoNumber" from '^ECO-(\d+)$')::int)`.
 
-
 ### ~~G. A leftover approval seat could decide a finished request~~ Fixed 2026-09-14
 
 Finding 4's fix gave ALL and MAJORITY steps one seat per member, and nothing
@@ -606,6 +605,98 @@ Typed effectivity is written at last — see
 **Before deploy**, look for seatless requests an old failed start left behind —
 they will now hold their ECO until recalled:
 `select id, "entityId", title from approval_requests r where status = 'PENDING' and not exists (select 1 from approval_decisions d where d."requestId" = r.id and d.status = 'PENDING')`.
+
+### Still open from the second pass
+
+Found by the same read, triaged below the line for the first week. Each was
+confirmed by reading the full path unless marked _plausible_. Take them in
+roughly this order within an area.
+
+**Users and roles**
+
+- **Removing a user on an active SSO domain does nothing.** The next page load
+  finds no row and JIT provisions a fresh one (`auth.ts` → `sso-jit.ts`).
+  Deactivating works. Until fixed, deactivate rather than remove.
+- **Reactivating skips the one-active-workspace guard** (`users/[userId]`), so a
+  user invited elsewhere meanwhile ends up with two active rows, resolves to no
+  tenant, and onboarding creates a third.
+- A refused last-admin deactivation still releases that admin's checkouts and
+  writes their audit rows first.
+- No ceiling on reactivating, demoting or removing a more privileged user; no
+  guard on stripping `*` from the last admin role.
+- Any tenant can register an unverified SSO domain, and the unique index then
+  blocks its real owner permanently.
+- JIT adopts a row by email alone, not by provider — _plausible_ takeover if
+  Supabase accepts an asserted email outside the provider's domains. Verify.
+- Deactivated members still count as seats and still receive approval requests.
+- No "resend invite"; the tenant duplicate-email check is case-sensitive.
+
+**Approvals and ECOs**
+
+- `ECO_APPROVE` is not required on the engine path, and "self" means
+  `requestedById` there but `createdById` on the direct path.
+- ALL steps count the requester as a seat, so with `blockSelfApproval` on they
+  can never complete. One rejection vetoes a MAJORITY step.
+- Inbox and badge count seats rather than requests (five cards for an ALL group
+  of five). Reminders ignore request status, notify the whole group once per
+  seat, and are not reset on resubmit.
+- `implement_eco` (migration 049) bumps part revisions with `chr(ascii+1)`, onto
+  reserved letters, and audits a skipped checked-out file as transitioned. Needs
+  a migration.
+- A PUT that combines field edits with a status change drops the fields; a
+  REWORK request cannot be recalled.
+
+**BOMs**
+
+- **CSV import into an existing BOM has never worked** — `PostBodySchema`'s
+  union reads `{items:[…]}` as one empty item, inserts a blank line, and toasts
+  "Imported undefined items". Put the `items` schema first.
+- Deleting a BOM ignores use: a superseded revision can be deleted out from under
+  its parents and history, and a BOM on an approved ECO can be deleted, which
+  implement then skips silently. Child BOMs of a carried BOM are not locked.
+- Four different cost figures for one BOM (items table, rollup, header, baseline),
+  because the add-line dialog copies the part's cost into a permanent line
+  override.
+- Releasing a sub-assembly revision detaches it from its parent in the tree.
+- Where-used never reaches parent assemblies — it walks `boms.fileId`, which
+  nothing sets.
+- The build-list import cannot link to sub-assemblies that already exist, and has
+  no cycle check. It also overwrites part revisions (an R3 part back to R2),
+  writes no audit rows, and reads the file as UTF-8 where QuickBooks writes
+  Windows-1252.
+- Unpaged `bom_items` reads in `GET /api/boms`, relink and rollup — _plausible_
+  truncation past 1,000 rows.
+- Revision history dates come from `updatedAt`; revise is not atomic; the rollup
+  panel goes stale after a quantity edit.
+
+**Parts**
+
+- Under `costSource: LOCKED` every part edit is refused, because the form always
+  sends `unitCost`. The generic import writes `unitCost` regardless of the
+  setting, and accepts a `Lifecycle State` column — Released without an ECO.
+- QuickBooks: a single candidate entry for the wrong revision is applied without
+  a warning; a `0.00` cost is stored as 0 and hides `estimatedCost` in rollups.
+- `GET /api/parts` stops at 200 with no paging; export includes soft-deleted
+  parts (which a re-import revives) and truncates at 1,000.
+
+**Vault**
+
+- A transition marked "requires approval" runs directly when no workflow is
+  assigned, or when its workflow is inactive.
+- Folder rename does not rewrite descendants' `path`, so a zip of the renamed
+  folder omits its subfolders and the old paths block new folders.
+- Lifecycle states are matched by name: the state-delete check always counts 0,
+  renaming a state strands its files, and upload hard-codes `WIP`.
+- Folder zip and `GET /api/files` read versions unpaged — _plausible_ silent
+  omissions at volume.
+- Storage keys use the raw filename — _plausible_ refusal of non-ASCII and
+  `#%[]{}~^`. Uploads go through a route handler — _plausible_ 4.5 MB ceiling on
+  Vercel.
+- Two concurrent upload-versions pick the same number; checkout has no
+  compare-and-set; `fileSize` is INTEGER.
+- `GET /api/share-tokens` lists links to files in folders the caller cannot see.
+- Custom metadata values cannot be cleared; the Rejected badge outlives a later
+  release; a desktop drop uploads only the first file.
 
 ---
 
