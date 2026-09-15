@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { getCostSource, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
+import { getCostSource, unitCostWouldChange, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
 import { z, parseBody, optionalString } from "@/lib/validation";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
 
@@ -184,7 +184,7 @@ export async function PUT(
 
     const { data: existing } = await db
       .from("parts")
-      .select("partNumber")
+      .select("partNumber, unitCost")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
@@ -198,7 +198,13 @@ export async function PUT(
     // must not be able to overwrite what Finance believes. `estimatedCost` is
     // always writable, and the refusal says so, because otherwise the answer to
     // "then where do I put my number" is nowhere.
-    if (body.unitCost !== undefined) {
+    //
+    // Refused only when the figure would actually change. This used to refuse
+    // any body that named `unitCost`, and the part form always sends it, so
+    // locking cost made every part in the tenant uneditable.
+    const { unitCost, ...rest } = body;
+    const costChanges = unitCostWouldChange(existing.unitCost, unitCost);
+    if (costChanges) {
       const costSource = await getCostSource(db, tenantUser.tenantId);
       if (costSource === "LOCKED") {
         return NextResponse.json({ error: UNIT_COST_LOCKED_MESSAGE }, { status: 403 });
@@ -206,9 +212,11 @@ export async function PUT(
     }
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-    for (const [key, value] of Object.entries(body)) {
+    for (const [key, value] of Object.entries(rest)) {
       if (value !== undefined) updates[key] = value;
     }
+    // An unchanged cost is not rewritten, locked or not.
+    if (costChanges) updates.unitCost = unitCost;
 
     const { data: part, error } = await db
       .from("parts")

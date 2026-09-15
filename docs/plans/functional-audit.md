@@ -885,8 +885,9 @@ offsets as valid streams.
 **Small fixes — done 2026-09-15.**
 
 - **BOM-1, CSV import into an existing BOM — done.** The `items` key now decides the schema, so a bad batch is a 400 instead of one blank line. The client parser (`boms/bom-csv-import.ts`, on `parseCsv`) matches headers exactly, including SOLIDWORKS names like `ITEM NO.` and `QTY.`, refuses bad quantities with a reason instead of coercing them, and skips Level > 1 rows so a re-imported export does not double-count. Part numbers link to the tenant's parts, chunked.
+- **BOM-2, LOCKED cost source — done.** Part edits are refused only when the cost would actually change (`unitCostWouldChange`), the form stops sending cost under the lock, create refuses a cost, and the CSV importer skips cost and says so. The QuickBooks importer still writes cost under the lock, on the reading that QuickBooks is the system the lock defers to — confirm.
 
-**Still to do in Stage 2:** LOCKED cost source (BOM-2), AUTO numbering (BOM-7), unsaved panel edits (UI-2), record links (UI-3).
+**Still to do in Stage 2:** AUTO numbering (BOM-7), unsaved panel edits (UI-2), record links (UI-3).
 
 ### Stages 3–4 — not started
 

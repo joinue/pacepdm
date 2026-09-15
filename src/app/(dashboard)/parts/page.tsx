@@ -92,6 +92,7 @@ export default function PartsPage() {
     updated: number;
     failed: number;
     warned: number;
+    costsNotImported?: number;
     total: number;
     results: {
       row: number;
@@ -370,7 +371,8 @@ export default function PartsPage() {
       const summary =
         `${data.inserted} added, ${data.updated} updated` +
         `${data.failed ? `, ${data.failed} failed` : ""}` +
-        `${data.warned ? `, ${data.warned} with warnings` : ""}`;
+        `${data.warned ? `, ${data.warned} with warnings` : ""}` +
+        `${data.costsNotImported ? ` — unit cost is locked, so ${data.costsNotImported} cost${data.costsNotImported === 1 ? " was" : "s were"} not imported` : ""}`;
       // A warning still opens the results dialog, but it is not a failure —
       // the rows landed. Only the toast tone differs.
       if (data.failed > 0 || data.warned > 0) {

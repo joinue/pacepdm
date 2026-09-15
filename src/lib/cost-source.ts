@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ScopedDb } from "@/lib/tenant-db";
 
 /**
  * Who is allowed to write `parts.unitCost`.
@@ -33,10 +33,47 @@ export type CostSource = "OPEN" | "LOCKED";
  * moment a settings read hiccuped, which looks exactly like data loss to
  * whoever is mid-edit.
  */
-export async function getCostSource(db: SupabaseClient, tenantId: string): Promise<CostSource> {
+export async function getCostSource(
+  // Only `from` is used, so both the scoped client and the raw service client
+  // (in routes not yet converted) fit.
+  db: Pick<ScopedDb, "from">,
+  tenantId: string
+): Promise<CostSource> {
   const { data } = await db.from("tenants").select("settings").eq("id", tenantId).maybeSingle();
   const settings = (data?.settings as Record<string, unknown> | null) ?? {};
   return settings[COST_SOURCE_KEY] === "LOCKED" ? "LOCKED" : "OPEN";
+}
+
+/**
+ * Would writing `next` change a part's `unitCost` from `current`?
+ *
+ * The lock is on *changing* the figure, not on the key appearing in a request.
+ * The part form sends every field it shows, cost included, so refusing any body
+ * that named `unitCost` made every part uneditable — name, description,
+ * anything — the moment a tenant locked cost. `undefined` means the request
+ * says nothing about cost; `null` means "no cost", and clearing a cost that is
+ * set is a change like any other.
+ */
+export function unitCostWouldChange(
+  current: number | null | undefined,
+  next: number | null | undefined
+): boolean {
+  if (next === undefined) return false;
+  const before = current ?? null;
+  if (before === null || next === null) return before !== next;
+  return Number(before) !== next;
+}
+
+/**
+ * The note an import attaches to a row whose unit cost it did not write,
+ * because cost is locked. Says what happened to the value and why, so a sheet
+ * of costs that did not land is not mistaken for one that did.
+ */
+export function unitCostNotImportedNote(raw: string): string {
+  return (
+    `Unit cost "${raw}" was not imported: unit cost is locked in this workspace ` +
+    `and is set by the connected cost system.`
+  );
 }
 
 /**

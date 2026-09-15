@@ -6,6 +6,7 @@ import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString, ilikeContains } from "@/lib/validation";
 import { nextPartNumberSequence, formatPartNumber, readPartNumberSettings } from "@/lib/parts";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
+import { getCostSource, unitCostWouldChange, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
 
 const CreatePartSchema = z.object({
   // Optional — when omitted and the tenant is in AUTO mode the server allocates
@@ -107,6 +108,16 @@ export async function POST(request: NextRequest) {
         { error: "Part number is required (this workspace is in manual numbering mode)" },
         { status: 400 }
       );
+    }
+
+    // Same rule as an edit: under a locked cost source only the connected cost
+    // system sets `unitCost`, so a new part may not arrive with one. A null is
+    // not a cost and is fine.
+    if (
+      unitCostWouldChange(null, body.unitCost) &&
+      (await getCostSource(db, tenantUser.tenantId)) === "LOCKED"
+    ) {
+      return NextResponse.json({ error: UNIT_COST_LOCKED_MESSAGE }, { status: 403 });
     }
 
     const buildRow = (pn: string) => ({

@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/api-route";
 import type { ScopedDb } from "@/lib/tenant-db";
 import { getApiTenantUser, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { getCostSource, unitCostNotImportedNote } from "@/lib/cost-source";
 import { parseCsvRecords } from "@/lib/csv";
 import { usesReservedLetter } from "@/lib/revision";
 import { createVendorResolver, normalizeVendorName } from "@/lib/vendors";
@@ -94,6 +95,8 @@ interface ParsedRow {
   notes: string | null;
   /** Number cells that had something in them but did not parse. */
   unparsedNumbers: Array<{ column: string; raw: string }>;
+  /** The Unit Cost cell as written, blank when the sheet has none. */
+  unitCostRaw: string;
 }
 
 /** The optional fields an update writes, each only when the row has a value. */
@@ -142,7 +145,11 @@ interface RowResult {
  * first person to revise that part will be told to set the revision by hand,
  * and this is where they find out why.
  */
-function warningsFor(parsed: ParsedRow, updating: boolean): string | undefined {
+function warningsFor(
+  parsed: ParsedRow,
+  updating: boolean,
+  costLocked: boolean
+): string | undefined {
   const notes: string[] = [];
   if (parsed.revision && usesReservedLetter(parsed.revision)) {
     notes.push(
@@ -151,7 +158,11 @@ function warningsFor(parsed: ParsedRow, updating: boolean): string | undefined {
         `revising this part will ask for the next revision by hand.`
     );
   }
+  // Under a locked cost source the cell is not read at all, parseable or not,
+  // and the note says so instead of complaining about its format.
+  if (costLocked && parsed.unitCostRaw) notes.push(unitCostNotImportedNote(parsed.unitCostRaw));
   for (const { column, raw } of parsed.unparsedNumbers) {
+    if (costLocked && column === UNIT_COST_COLUMN) continue;
     notes.push(
       `${column} "${raw}" is not a number, so ` +
         (updating ? `the part's existing value was left unchanged.` : `it was left blank.`)
@@ -159,6 +170,9 @@ function warningsFor(parsed: ParsedRow, updating: boolean): string | undefined {
   }
   return notes.length > 0 ? notes.join(" ") : undefined;
 }
+
+/** How the Unit Cost column is named in row notes. */
+const UNIT_COST_COLUMN = "Unit Cost";
 
 function parseOptionalNumber(value: string): number | null {
   if (!value) return null;
@@ -219,11 +233,12 @@ function buildRow(
       material: field("material") || null,
       weight: numberField("weight", "Weight"),
       weightUnit: field("weightUnit") || null,
-      unitCost: numberField("unitCost", "Unit Cost"),
+      unitCost: numberField("unitCost", UNIT_COST_COLUMN),
       currency: field("currency") || null,
       unit: field("unit") || null,
       notes: field("notes") || null,
       unparsedNumbers,
+      unitCostRaw: field("unitCost"),
     },
   };
 }
@@ -444,6 +459,9 @@ async function importFromQuickBooks(
 
     const row = chosen.row;
     const updates: Record<string, unknown> = { updatedAt: now };
+    // Not gated on a LOCKED cost source, unlike the generic path: this file is
+    // the accounting system's own item export, which is the source a locked
+    // `unitCost` defers to — see docs/decisions/erp-ownership.md.
     if (row.unitCost !== null) updates.unitCost = row.unitCost;
     if (row.description) updates.description = row.description;
     if (row.weight !== null) updates.weight = row.weight;
@@ -633,6 +651,14 @@ export const POST = withTenant(
       }
     }
 
+    // `unitCost` belongs to the connected cost system once the tenant locks it
+    // (lib/cost-source.ts). This import used to write it regardless, so a
+    // spreadsheet could overwrite every figure Finance relies on — the one
+    // thing the lock exists to prevent. The column is now left unwritten and
+    // each row that carried a value says so.
+    const costLocked = (await getCostSource(db, tenantUser.tenantId)) === "LOCKED";
+    let costsNotImported = 0;
+
     const now = new Date().toISOString();
     const results: RowResult[] = [];
     let inserted = 0;
@@ -660,8 +686,9 @@ export const POST = withTenant(
 
       const parsed = built.row;
       const existing = existingById.get(parsed.partNumber);
-      const warning = warningsFor(parsed, !!existing);
+      const warning = warningsFor(parsed, !!existing, costLocked);
       if (warning) warned++;
+      const costWithheld = costLocked && !!parsed.unitCostRaw;
 
       try {
         if (existing) {
@@ -680,6 +707,7 @@ export const POST = withTenant(
           // An unparseable number is null here too, so it is skipped and
           // warned about rather than written.
           for (const key of UPDATABLE_FIELDS) {
+            if (key === "unitCost" && costLocked) continue;
             if (parsed[key] !== null) changes[key] = parsed[key];
           }
           const { error } = await db.from("parts").update(changes).eq("id", existing.id);
@@ -691,6 +719,7 @@ export const POST = withTenant(
             warning,
           });
           updated++;
+          if (costWithheld) costsNotImported++;
         } else {
           const id = uuid();
           const { error } = await db.from("parts").insert({
@@ -705,7 +734,7 @@ export const POST = withTenant(
             material: parsed.material,
             weight: parsed.weight,
             weightUnit: parsed.weightUnit || "kg",
-            unitCost: parsed.unitCost,
+            unitCost: costLocked ? null : parsed.unitCost,
             currency: parsed.currency || "USD",
             unit: parsed.unit || "EA",
             notes: parsed.notes,
@@ -724,6 +753,7 @@ export const POST = withTenant(
             warning,
           });
           inserted++;
+          if (costWithheld) costsNotImported++;
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -743,7 +773,7 @@ export const POST = withTenant(
       action: "parts.import",
       entityType: "part",
       entityId: "bulk",
-      details: { inserted, updated, failed, warned, total: rows.length },
+      details: { inserted, updated, failed, warned, costsNotImported, total: rows.length },
     });
 
     return NextResponse.json({
@@ -751,6 +781,10 @@ export const POST = withTenant(
       updated,
       failed,
       warned,
+      /** True when the tenant's cost source is LOCKED, so no unit cost was written. */
+      unitCostLocked: costLocked,
+      /** Rows that landed with a unit cost the lock kept out. */
+      costsNotImported,
       total: rows.length,
       results,
     });

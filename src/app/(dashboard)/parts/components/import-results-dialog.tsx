@@ -17,6 +17,8 @@ interface ImportResult {
   failed: number;
   /** Rows that landed but carry something worth a second look. */
   warned: number;
+  /** Rows whose unit cost was not written because cost is locked in this workspace. */
+  costsNotImported?: number;
   total: number;
   results: {
     row: number;
@@ -59,6 +61,13 @@ export function ImportResultsDialog({ result, onClose }: ImportResultsDialogProp
                     ,{" "}
                     <span className="text-warning font-medium">{result.warned} with warnings</span>
                   </>
+                )}
+                {!!result.costsNotImported && (
+                  <span className="block mt-1 text-warning">
+                    Unit cost is locked in this workspace, so the unit cost on{" "}
+                    {result.costsNotImported} row{result.costsNotImported === 1 ? "" : "s"} was not
+                    imported. Estimated cost can be set on each part instead.
+                  </span>
                 )}
               </>
             )}

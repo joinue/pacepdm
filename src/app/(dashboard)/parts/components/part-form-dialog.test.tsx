@@ -441,4 +441,36 @@ describe("PartFormDialog — cost fields", () => {
     await waitFor(() => expect(partNumberField()).toHaveValue("PN-1042"));
     expect(field("Est. Cost ($)")).toHaveValue(null);
   });
+
+  /**
+   * The disabled box still held the part's figure, and the form sent it back
+   * on every save. The route refused any edit naming `unitCost` under a locked
+   * cost source, so locking cost made every part uneditable.
+   */
+  it("does not send unit cost when it is locked, so the rest of the edit saves", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      editingPart: { ...existingPart, unitCost: 4.25 } as Part,
+      costSource: "LOCKED",
+    });
+    await waitFor(() => expect(field("Name")).toHaveValue("Idler bracket"));
+    await user.clear(field("Name"));
+    await user.type(field("Name"), "Idler bracket, long");
+    await user.type(field("Est. Cost ($)"), "5");
+    await user.click(saveButton());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const { body } = savedRequest();
+    expect(body).not.toHaveProperty("unitCost");
+    expect(body).toMatchObject({ name: "Idler bracket, long", estimatedCost: 5 });
+  });
+
+  it("still sends unit cost on an edit when cost is owned here", async () => {
+    const user = userEvent.setup();
+    renderDialog({ editingPart: { ...existingPart, unitCost: 4.25 } as Part, costSource: "OPEN" });
+    await waitFor(() => expect(field("Name")).toHaveValue("Idler bracket"));
+    await user.click(saveButton());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(savedRequest().body.unitCost).toBe(4.25);
+  });
 });

@@ -202,6 +202,13 @@ export function PartFormDialog({
     if (!editingPart && partNumberMode === "AUTO" && !formData.partNumber.trim()) {
       delete payload.partNumber;
     }
+    // A locked unit cost is not the form's to send. The field is disabled, but
+    // it still held the part's figure, and sending it back made the route
+    // refuse the whole edit — every part became uneditable once cost was
+    // locked.
+    if (costLocked) {
+      delete payload.unitCost;
+    }
 
     const url = editingPart ? `/api/parts/${editingPart.id}` : "/api/parts";
     const method = editingPart ? "PUT" : "POST";

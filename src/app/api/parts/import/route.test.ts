@@ -478,6 +478,64 @@ describe("POST /api/parts/import — inserting a new part", () => {
 });
 
 /**
+ * Once a tenant locks cost, `unitCost` is the connected cost system's to
+ * write. This importer wrote it regardless, so one spreadsheet could overwrite
+ * every figure the lock exists to protect.
+ */
+describe("POST /api/parts/import — locked unit cost", () => {
+  const partWrites = () => [
+    ...inserts.filter((i) => i.__table === "parts"),
+    ...updates.filter((u) => u.__table === "parts"),
+  ];
+
+  beforeEach(() => {
+    tableResults.tenants = { data: { settings: { costSource: "LOCKED" } }, error: null };
+  });
+
+  it("does not write the cost of an existing part, and says so on the row", async () => {
+    tableResults.parts = { data: [{ id: "part-1", partNumber: "PN-1" }], error: null };
+    const body = await (
+      await POST(csv("Part Number,Name,Description,Unit Cost\nPN-1,Bracket,Bent,12.50"))
+    ).json();
+
+    const [update] = partWrites();
+    expect(update).toMatchObject({ description: "Bent" });
+    expect(update).not.toHaveProperty("unitCost");
+    expect(body).toMatchObject({
+      updated: 1,
+      warned: 1,
+      unitCostLocked: true,
+      costsNotImported: 1,
+    });
+    expect(body.results[0].warning).toMatch(/Unit cost "12.50" was not imported/);
+  });
+
+  it("creates a new part with no cost", async () => {
+    const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,4"))).json();
+    expect(partWrites()[0]).toMatchObject({ partNumber: "PN-9", unitCost: null });
+    expect(body).toMatchObject({ inserted: 1, costsNotImported: 1 });
+  });
+
+  it("does not complain about the format of a cost it was never going to read", async () => {
+    const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,TBD"))).json();
+    expect(body.results[0].warning).not.toMatch(/not a number/);
+    expect(body.results[0].warning).toMatch(/locked/);
+  });
+
+  it("does not warn about a row whose cost cell is blank", async () => {
+    const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,"))).json();
+    expect(body).toMatchObject({ warned: 0, costsNotImported: 0 });
+  });
+
+  it("still writes cost when the tenant owns it", async () => {
+    tableResults.tenants = { data: { settings: { costSource: "OPEN" } }, error: null };
+    const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,4"))).json();
+    expect(partWrites()[0]).toMatchObject({ unitCost: 4 });
+    expect(body).toMatchObject({ unitCostLocked: false, costsNotImported: 0 });
+  });
+});
+
+/**
  * Deciding insert-or-update rests entirely on the lookup of existing part
  * numbers. When it misses a part, that row goes down the insert path and fails
  * on the unique index — so a lookup that misses silently fails rows loudly.
