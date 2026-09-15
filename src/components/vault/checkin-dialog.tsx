@@ -14,6 +14,8 @@ import { MentionInput } from "@/components/ui/mention-input";
 import { Label } from "@/components/ui/label";
 import { Upload } from "lucide-react";
 import { toast } from "sonner";
+import { errorMessage, fetchJson, isAbortError } from "@/lib/api-client";
+import { formatBytes, uploadNewVersion } from "@/lib/vault-upload-client";
 
 export function CheckInDialog({
   open,
@@ -30,46 +32,55 @@ export function CheckInDialog({
   const [isDragging, setIsDragging] = useState(false);
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleCheckIn(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
 
     try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      if (comment) formData.append("comment", comment);
-
-      const res = await fetch(`/api/files/${fileId}/checkin`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || "Failed to check in");
-        setLoading(false);
-        return;
-      }
-
-      const data = await res.json();
-      toast.success(file ? "File checked in with new version" : "Check-out cancelled");
-      if (data.warnings?.length) {
-        for (const w of data.warnings) toast.warning(w);
+      if (file) {
+        // Straight to storage, then recorded — see lib/vault-uploads.ts. A
+        // large assembly could not be checked in when the bytes went through
+        // the route.
+        setProgress(0);
+        const result = await uploadNewVersion(fileId, file, "checkin", comment || null, {
+          onProgress: ({ loaded, total }) => setProgress(total > 0 ? loaded / total : 0),
+          signal: abort.signal,
+        });
+        toast.success(`Checked in as version ${result.version}`);
+      } else {
+        await fetchJson(`/api/files/${fileId}/checkin`, {
+          method: "POST",
+          body: { comment: comment || null },
+        });
+        toast.success("Check-out cancelled");
       }
       setFile(null);
       setComment("");
       onOpenChange(false);
       onCheckedIn();
-    } catch {
-      toast.error("Failed to check in");
+    } catch (err) {
+      // The comment stays, so a refused check-in can be retried without retyping it.
+      if (!isAbortError(err)) toast.error(errorMessage(err));
+    } finally {
+      abortRef.current = null;
+      setLoading(false);
+      setProgress(null);
     }
-    setLoading(false);
+  }
+
+  function handleOpenChange(next: boolean) {
+    if (!next) abortRef.current?.abort();
+    onOpenChange(next);
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Check In File</DialogTitle>
@@ -106,9 +117,7 @@ export function CheckInDialog({
               {file ? (
                 <div>
                   <p className="font-medium">{file.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {(file.size / 1048576).toFixed(2)} MB
-                  </p>
+                  <p className="text-sm text-muted-foreground">{formatBytes(file.size)}</p>
                 </div>
               ) : (
                 <div>
@@ -131,6 +140,20 @@ export function CheckInDialog({
               />
             </div>
 
+            {progress !== null && (
+              <div className="space-y-1" role="status" aria-live="polite">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.round(progress * 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {progress < 1 ? `Uploading\u2026 ${Math.round(progress * 100)}%` : "Saving\u2026"}
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="comment">Comment</Label>
               <MentionInput
@@ -143,7 +166,7 @@ export function CheckInDialog({
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={loading}>

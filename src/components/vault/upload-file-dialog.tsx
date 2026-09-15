@@ -30,34 +30,41 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Upload, Search, AlertTriangle, Box } from "lucide-react";
 import { toast } from "sonner";
 import { useTenantUser } from "@/components/providers/tenant-provider";
+import { errorMessage, fetchJson, isAbortError } from "@/lib/api-client";
+import { readDroppedFiles, type DroppedFile } from "@/lib/dropped-files";
+import {
+  duplicateOf,
+  formatBytes,
+  uploadNewFile,
+  uploadNewVersion,
+  type DuplicateFileInfo,
+} from "@/lib/vault-upload-client";
 import { needsNeutralExport } from "./vault-types";
-
-interface DuplicateFileInfo {
-  id: string;
-  name: string;
-  currentVersion: number;
-  isCheckedOut: boolean;
-  checkedOutById: string | null;
-  isFrozen: boolean;
-  lifecycleState: string;
-}
+import { UploadQueue } from "./upload-queue";
 
 export function UploadFileDialog({
   open,
   onOpenChange,
   folderId,
   onUploaded,
-  initialFile,
+  initialItems,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   folderId: string;
   onUploaded: () => void;
-  initialFile?: File | null;
+  /** Files dropped onto the vault, loose or from folders, to start with. */
+  initialItems?: DroppedFile[] | null;
 }) {
   const user = useTenantUser();
   const isAdmin = user.permissions.includes("*");
-  const [file, setFile] = useState<File | null>(null);
+  const [items, setItems] = useState<DroppedFile[]>([]);
+  // One loose file gets the full form. Several files, or anything from a
+  // dropped folder, go through the queue.
+  const file = items.length === 1 && items[0].dir.length === 0 ? items[0].file : null;
+  const isQueue = items.length > 1 || (items.length === 1 && items[0].dir.length > 0);
+  const [progress, setProgress] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [partNumber, setPartNumber] = useState("");
   const [description, setDescription] = useState("");
@@ -93,10 +100,10 @@ export function UploadFileDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open && initialFile) {
-      queueMicrotask(() => setFile(initialFile));
+    if (open && initialItems?.length) {
+      queueMicrotask(() => setItems(initialItems));
     }
-  }, [open, initialFile]);
+  }, [open, initialItems]);
 
   useEffect(() => {
     if (open && isAdmin && lifecycleStates.length === 0) {
@@ -141,116 +148,117 @@ export function UploadFileDialog({
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    // A part typed into the search but never picked used to upload with no
+    // link and no warning.
+    if (linkToPart && linkMode === "existing" && !selectedPart) {
+      toast.error(
+        "Pick a part from the search results, or untick \u201cLink this file to a part\u201d."
+      );
+      return;
+    }
 
     setLoading(true);
-
+    setProgress(0);
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("folderId", folderId);
-      if (partNumber) formData.append("partNumber", partNumber);
-      if (description) formData.append("description", description);
-      if (category) formData.append("category", category);
-      if (lifecycleState) formData.append("lifecycleState", lifecycleState);
-
-      const res = await fetch("/api/files", {
-        method: "POST",
-        body: formData,
-      });
-
-      const fileData = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 409 && fileData.code === "DUPLICATE_FILE" && fileData.existingFile) {
-          setDuplicateFile(fileData.existingFile);
-          setLoading(false);
-          return;
+      const created = await uploadNewFile<{ id: string }>(
+        folderId,
+        file,
+        {
+          partNumber: partNumber || undefined,
+          description: description || undefined,
+          category: category || undefined,
+          lifecycleState: lifecycleState || undefined,
+        },
+        {
+          onProgress: ({ loaded, total }) => setProgress(total > 0 ? loaded / total : 0),
+          signal: abort.signal,
         }
-        toast.error(fileData.error || "Failed to upload file");
-        setLoading(false);
-        return;
-      }
-
-      // Link to part if requested
-      if (linkToPart && linkMode === "existing" && selectedPart) {
-        await fetch(`/api/parts/${selectedPart.id}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileId: fileData.id, role: fileRole, isPrimary: true }),
-        });
-        toast.success(`File uploaded and linked to ${selectedPart.partNumber}`);
-      } else if (linkToPart && linkMode === "new" && newPartNumber && newPartName) {
-        const partRes = await fetch("/api/parts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ partNumber: newPartNumber, name: newPartName }),
-        });
-        if (partRes.ok) {
-          const part = await partRes.json();
-          await fetch(`/api/parts/${part.id}/files`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileId: fileData.id, role: fileRole, isPrimary: true }),
-          });
-          toast.success(`File uploaded, part ${newPartNumber} created and linked`);
-        } else {
-          toast.success("File uploaded but failed to create part");
-        }
-      } else {
-        toast.success("File uploaded successfully");
-      }
-
-      // Surface thumbnail extraction warnings so users know to upload manually
-      if (fileData.warnings?.length) {
-        for (const w of fileData.warnings) {
-          toast.warning(w);
-        }
-      }
-
+      );
+      await linkUploadedFile(created.id);
       resetForm();
       onOpenChange(false);
       onUploaded();
-    } catch {
-      toast.error("Failed to upload file");
+    } catch (err) {
+      const existing = duplicateOf(err);
+      if (existing) {
+        setDuplicateFile(existing);
+      } else if (!isAbortError(err)) {
+        toast.error(errorMessage(err));
+      }
+    } finally {
+      abortRef.current = null;
+      setLoading(false);
+      setProgress(null);
     }
-    setLoading(false);
+  }
+
+  /**
+   * Link the uploaded file to a part. The upload has already succeeded, so a
+   * failure here is a warning naming what did not happen — it used to report
+   * "linked" whether or not the link worked.
+   */
+  async function linkUploadedFile(fileId: string) {
+    if (!linkToPart) {
+      toast.success("File uploaded");
+      return;
+    }
+    try {
+      let part = selectedPart;
+      if (linkMode === "new") {
+        part = await fetchJson<{ id: string; partNumber: string; name: string }>("/api/parts", {
+          method: "POST",
+          body: { partNumber: newPartNumber, name: newPartName },
+        });
+      }
+      if (!part) return;
+      await fetchJson(`/api/parts/${part.id}/files`, {
+        method: "POST",
+        body: { fileId, role: fileRole, isPrimary: true },
+      });
+      toast.success(
+        linkMode === "new"
+          ? `File uploaded, part ${part.partNumber} created and linked`
+          : `File uploaded and linked to ${part.partNumber}`
+      );
+    } catch (err) {
+      toast.warning(`File uploaded, but it was not linked to a part: ${errorMessage(err)}`);
+    }
   }
 
   async function handleVersionBump() {
     if (!file || !duplicateFile) return;
     setLoading(true);
+    setProgress(0);
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("comment", `New version uploaded (replaced duplicate)`);
-
-      const res = await fetch(`/api/files/${duplicateFile.id}/upload-version`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.error || "Failed to upload new version");
-        setLoading(false);
-        return;
-      }
-
+      const data = await uploadNewVersion(
+        duplicateFile.id,
+        file,
+        "version",
+        "New version uploaded (replaced duplicate)",
+        {
+          onProgress: ({ loaded, total }) => setProgress(total > 0 ? loaded / total : 0),
+          signal: abort.signal,
+        }
+      );
       toast.success(`Uploaded as version ${data.version} of "${duplicateFile.name}"`);
-      if (data.warnings?.length) {
-        for (const w of data.warnings) toast.warning(w);
-      }
       resetForm();
       onOpenChange(false);
       onUploaded();
-    } catch {
-      toast.error("Failed to upload new version");
+    } catch (err) {
+      if (!isAbortError(err)) toast.error(errorMessage(err));
+    } finally {
+      abortRef.current = null;
+      setLoading(false);
+      setProgress(null);
     }
-    setLoading(false);
   }
 
   function resetForm() {
-    setFile(null);
+    setItems([]);
     setPartNumber("");
     setDescription("");
     setCategory("");
@@ -266,13 +274,35 @@ export function UploadFileDialog({
     setDuplicateFile(null);
   }
 
+  /** Closing cancels an upload in progress and forgets the picked files. */
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      abortRef.current?.abort();
+      resetForm();
+    }
+    onOpenChange(next);
+  }
+
+  function pickFiles(list: FileList | null) {
+    const picked = Array.from(list ?? []).map((f) => ({ file: f, dir: [] }));
+    if (picked.length) setItems(picked);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Upload File</DialogTitle>
+          <DialogTitle>{isQueue ? "Upload Files" : "Upload File"}</DialogTitle>
         </DialogHeader>
-        {duplicateFile ? (
+        {isQueue ? (
+          <UploadQueue
+            folderId={folderId}
+            items={items}
+            onUploaded={onUploaded}
+            onBack={() => setItems([])}
+            onClose={() => handleOpenChange(false)}
+          />
+        ) : duplicateFile ? (
           <div className="space-y-4 py-4">
             <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4 /30">
               <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
@@ -303,18 +333,13 @@ export function UploadFileDialog({
               </p>
             )}
 
+            {progress !== null && <UploadProgressBar progress={progress} />}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDuplicateFile(null)}>
                 Back
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  resetForm();
-                  onOpenChange(false);
-                }}
-              >
+              <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                 Cancel
               </Button>
               {!duplicateFile.isFrozen &&
@@ -352,32 +377,38 @@ export function UploadFileDialog({
                   e.preventDefault();
                   e.stopPropagation();
                   setIsDragging(false);
-                  const dropped = e.dataTransfer.files?.[0];
-                  if (dropped) setFile(dropped);
+                  readDroppedFiles(e.dataTransfer)
+                    .then((dropped) => {
+                      if (dropped.length) setItems(dropped);
+                    })
+                    .catch((err) => toast.error(errorMessage(err)));
                 }}
               >
                 {file ? (
                   <div>
                     <p className="font-medium">{file.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {(file.size / 1048576).toFixed(2)} MB
-                    </p>
+                    <p className="text-sm text-muted-foreground">{formatBytes(file.size)}</p>
                   </div>
                 ) : (
                   <div>
                     <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                     <p className="text-sm text-muted-foreground">
-                      {isDragging ? "Drop file here" : "Drag a file here, or click to browse"}
+                      {isDragging
+                        ? "Drop files or folders here"
+                        : "Drag files or folders here, or click to browse"}
                     </p>
                   </div>
                 )}
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  onChange={(e) => pickFiles(e.target.files)}
                 />
               </div>
+
+              {progress !== null && <UploadProgressBar progress={progress} />}
 
               {/* A native SolidWorks file can only ever show its embedded 2D
                   bitmap — occt-import-js reads neutral formats only, so no
@@ -615,7 +646,7 @@ export function UploadFileDialog({
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={loading || !file}>
@@ -626,5 +657,19 @@ export function UploadFileDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function UploadProgressBar({ progress }: { progress: number }) {
+  const pct = Math.round(progress * 100);
+  return (
+    <div className="space-y-1" role="status" aria-live="polite">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {pct < 100 ? `Uploading\u2026 ${pct}%` : "Saving\u2026"}
+      </p>
+    </div>
   );
 }

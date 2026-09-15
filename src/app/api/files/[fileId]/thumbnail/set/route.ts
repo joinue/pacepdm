@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { requireFileAccess } from "@/lib/folder-access-guards";
 import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileThumbnailKey } from "@/lib/vault-uploads";
 
 /**
  * POST /api/files/[fileId]/thumbnail/set
@@ -104,7 +105,9 @@ export async function POST(
     // Upload under a fresh timestamped key so signed-URL caches don't
     // serve the old thumbnail. We don't bother deleting any previous
     // thumbnail object — orphaned thumbnails are cheap and harmless.
-    const thumbnailKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
+    // Built from ids, not the file name: storage refuses keys containing
+    // characters common in engineering file names (AUD-003 VLT-4).
+    const thumbnailKey = fileThumbnailKey(tenantUser.tenantId, fileId, thumb.ext);
     const { error: upError } = await db.storage.from("vault").upload(thumbnailKey, thumb.data, {
       contentType: thumb.mimeType,
       upsert: false,

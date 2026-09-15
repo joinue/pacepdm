@@ -1,149 +1,190 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { randomUUID } from "node:crypto";
+import { withTenant, badRequest, conflict, forbidden, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { extractThumbnail } from "@/lib/thumbnail";
-import { v4 as uuid } from "uuid";
+import { getServiceClient } from "@/lib/db";
 import { getFolderAccessScope, canViewFolder, canEditFolder } from "@/lib/folder-access";
 import { categoryForExtension } from "@/lib/file-categories";
+import { runAfterResponse } from "@/lib/notifications";
+import { selectAll, selectAllIn } from "@/lib/paged-query";
+import { z, nonEmptyString, optionalString } from "@/lib/validation";
+import {
+  THUMBNAIL_SOURCE_EXTENSIONS,
+  VAULT_BUCKET,
+  confirmUploadedObject,
+  discardUploadedObject,
+  extensionOf,
+  generateFileThumbnail,
+  readUploadGrant,
+  scheduleThumbnail,
+} from "@/lib/vault-uploads";
 
-// File types the thumbnail extractor knows how to process. Files of these
-// types that are missing `thumbnailKey` get a just-in-time backfill in the
-// list endpoint below — critical for PDFs / SolidWorks files that were
-// uploaded before the extractor supported them.
-const BACKFILLABLE_EXTS = new Set([
-  "pdf",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "bmp",
-  "sldprt",
-  "sldasm",
-  "slddrw",
-]);
+/**
+ * How many files one listing may queue for a thumbnail backfill. Each is a
+ * download and an extraction after the response; a folder of freshly migrated
+ * files catches up over a few views instead of in one burst.
+ */
+const BACKFILL_PER_LISTING = 3;
 
-export async function GET(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { searchParams } = new URL(request.url);
-    const folderId = searchParams.get("folderId");
-    const checkedOutByMe = searchParams.get("checkedOutByMe") === "1";
+const ListQuerySchema = z.object({
+  folderId: z.string().optional(),
+  checkedOutByMe: z.string().optional(),
+});
 
-    if (!folderId && !checkedOutByMe) {
-      return NextResponse.json(
-        { error: "folderId or a flat-view flag is required" },
-        { status: 400 }
-      );
-    }
+type RawFileRow = {
+  id: string;
+  folderId: string;
+  name: string;
+  fileType: string | null;
+  currentVersion: number;
+  thumbnailKey: string | null;
+  thumbnailAttemptedAt: string | null;
+  [key: string]: unknown;
+};
 
-    const db = getServiceClient();
-    const scope = await getFolderAccessScope(tenantUser);
+type VersionRow = {
+  fileId: string;
+  version: number;
+  storageKey: string;
+  fileSize: number;
+  createdAt: string;
+  uploadedBy: unknown;
+};
 
-    // Loose shape of the row set the decoration pipeline below consumes.
-    // Both read modes return something conforming to this — flat mode
-    // additionally includes a joined `folder`, which we just pass through.
-    type RawFileRow = {
-      id: string;
-      folderId: string;
-      name: string;
-      fileType: string | null;
-      currentVersion: number;
-      thumbnailKey: string | null;
-      thumbnailAttemptedAt: string | null;
-      [key: string]: unknown;
-    };
+/**
+ * Two read modes:
+ *   * Folder mode (?folderId=) — that folder's files, ordered by name.
+ *   * Flat mode (?checkedOutByMe=1) — every file the caller has checked out
+ *     across the tenant, oldest checkout first, each carrying its folder so
+ *     the list can show a path.
+ *
+ * Every read is paged. A folder past 1,000 files used to lose the rest from
+ * the listing while they still blocked re-upload by name, and past a few
+ * hundred files the `.in()` lookups for versions and approvals exceeded the
+ * URL limit — with the error discarded, so sizes, uploaders and approval
+ * badges went blank (AUD-003 OPS-6).
+ */
+export const GET = withTenant({ query: ListQuerySchema }, async ({ db, tenantUser, query }) => {
+  const checkedOutByMe = query.checkedOutByMe === "1";
+  const folderId = query.folderId;
+  if (!folderId && !checkedOutByMe) {
+    throw badRequest("folderId or a flat-view flag is required");
+  }
 
-    // Two read modes:
-    //   * Folder mode (default) — returns that folder's files, ordered by name.
-    //   * Flat mode (?checkedOutByMe=1) — returns every file the current user
-    //     has checked out across the tenant, oldest-checkout-first. Flat rows
-    //     carry their parent folder so the list can render a path, and are
-    //     post-filtered by folder access so a revoked folder never leaks a
-    //     row through even if the user still technically owns the checkout.
-    let files: RawFileRow[] | null;
-    if (checkedOutByMe) {
-      const { data } = await db
+  const scope = await getFolderAccessScope(tenantUser);
+
+  let files: RawFileRow[];
+  if (checkedOutByMe) {
+    const rows = await selectAll<RawFileRow>((from, to) =>
+      db
         .from("files")
         .select(
           `*, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName), folder:folders!files_folderId_fkey(id, name, path)`
         )
-        .eq("tenantId", tenantUser.tenantId)
         .is("deletedAt", null)
         .eq("isCheckedOut", true)
         .eq("checkedOutById", tenantUser.id)
-        .order("checkedOutAt", { ascending: true });
-      files = ((data ?? []) as unknown as RawFileRow[]).filter((f) =>
-        canViewFolder(scope, f.folderId)
-      );
-    } else {
-      // Deny at the folder level before touching file rows. Returning an
-      // empty list (rather than 403) keeps existence hidden for folders the
-      // user shouldn't know about — same convention as the folder listing.
-      if (!canViewFolder(scope, folderId!)) {
-        return NextResponse.json([]);
-      }
-      const { data } = await db
+        .order("checkedOutAt", { ascending: true })
+        .order("id")
+        .range(from, to)
+    );
+    // A revoked folder never leaks a row, even to the user holding the checkout.
+    files = rows.filter((f) => canViewFolder(scope, f.folderId));
+  } else {
+    // An empty list rather than a 403 keeps a hidden folder's existence hidden.
+    if (!canViewFolder(scope, folderId!)) return [];
+    files = await selectAll<RawFileRow>((from, to) =>
+      db
         .from("files")
-        .select(
-          `
-          *,
-          checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)
-        `
-        )
-        .eq("tenantId", tenantUser.tenantId)
+        .select(`*, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)`)
         .is("deletedAt", null)
         .eq("folderId", folderId!)
-        .order("name");
-      files = (data ?? []) as unknown as RawFileRow[];
+        .order("name")
+        .order("id")
+        .range(from, to)
+    );
+  }
+
+  const fileIds = files.map((f) => f.id);
+
+  // lint-conventions-allow: child-table-direct-query — `file_versions` has no
+  // tenant column; every id here came from the scoped `files` read above,
+  // which is what makes this lookup safe.
+  const [versions, approvals] = await Promise.all([
+    selectAllIn<VersionRow>(fileIds, (chunk, from, to) =>
+      db
+        .from("file_versions")
+        .select(
+          "fileId, version, storageKey, fileSize, createdAt, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)"
+        )
+        .in("fileId", chunk)
+        .order("fileId")
+        .order("version", { ascending: false })
+        .range(from, to)
+    ),
+    selectAllIn<{ id: string; entityId: string; status: string }>(fileIds, (chunk, from, to) =>
+      db
+        .from("approval_requests")
+        .select("id, entityId, status")
+        .eq("entityType", "file")
+        .in("entityId", chunk)
+        .in("status", ["PENDING", "REJECTED"])
+        .order("id")
+        .range(from, to)
+    ),
+  ]);
+
+  // Sorted by version descending within each file, so the first is the latest.
+  const versionsByFile = new Map<string, VersionRow[]>();
+  for (const v of versions) {
+    const list = versionsByFile.get(v.fileId) ?? [];
+    list.push(v);
+    versionsByFile.set(v.fileId, list);
+  }
+  const currentVersionOf = (file: RawFileRow) =>
+    versionsByFile.get(file.id)?.find((v) => v.version === file.currentVersion);
+
+  // PENDING wins over REJECTED when a file has both.
+  const approvalMap = new Map<string, string>();
+  for (const req of approvals) {
+    const existing = approvalMap.get(req.entityId);
+    if (!existing || req.status === "PENDING") approvalMap.set(req.entityId, req.status);
+  }
+
+  queueThumbnailBackfill(tenantUser.tenantId, files, currentVersionOf);
+
+  // Thumbnails come from `thumbnailKey`; SVG is served from the file itself,
+  // which browsers render. Signed in one call rather than one per file.
+  const thumbKeys = new Map<string, string>();
+  for (const file of files) {
+    if (file.thumbnailKey) {
+      thumbKeys.set(file.id, file.thumbnailKey);
+    } else if ((file.fileType ?? "").toLowerCase() === "svg") {
+      const current = currentVersionOf(file);
+      if (current?.storageKey) thumbKeys.set(file.id, current.storageKey);
     }
-
-    // Get file IDs for batch queries
-    const fileIds = (files || []).map((f) => f.id);
-
-    // Batch-fetch all versions for these files in a single query, then group
-    // by fileId in memory. This replaces a per-file query (the old N+1) and
-    // also serves the image-thumbnail lookup below — both needs come from the
-    // same row set, so one round trip covers everything.
-    const [allVersionsResult, approvalData] = await Promise.all([
-      fileIds.length > 0
-        ? db
-            .from("file_versions")
-            .select(
-              "fileId, version, storageKey, fileSize, createdAt, uploadedBy:tenant_users!file_versions_uploadedById_fkey(fullName)"
-            )
-            .in("fileId", fileIds)
-            .order("version", { ascending: false })
-        : Promise.resolve({ data: [] }),
-      fileIds.length > 0
-        ? db
-            .from("approval_requests")
-            .select("entityId, status")
-            .eq("tenantId", tenantUser.tenantId)
-            .eq("entityType", "file")
-            .in("entityId", fileIds)
-            .in("status", ["PENDING", "REJECTED"])
-        : Promise.resolve({ data: [] }),
-    ]);
-
-    // Group versions by fileId. Already sorted by version DESC, so the first
-    // entry per file is the latest version.
-    const versionsByFile = new Map<string, Array<Record<string, unknown>>>();
-    for (const v of (allVersionsResult.data || []) as Array<Record<string, unknown>>) {
-      const list = versionsByFile.get(v.fileId as string) || [];
-      list.push(v);
-      versionsByFile.set(v.fileId as string, list);
+  }
+  const signedByKey = new Map<string, string>();
+  if (thumbKeys.size > 0) {
+    const { data: signed, error: signError } = await db.storage
+      .from(VAULT_BUCKET)
+      .createSignedUrls([...new Set(thumbKeys.values())], 300);
+    if (signError) {
+      console.warn("[files/list] could not sign thumbnail URLs:", signError.message);
     }
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) signedByKey.set(s.path, s.signedUrl);
+    }
+  }
 
-    // Preserve the previous response shape: each file gets `versions: [latest]`,
-    // omitting the internal fileId/storageKey fields the UI doesn't consume.
-    const filesWithVersions = (files || []).map((file) => {
-      const latest = versionsByFile.get(file.id)?.[0];
-      const versions = latest
+  return files.map((file) => {
+    const latest = versionsByFile.get(file.id)?.[0];
+    const key = thumbKeys.get(file.id);
+    return {
+      ...file,
+      // The response has always carried only the latest version, without the
+      // internal fileId/storageKey.
+      versions: latest
         ? [
             {
               version: latest.version,
@@ -152,341 +193,166 @@ export async function GET(request: NextRequest) {
               uploadedBy: latest.uploadedBy,
             },
           ]
-        : [];
-      return { ...file, versions };
-    });
+        : [],
+      approvalStatus: approvalMap.get(file.id) ?? null,
+      thumbnailUrl: (key && signedByKey.get(key)) || null,
+    };
+  });
+});
 
-    // Build a map of fileId -> approval status
-    const approvalMap = new Map<string, string>();
-    for (const req of approvalData.data || []) {
-      // If multiple requests exist, PENDING takes priority display
-      const existing = approvalMap.get(req.entityId);
-      if (!existing || req.status === "PENDING") {
-        approvalMap.set(req.entityId, req.status);
+/**
+ * Thumbnails for files that have never had one attempted — mostly formats the
+ * extractor learned after their upload, like PDFs. This used to download and
+ * extract every such file inline, in parallel, inside the listing request; a
+ * freshly migrated folder timed out.
+ *
+ * Now a few per listing are queued after the response. Each is claimed first
+ * by stamping `thumbnailAttemptedAt` only where it is still null, so two
+ * people opening the same folder do not extract the same file twice. The new
+ * thumbnail reaches the screen through the file row's realtime update.
+ */
+function queueThumbnailBackfill(
+  tenantId: string,
+  files: RawFileRow[],
+  currentVersionOf: (file: RawFileRow) => VersionRow | undefined
+) {
+  const targets = files
+    .filter(
+      (f) =>
+        !f.thumbnailKey &&
+        !f.thumbnailAttemptedAt &&
+        THUMBNAIL_SOURCE_EXTENSIONS.has((f.fileType ?? "").toLowerCase())
+    )
+    .slice(0, BACKFILL_PER_LISTING)
+    .map((f) => ({ file: f, current: currentVersionOf(f) }))
+    .filter((t): t is { file: RawFileRow; current: VersionRow } => Boolean(t.current));
+  if (targets.length === 0) return;
+
+  runAfterResponse(async () => {
+    const service = getServiceClient();
+    for (const { file, current } of targets) {
+      const { data: claimed, error } = await service
+        .from("files")
+        .update({ thumbnailAttemptedAt: new Date().toISOString() })
+        .eq("id", file.id)
+        .eq("tenantId", tenantId)
+        .is("thumbnailAttemptedAt", null)
+        .select("id");
+      if (error) {
+        console.warn(
+          `[files/list] could not claim thumbnail backfill for ${file.id}:`,
+          error.message
+        );
+        continue;
       }
+      if (!claimed || claimed.length === 0) continue;
+      await generateFileThumbnail(service, {
+        tenantId,
+        fileId: file.id,
+        version: file.currentVersion,
+        key: current.storageKey,
+        fileName: file.name,
+        size: current.fileSize,
+      });
     }
-
-    // Just-in-time thumbnail backfill. Any file in the list that's
-    // missing `thumbnailKey` and has never been attempted gets processed
-    // inline: download bytes, extract, upload, stamp the row. This is
-    // how PDFs (and any other format that was added to the extractor
-    // after their upload) acquire thumbnails retroactively.
-    //
-    // `thumbnailAttemptedAt` acts as a negative cache: any attempt —
-    // success or failure — stamps the timestamp, so files that
-    // legitimately have no extractable preview (e.g. SolidWorks files
-    // saved without "Save preview picture") don't get reprocessed on
-    // every folder view. Users can force a retry via the detail panel's
-    // manual "Regenerate thumbnail" button, which ignores the flag.
-    //
-    // SVG is excluded from the backfill set — browsers render it
-    // natively from the raw URL fallback below.
-    const backfillTargets = filesWithVersions.filter((file) => {
-      if (file.thumbnailKey) return false;
-      if (file.thumbnailAttemptedAt) return false;
-      const ext = (file.fileType || "").toLowerCase();
-      return BACKFILLABLE_EXTS.has(ext);
-    });
-
-    if (backfillTargets.length > 0) {
-      await Promise.all(
-        backfillTargets.map(async (file) => {
-          const attemptedAt = new Date().toISOString();
-          try {
-            const versions = versionsByFile.get(file.id) || [];
-            const currentVer = versions.find((v) => v.version === file.currentVersion);
-            const storageKey = currentVer?.storageKey as string | undefined;
-            if (!storageKey) return;
-
-            const { data: blob } = await db.storage.from("vault").download(storageKey);
-            if (!blob) return;
-
-            const arrayBuffer = await blob.arrayBuffer();
-            const thumb = await extractThumbnail(arrayBuffer, file.name);
-
-            if (!thumb) {
-              // Extraction failed or returned no preview. Stamp the
-              // attempt timestamp without a key so we don't retry.
-              const { error } = await db
-                .from("files")
-                .update({ thumbnailAttemptedAt: attemptedAt })
-                .eq("id", file.id);
-              // Best-effort backfill during a list read — never fails the
-              // listing. But an unstamped file is retried on every single
-              // request, so a persistent failure here is a silent loop.
-              if (error) {
-                console.warn(
-                  `[files/list] could not stamp thumbnail attempt on ${file.id}:`,
-                  error.message
-                );
-              }
-              return;
-            }
-
-            const newKey = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
-            const { error: upErr } = await db.storage
-              .from("vault")
-              .upload(newKey, thumb.data, { contentType: thumb.mimeType, upsert: false });
-            if (upErr) return;
-
-            const { error: stampError } = await db
-              .from("files")
-              .update({ thumbnailKey: newKey, thumbnailAttemptedAt: attemptedAt })
-              .eq("id", file.id);
-            if (stampError) {
-              // The thumbnail is in storage but nothing points at it. Do not
-              // claim it below, or this response advertises a key the next
-              // one will not have.
-              console.warn(
-                `[files/list] thumbnail saved but not linked for ${file.id}:`,
-                stampError.message
-              );
-              return;
-            }
-            // Mutate the in-memory object so this same response includes
-            // the new thumbnailKey — no second fetch required.
-            (file as { thumbnailKey: string | null }).thumbnailKey = newKey;
-          } catch (err) {
-            console.warn(`[files/list] thumbnail backfill failed for ${file.id}:`, err);
-            // Still stamp the attempt so a transient error (network,
-            // storage flake) doesn't trap the file in a reprocess loop.
-            // The manual regenerate path will retry on demand.
-            //
-            // lint-conventions-allow: unchecked-update — last-resort stamp
-            // inside the handler for the failure it is reacting to, which has
-            // already been logged on the line above. A second warning here
-            // would say nothing the first did not.
-            await db
-              .from("files")
-              .update({ thumbnailAttemptedAt: attemptedAt })
-              .eq("id", file.id)
-              .then(
-                () => undefined,
-                () => undefined
-              );
-          }
-        })
-      );
-    }
-
-    // Generate thumbnail URLs for files that have them or are SVG images.
-    // SVG is served directly from the raw file (browsers render it); all
-    // other raster formats get here via thumbnailKey, either set at upload
-    // or by the backfill loop above.
-    const SVG_FALLBACK = ["svg"];
-    const thumbKeys: { fileId: string; key: string }[] = [];
-    for (const file of filesWithVersions) {
-      if (file.thumbnailKey) {
-        thumbKeys.push({ fileId: file.id, key: file.thumbnailKey });
-      } else if (SVG_FALLBACK.includes((file.fileType || "").toLowerCase())) {
-        const versions = versionsByFile.get(file.id) || [];
-        const currentVer = versions.find((v) => v.version === file.currentVersion);
-        if (currentVer?.storageKey) {
-          thumbKeys.push({ fileId: file.id, key: currentVer.storageKey as string });
-        }
-      }
-    }
-
-    const thumbUrlMap = new Map<string, string>();
-    if (thumbKeys.length > 0) {
-      const urls = await Promise.all(
-        thumbKeys.map(async ({ fileId: fid, key }) => {
-          const { data } = await db.storage.from("vault").createSignedUrl(key, 300);
-          return { fid, url: data?.signedUrl || null };
-        })
-      );
-      for (const { fid, url } of urls) {
-        if (url) thumbUrlMap.set(fid, url);
-      }
-    }
-
-    const result = filesWithVersions.map((file) => ({
-      ...file,
-      approvalStatus: approvalMap.get(file.id) || null,
-      thumbnailUrl: thumbUrlMap.get(file.id) || null,
-    }));
-
-    return NextResponse.json(result);
-  } catch (err) {
-    console.error("GET /api/files failed:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch files";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  }, `thumbnail backfill for ${targets.length} file(s)`);
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const permissions = tenantUser.role.permissions as string[];
+const CommitBodySchema = z.object({
+  uploadToken: nonEmptyString,
+  partNumber: optionalString,
+  description: optionalString,
+  category: optionalString,
+  lifecycleState: optionalString,
+});
 
-    if (!hasPermission(permissions, PERMISSIONS.FILE_UPLOAD)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+/**
+ * Step 3 of uploading a new file: record the object the browser uploaded.
+ * Step 1 is POST /api/files/uploads; see lib/vault-uploads.ts.
+ *
+ * Safe to retry: a commit that already landed returns the file it created.
+ */
+export const POST = withTenant(
+  { permission: PERMISSIONS.FILE_UPLOAD, body: CommitBodySchema },
+  async ({ db, tenantUser, permissions, body }) => {
+    const grant = readUploadGrant(body.uploadToken, {
+      tenantId: tenantUser.tenantId,
+      userId: tenantUser.id,
+      purpose: "new",
+    });
 
-    const formData = await request.formData();
-    const file = formData.get("file") as globalThis.File | null;
-    const folderId = formData.get("folderId") as string;
-    const description = formData.get("description") as string | null;
-    const partNumber = formData.get("partNumber") as string | null;
-    const requestedState = formData.get("lifecycleState") as string | null;
-    const requestedCategory = formData.get("category") as string | null;
+    const { data: alreadyRecorded } = await db
+      .from("files")
+      .select("*")
+      .eq("id", grant.fileId)
+      .maybeSingle();
+    if (alreadyRecorded) return alreadyRecorded;
 
-    if (!file || !folderId) {
-      return NextResponse.json({ error: "File and folderId are required" }, { status: 400 });
-    }
+    const refuse = async (err: Error): Promise<never> => {
+      await discardUploadedObject(db.storage, grant.key);
+      throw err;
+    };
 
-    // 5 GB hard cap — prevents storage exhaustion from malicious or
-    // accidental uploads. Supabase Storage has its own limits, but we
-    // reject early to avoid buffering the entire body.
-    const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: "File exceeds the 5 GB size limit" }, { status: 413 });
-    }
+    // Re-checked: the folder can be deleted, or access revoked, while the
+    // upload runs.
+    const folderId = grant.folderId!;
+    const { data: folder } = await db.from("folders").select("id").eq("id", folderId).maybeSingle();
+    if (!folder) return refuse(notFound("Folder not found"));
+    const scope = await getFolderAccessScope(tenantUser);
+    if (!canViewFolder(scope, folderId)) return refuse(notFound("Folder not found"));
+    if (!canEditFolder(scope, folderId)) return refuse(forbidden());
 
-    const db = getServiceClient();
-
-    const { data: folder } = await db
-      .from("folders")
-      .select("id, tenantId")
-      .eq("id", folderId)
-      .single();
-    if (!folder || folder.tenantId !== tenantUser.tenantId) {
-      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
-    }
-
-    // Upload requires EDIT on the destination folder. "Can't see it" and
-    // "can see but can't write" are distinguished because a user who
-    // already knows the folder exists (they navigated into it) deserves
-    // a clear 403 rather than a misleading 404.
-    const uploadScope = await getFolderAccessScope(tenantUser);
-    if (!canViewFolder(uploadScope, folderId)) {
-      return NextResponse.json({ error: "Folder not found" }, { status: 404 });
-    }
-    if (!canEditFolder(uploadScope, folderId)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const ext = file.name.split(".").pop()?.toLowerCase() || "";
-    // Auto-detect from the extension unless the uploader explicitly chose a
-    // category. The map lives in lib/file-categories.ts so the upload dialog
-    // can show the user the same answer before they submit.
-    const category = requestedCategory || categoryForExtension(ext) || "OTHER";
-
-    // Pre-check for duplicate filename in the same folder. Done before
-    // the storage upload so we never create orphan blobs for rejected files.
     const { data: existingFile } = await db
       .from("files")
       .select("id, name, currentVersion, isCheckedOut, checkedOutById, isFrozen, lifecycleState")
-      .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
       .eq("folderId", folderId)
-      .eq("name", file.name)
+      .eq("name", grant.name)
       .maybeSingle();
-
     if (existingFile) {
-      return NextResponse.json(
-        {
-          error: "A file with this name already exists in this folder",
+      return refuse(
+        conflict("A file with this name already exists in this folder", {
           code: "DUPLICATE_FILE",
-          existingFile: {
-            id: existingFile.id,
-            name: existingFile.name,
-            currentVersion: existingFile.currentVersion,
-            isCheckedOut: existingFile.isCheckedOut,
-            checkedOutById: existingFile.checkedOutById,
-            isFrozen: existingFile.isFrozen,
-            lifecycleState: existingFile.lifecycleState,
-          },
-        },
-        { status: 409 }
+          existingFile,
+        })
       );
+    }
+
+    try {
+      await confirmUploadedObject(db.storage, grant);
+    } catch (err) {
+      return refuse(err as Error);
     }
 
     const { data: lifecycle } = await db
       .from("lifecycles")
       .select("id")
-      .eq("tenantId", tenantUser.tenantId)
       .eq("isDefault", true)
-      .single();
+      .maybeSingle();
 
-    // Upload to Supabase Storage (use service client to bypass storage RLS)
-    const storageKey = `${tenantUser.tenantId}/${folderId}/${Date.now()}-${file.name}`;
-    const supabase = getServiceClient();
-    const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await supabase.storage
-      .from("vault")
-      .upload(storageKey, arrayBuffer, { contentType: file.type, upsert: false });
-
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
-    }
-
-    // Generate a thumbnail via the format dispatcher (SolidWorks preview
-    // extraction, image resize, …). Non-fatal: a missing thumbnail is a UX
-    // gap, not a correctness problem, so failures are logged and surfaced
-    // as a warning in the response.
-    //
-    // Clone the buffer before passing to the extractor: the Supabase
-    // storage upload above may consume the underlying ArrayBuffer (Node's
-    // undici can detach it when streaming the request body), leaving a
-    // zero-length buffer for the extractor. A fresh slice guarantees the
-    // bytes are still readable.
-    let thumbnailKey: string | null = null;
-    let thumbnailWarning: string | null = null;
-    try {
-      const thumbBuffer = arrayBuffer.slice(0);
-      const thumb = await extractThumbnail(thumbBuffer, file.name);
-      if (thumb) {
-        const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${file.name}.${thumb.ext}`;
-        const { error: thumbUploadError } = await supabase.storage
-          .from("vault")
-          .upload(key, thumb.data, {
-            contentType: thumb.mimeType,
-            upsert: false,
-          });
-        if (thumbUploadError) {
-          console.error("Thumbnail storage upload failed:", thumbUploadError);
-          thumbnailWarning =
-            "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
-        } else {
-          thumbnailKey = key;
-        }
-      }
-    } catch (e) {
-      console.error("Thumbnail generation failed:", e);
-      thumbnailWarning =
-        "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
-    }
-
+    const ext = extensionOf(grant.name);
+    // Auto-detected from the extension unless the uploader chose a category;
+    // lib/file-categories.ts is shared with the dialog so both give the same answer.
+    const category = body.category || categoryForExtension(ext) || "OTHER";
+    const isAdmin = permissions.includes("*");
+    const state = body.lifecycleState && isAdmin ? body.lifecycleState : "WIP";
     const now = new Date().toISOString();
-    const fileId = uuid();
 
     const { data: dbFile, error: fileError } = await db
       .from("files")
       .insert({
-        id: fileId,
-        tenantId: tenantUser.tenantId,
+        id: grant.fileId,
         folderId,
-        name: file.name,
-        partNumber,
-        description,
+        name: grant.name,
+        partNumber: body.partNumber ?? null,
+        description: body.description ?? null,
         fileType: ext,
         category,
         currentVersion: 1,
         lifecycleId: lifecycle?.id ?? null,
-        lifecycleState: requestedState && permissions.includes("*") ? requestedState : "WIP",
-        isFrozen:
-          requestedState &&
-          permissions.includes("*") &&
-          (requestedState === "Released" || requestedState === "Obsolete")
-            ? true
-            : false,
+        lifecycleState: state,
+        isFrozen: isAdmin && (state === "Released" || state === "Obsolete"),
         isCheckedOut: false,
-        thumbnailKey,
         createdById: tenantUser.id,
         createdAt: now,
         updatedAt: now,
@@ -496,51 +362,48 @@ export async function POST(request: NextRequest) {
 
     if (fileError) {
       if (fileError.code === "23505") {
-        // Race condition: another upload of the same name snuck in between
-        // the pre-check and the insert. Return the same enriched shape.
-        return NextResponse.json(
-          {
-            error: "A file with this name already exists in this folder",
+        // Either this same commit landed concurrently, or another upload of
+        // the same name got in between the check above and the insert.
+        const { data: raced } = await db
+          .from("files")
+          .select("*")
+          .eq("id", grant.fileId)
+          .maybeSingle();
+        if (raced) return raced;
+        return refuse(
+          conflict("A file with this name already exists in this folder", {
             code: "DUPLICATE_FILE",
-          },
-          { status: 409 }
+          })
         );
       }
-      throw fileError;
+      return refuse(new Error(`Could not record the file: ${fileError.message}`));
     }
 
+    // lint-conventions-allow: child-table-direct-query — `grant.fileId` is the
+    // file row this request just inserted through the scoped client.
     const { error: versionError } = await db.from("file_versions").insert({
-      id: uuid(),
-      fileId,
+      id: randomUUID(),
+      fileId: grant.fileId,
       version: 1,
-      storageKey,
-      fileSize: file.size,
+      storageKey: grant.key,
+      fileSize: grant.size,
       uploadedById: tenantUser.id,
       comment: "Initial upload",
       createdAt: now,
     });
 
-    // The file row is already committed and says `currentVersion: 1`, so
-    // without this row the vault shows a file that can never be opened or
-    // downloaded. Remove it rather than leaving that behind, and report the
-    // upload as the failure it was.
-    //
-    // The uploaded blob is left in storage. That is the right way round here:
-    // it is unreferenced garbage from a request the user will simply retry,
-    // not the "orphaned and unrecoverable" case that decides the ordering in
-    // the purge route — there, the blob was the only copy of something real.
+    // The file row says `currentVersion: 1`; without its version row it shows
+    // in the vault and can never be opened. Remove both rather than leave that.
     if (versionError) {
-      const { error: cleanupError } = await db.from("files").delete().eq("id", fileId);
+      const { error: cleanupError } = await db.from("files").delete().eq("id", grant.fileId);
       if (cleanupError) {
         console.error(
-          `[files] version row failed for ${fileId} and the file row could not be removed:`,
+          `[files] version row failed for ${grant.fileId} and the file row could not be removed:`,
           cleanupError.message
         );
+        throw new Error(`Could not record the initial version: ${versionError.message}`);
       }
-      return NextResponse.json(
-        { error: `Could not record the initial version: ${versionError.message}` },
-        { status: 500 }
-      );
+      return refuse(new Error(`Could not record the initial version: ${versionError.message}`));
     }
 
     await logAudit({
@@ -548,15 +411,19 @@ export async function POST(request: NextRequest) {
       userId: tenantUser.id,
       action: "file.upload",
       entityType: "file",
-      entityId: fileId,
-      details: { name: file.name, version: 1, size: file.size },
+      entityId: grant.fileId,
+      details: { name: grant.name, version: 1, size: grant.size },
     });
 
-    const warnings = thumbnailWarning ? [thumbnailWarning] : undefined;
-    return NextResponse.json({ ...dbFile, warnings });
-  } catch (error) {
-    console.error("File creation error:", error);
-    const message = error instanceof Error ? error.message : "Failed to create file";
-    return NextResponse.json({ error: message }, { status: 500 });
+    scheduleThumbnail({
+      tenantId: tenantUser.tenantId,
+      fileId: grant.fileId,
+      version: 1,
+      key: grant.key,
+      fileName: grant.name,
+      size: grant.size,
+    });
+
+    return dbFile;
   }
-}
+);

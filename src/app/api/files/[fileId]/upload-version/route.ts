@@ -1,175 +1,53 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { withTenant } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { extractThumbnail } from "@/lib/thumbnail";
-import { requireFileAccess } from "@/lib/folder-access-guards";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
-import { v4 as uuid } from "uuid";
+import { loadFile } from "@/lib/folder-access-guards";
+import { z, uuid, nonEmptyString } from "@/lib/validation";
+import { readUploadGrant } from "@/lib/vault-uploads";
+import { commitVersionUpload } from "@/lib/vault-version-upload";
+
+const BodySchema = z.object({
+  /** From POST /api/files/[fileId]/upload-version/upload. */
+  uploadToken: nonEmptyString,
+  comment: z.string().max(5000).nullable().optional(),
+});
 
 /**
- * Atomic "upload new version" — performs checkout + checkin in a single
- * request so the file is never left in a dangling checked-out state.
- * Used by the upload dialog's duplicate-file resolution flow.
+ * "Upload as new version" — checkout and check-in in one step, so the file is
+ * never left checked out. Used by the upload dialog when a file of the same
+ * name already exists.
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ fileId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    const { fileId } = await params;
-
-    if (!hasPermission(permissions, PERMISSIONS.FILE_UPLOAD)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const db = getServiceClient();
-
-    const { data: file } = await db.from("files").select("*").eq("id", fileId).single();
-    if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
-
-    const access = await requireFileAccess(tenantUser, file, "edit");
-    if (!access.ok) return access.response;
-
-    if (file.isFrozen) {
-      return NextResponse.json(
-        { error: "Cannot create a new version of a released/frozen file. Revise it first." },
-        { status: 409 }
-      );
-    }
-
-    if (file.isCheckedOut && file.checkedOutById !== tenantUser.id) {
-      return NextResponse.json({ error: "File is checked out by another user" }, { status: 409 });
-    }
-
-    // This adds a version without a checkout, so the checkout lock alone does
-    // not stop it replacing what reviewers are approving. See
-    // lib/pending-approval.ts.
-    const refusal = await pendingApprovalRefusal(
-      tenantUser.tenantId,
-      fileId,
-      "given a new version"
-    );
-    if (refusal) {
-      return NextResponse.json({ error: refusal }, { status: 409 });
-    }
-
-    const formData = await request.formData();
-    const newFile = formData.get("file") as globalThis.File | null;
-    const comment = formData.get("comment") as string | null;
-
-    if (!newFile) {
-      return NextResponse.json({ error: "File is required" }, { status: 400 });
-    }
-
-    if (newFile.size > 5 * 1024 * 1024 * 1024) {
-      return NextResponse.json({ error: "File exceeds the 5 GB size limit" }, { status: 413 });
-    }
-
-    const now = new Date().toISOString();
-    const newVersion = file.currentVersion + 1;
-
-    // Upload to storage
-    const storageKey = `${tenantUser.tenantId}/${file.folderId}/${Date.now()}-${newFile.name}`;
-    const arrayBuffer = await newFile.arrayBuffer();
-    const { error: uploadError } = await db.storage
-      .from("vault")
-      .upload(storageKey, arrayBuffer, { contentType: newFile.type, upsert: false });
-
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return NextResponse.json({ error: "Failed to upload file" }, { status: 500 });
-    }
-
-    // Regenerate thumbnail. Clone the buffer — the storage upload above may
-    // have consumed / detached the original ArrayBuffer.
-    let thumbnailKey = file.thumbnailKey;
-    let thumbnailWarning: string | null = null;
-    try {
-      const thumbBuffer = arrayBuffer.slice(0);
-      const thumb = await extractThumbnail(thumbBuffer, newFile.name);
-      if (thumb) {
-        const key = `${tenantUser.tenantId}/thumbnails/${Date.now()}-${newFile.name}.${thumb.ext}`;
-        const { error: thumbUploadError } = await db.storage.from("vault").upload(key, thumb.data, {
-          contentType: thumb.mimeType,
-          upsert: false,
-        });
-        if (thumbUploadError) {
-          console.error("Thumbnail storage upload failed:", thumbUploadError);
-          thumbnailWarning =
-            "Thumbnail was generated but could not be saved — you can upload one manually from the file detail panel.";
-        } else {
-          thumbnailKey = key;
-        }
-      }
-    } catch (e) {
-      console.error("Thumbnail generation failed:", e);
-      thumbnailWarning =
-        "Thumbnail could not be generated — you can upload one manually from the file detail panel.";
-    }
-
-    // Create version record
-    const { error: versionError } = await db.from("file_versions").insert({
-      id: uuid(),
-      fileId,
-      version: newVersion,
-      revision: file.revision,
-      storageKey,
-      fileSize: newFile.size,
-      uploadedById: tenantUser.id,
-      comment: comment || `New version uploaded (replaced duplicate)`,
-      createdAt: now,
-    });
-
-    // Refuse before the file row is bumped. `files.currentVersion` pointing
-    // at a version row that was never written aims every read at a blob
-    // nothing can resolve; leaving the file on its previous version leaves it
-    // whole and the upload retryable.
-    if (versionError) {
-      return NextResponse.json(
-        { error: `Could not record the new version: ${versionError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Update file record — clear any checkout and bump version
-    const { error: bumpError } = await db
-      .from("files")
-      .update({
-        currentVersion: newVersion,
-        isCheckedOut: false,
-        checkedOutById: null,
-        checkedOutAt: null,
-        updatedAt: now,
-        thumbnailKey,
-      })
-      .eq("id", fileId);
-    if (bumpError) {
-      return NextResponse.json(
-        { error: `The version was stored but the file could not be updated: ${bumpError.message}` },
-        { status: 500 }
-      );
-    }
-
-    await logAudit({
+export const POST = withTenant(
+  { permission: PERMISSIONS.FILE_UPLOAD, params: z.object({ fileId: uuid }), body: BodySchema },
+  async ({ db, tenantUser, permissions, params, body }) => {
+    const file = await loadFile(db, tenantUser, params.fileId, "edit");
+    const grant = readUploadGrant(body.uploadToken, {
       tenantId: tenantUser.tenantId,
       userId: tenantUser.id,
-      action: "file.upload_version",
-      entityType: "file",
-      entityId: fileId,
-      details: { name: file.name, version: newVersion, size: newFile.size },
+      purpose: "version",
+      fileId: params.fileId,
     });
 
-    const warnings = thumbnailWarning ? [thumbnailWarning] : undefined;
-    return NextResponse.json({ success: true, version: newVersion, warnings });
-  } catch (err) {
-    console.error("POST /api/files/[fileId]/upload-version failed:", err);
-    const message = err instanceof Error ? err.message : "Failed to upload new version";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const result = await commitVersionUpload({
+      db,
+      user: { id: tenantUser.id, permissions },
+      file,
+      grant,
+      purpose: "version",
+      comment: body.comment?.trim() || "New version uploaded (replaced duplicate)",
+    });
+
+    if (!result.alreadyRecorded) {
+      await logAudit({
+        tenantId: tenantUser.tenantId,
+        userId: tenantUser.id,
+        action: "file.upload_version",
+        entityType: "file",
+        entityId: params.fileId,
+        details: { name: file.name, version: result.version, size: grant.size },
+      });
+    }
+
+    return { success: true, version: result.version };
   }
-}
+);

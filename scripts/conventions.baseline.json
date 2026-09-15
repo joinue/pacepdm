@@ -77,9 +77,6 @@
   "src/app/api/ecos/route.ts": {
     "unwrapped-route": 6
   },
-  "src/app/api/files/[fileId]/checkin/route.ts": {
-    "unwrapped-route": 4
-  },
   "src/app/api/files/[fileId]/download/route.ts": {
     "unwrapped-route": 4
   },
@@ -110,9 +107,6 @@
   "src/app/api/files/[fileId]/transition/route.ts": {
     "unwrapped-route": 4
   },
-  "src/app/api/files/[fileId]/upload-version/route.ts": {
-    "unwrapped-route": 4
-  },
   "src/app/api/files/bulk-download/prepare/route.ts": {
     "unwrapped-route": 4
   },
@@ -123,7 +117,7 @@
     "unwrapped-route": 4
   },
   "src/app/api/files/route.ts": {
-    "unwrapped-route": 7
+    "unwrapped-route": 2
   },
   "src/app/api/folders/[folderId]/access/route.ts": {
     "unwrapped-route": 6
@@ -239,24 +233,19 @@
     "raw-fetch": 2,
     "swallowed-error": 1
   },
-  "src/components/vault/checkin-dialog.tsx": {
-    "generic-error-toast": 1,
-    "raw-fetch": 1
-  },
   "src/components/vault/create-folder-dialog.tsx": {
     "generic-error-toast": 1,
     "raw-fetch": 1
   },
   "src/components/vault/file-detail-panel.tsx": {
     "generic-error-toast": 1,
-    "raw-fetch": 11
+    "raw-fetch": 10
   },
   "src/components/vault/folder-access-dialog.tsx": {
     "swallowed-error": 1
   },
   "src/components/vault/upload-file-dialog.tsx": {
-    "generic-error-toast": 2,
-    "raw-fetch": 7,
+    "raw-fetch": 2,
     "swallowed-error": 1
   },
   "src/components/vault/vault-file-list.tsx": {

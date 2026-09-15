@@ -1,324 +1,342 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { createFakeSupabase, type FakeSupabase } from "@/lib/__mocks__/fake-supabase";
 
-// ── Mock setup ──────────────────────────────────────────────────────────
+/**
+ * Check-in: prepare → the browser PUTs the new version to storage → commit;
+ * or, with no upload, undo the checkout.
+ *
+ * The version bytes used to be posted to this route as multipart form data,
+ * so a large assembly could not be checked in at all. Driven against an
+ * in-memory database and storage that enforce the unique version number, so
+ * refusals, races and retries behave as they would against Supabase.
+ */
 
-const { tableResults, insertCalls, updateCalls, mockFrom, mockStorage } = vi.hoisted(() => {
-  type QueryResult = { data: unknown; error: unknown };
-
-  const tableResults: Record<string, QueryResult> = {};
-  const insertCalls: Array<{ table: string; data: unknown }> = [];
-  const updateCalls: Array<{ table: string; data: unknown; filters: Record<string, unknown> }> = [];
-
-  function makeChain(table: string) {
-    const filters: Record<string, unknown> = {};
-    const chain: Record<string, (...args: unknown[]) => unknown> = {};
-
-    const resolvable = () => tableResults[table] || { data: null, error: null };
-
-    for (const m of ["select", "eq", "in", "neq", "is", "order", "limit", "match"] as const) {
-      chain[m] = (...args: unknown[]) => {
-        if (m === "eq" && args.length === 2) filters[args[0] as string] = args[1];
-        return chain;
-      };
-    }
-
-    chain.single = () => resolvable();
-    chain.maybeSingle = () => resolvable();
-
-    chain.insert = (data: unknown) => {
-      insertCalls.push({ table, data });
-      return {
-        select: () => ({ single: () => ({ data: null, error: null }) }),
-        data: null,
-        error: null,
-      };
-    };
-
-    chain.update = (data: unknown) => {
-      const entry = { table, data, filters: { ...filters } };
-      updateCalls.push(entry);
-      const updateChain: Record<string, (...args: unknown[]) => unknown> = {};
-      for (const m of ["eq", "select"] as const) {
-        updateChain[m] = () => updateChain;
-      }
-      updateChain.single = () => ({ data: null, error: null });
-      return updateChain;
-    };
-
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
-      ...args: unknown[]
-    ) => unknown;
-
-    return chain;
-  }
-
-  const mockFrom = (table: string) => makeChain(table);
-
-  const mockStorage = {
-    from: () => ({
-      upload: vi.fn().mockResolvedValue({ error: null }),
-    }),
-  };
-
-  return { tableResults, insertCalls, updateCalls, mockFrom, mockStorage };
-});
-
-const mockTenantUser = vi.hoisted(() => ({
-  current: null as {
+const state = vi.hoisted(() => ({
+  fake: null as unknown as FakeSupabase,
+  user: null as null | {
     id: string;
     tenantId: string;
     fullName: string;
+    roleId: string;
     role: { permissions: string[] };
-  } | null,
+  },
+  afterTasks: [] as (() => Promise<unknown>)[],
 }));
 
-vi.mock("@/lib/db", () => ({
-  getServiceClient: () => ({ from: mockFrom, storage: mockStorage }),
-}));
-
-vi.mock("@/lib/auth", () => ({
-  getApiTenantUser: () => Promise.resolve(mockTenantUser.current),
-  hasPermission: (perms: string[], required: string) =>
-    perms.includes("*") || perms.includes(required),
-  PERMISSIONS: { FILE_CHECKIN: "file.checkin" },
-}));
-
-vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn().mockResolvedValue(undefined),
-}));
-
+vi.mock("@/lib/db", () => ({ getServiceClient: () => state.fake.client }));
+vi.mock("@/lib/auth", () => ({ getApiTenantUser: () => Promise.resolve(state.user) }));
+vi.mock("@/lib/audit", () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/notifications", () => ({
+  runAfterResponse: (task: () => Promise<unknown>) => state.afterTasks.push(task),
+  sideEffect: (p: Promise<unknown>) => p,
   notify: vi.fn().mockResolvedValue(undefined),
-  sideEffect: vi.fn((promise: Promise<unknown>) => promise),
 }));
+vi.mock("@/lib/mentions", () => ({ processMentions: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/lib/thumbnail", () => ({ extractThumbnail: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/folder-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/folder-access")>("@/lib/folder-access");
+  return { ...actual, getFolderAccessScope: vi.fn(async () => actual.openScope()) };
+});
 
-vi.mock("@/lib/mentions", () => ({
-  processMentions: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("@/lib/thumbnail", () => ({
-  extractThumbnail: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock("uuid", () => ({ v4: () => "mock-uuid" }));
-
-vi.mock("@/lib/folder-access-guards", () => ({
-  requireFileAccess: vi.fn().mockResolvedValue({ ok: true }),
-}));
-
-import { POST } from "./route";
+import { POST as commit } from "./route";
+import { POST as prepare } from "./upload/route";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function resetMockState() {
-  vi.clearAllMocks();
-  insertCalls.length = 0;
-  updateCalls.length = 0;
-  for (const key of Object.keys(tableResults)) delete tableResults[key];
-}
-
-function makeCheckinRequest(file?: File, comment?: string): NextRequest {
-  const formData = new FormData();
-  if (file) formData.append("file", file);
-  if (comment) formData.append("comment", comment);
-  return new NextRequest("http://localhost/api/files/file-1/checkin", {
-    method: "POST",
-    body: formData,
-  });
-}
-
-const params = Promise.resolve({ fileId: "file-1" });
+const TENANT = "tenant-a";
+const FILE_ID = "0f5e0a8c-1111-4111-8111-000000000001";
+const OTHER_FILE_ID = "0f5e0a8c-1111-4111-8111-000000000002";
 
 const owner = {
   id: "user-1",
-  tenantId: "tenant-1",
+  tenantId: TENANT,
   fullName: "Alice",
+  roleId: "role-eng",
   role: { permissions: ["file.checkin"] },
 };
-
-const otherUser = {
-  id: "user-2",
-  tenantId: "tenant-1",
-  fullName: "Bob",
-  role: { permissions: ["file.checkin"] },
-};
-
-const admin = {
-  id: "admin-1",
-  tenantId: "tenant-1",
-  fullName: "Admin",
-  role: { permissions: ["*"] },
-};
+const otherUser = { ...owner, id: "user-2", fullName: "Bob" };
+const admin = { ...owner, id: "admin-1", fullName: "Admin", role: { permissions: ["*"] } };
 
 const checkedOutFile = {
-  id: "file-1",
-  tenantId: "tenant-1",
+  id: FILE_ID,
+  tenantId: TENANT,
+  folderId: "folder-1",
   name: "bracket.sldprt",
+  revision: "A",
+  currentVersion: 2,
   isFrozen: false,
   isCheckedOut: true,
   checkedOutById: "user-1",
-  currentVersion: 2,
-  revision: "A",
-  folderId: "folder-1",
-  thumbnailKey: null,
+  checkedOutAt: "2026-09-15T08:00:00Z",
+  deletedAt: null,
 };
 
-const pendingRelease = { id: "req-1", title: "Release: bracket.sldprt" };
+const params = (fileId = FILE_ID) => ({ params: Promise.resolve({ fileId }) });
 
-function newVersion(): File {
-  return new File(["solid"], "bracket.sldprt", { type: "application/octet-stream" });
+function post(url: string, body: unknown) {
+  return new NextRequest(`http://localhost${url}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" },
+  });
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────
+/** Prepare a check-in and put the object into storage, as the browser would. */
+async function uploadedVersion(size = 80 * 1024 * 1024) {
+  const res = await prepare(
+    post(`/api/files/${FILE_ID}/checkin/upload`, { fileName: "bracket.sldprt", size }),
+    params()
+  );
+  expect(res.status).toBe(200);
+  const key = state.fake.signedUploadKeys.at(-1)!;
+  state.fake.objects.set(key, { size });
+  return { token: (await res.json()).uploadToken as string, key };
+}
 
-describe("POST /api/files/[fileId]/checkin", () => {
-  beforeEach(resetMockState);
+const checkIn = (body: unknown, fileId = FILE_ID) =>
+  commit(post(`/api/files/${fileId}/checkin`, body), params(fileId));
 
-  it("returns 401 when not authenticated", async () => {
-    mockTenantUser.current = null;
-    const res = await POST(makeCheckinRequest(), { params });
-    expect(res.status).toBe(401);
+const file = () => state.fake.rows("files").find((f) => f.id === FILE_ID)!;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key");
+  state.fake = createFakeSupabase({
+    files: [{ ...checkedOutFile }],
+    file_versions: [
+      { id: "v1", fileId: FILE_ID, version: 1, storageKey: "k1", fileSize: 1 },
+      { id: "v2", fileId: FILE_ID, version: 2, storageKey: "k2", fileSize: 1 },
+    ],
   });
+  state.user = owner;
+  state.afterTasks.length = 0;
+});
 
-  it("returns 403 without FILE_CHECKIN permission", async () => {
-    mockTenantUser.current = { ...owner, role: { permissions: ["file.view"] } };
-    const res = await POST(makeCheckinRequest(), { params });
-    expect(res.status).toBe(403);
-  });
+describe("checking in a new version", () => {
+  it("records the next version, releases the checkout and schedules the thumbnail", async () => {
+    const { token, key } = await uploadedVersion(80 * 1024 * 1024);
 
-  it("returns 409 if file is not checked out", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = {
-      data: { ...checkedOutFile, isCheckedOut: false },
-      error: null,
-    };
-    const res = await POST(makeCheckinRequest(), { params });
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toMatch(/not checked out/i);
-  });
+    const res = await checkIn({ uploadToken: token, comment: "Thickened the web" });
 
-  it("returns 403 if checked out by another user (non-admin)", async () => {
-    mockTenantUser.current = otherUser;
-    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
-    const res = await POST(makeCheckinRequest(), { params });
-    expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.error).toMatch(/another user/i);
-  });
-
-  it("allows admin to check in another user's file", async () => {
-    mockTenantUser.current = { ...admin, role: { permissions: ["*", "admin.settings"] } };
-    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
-    const res = await POST(makeCheckinRequest(), { params });
     expect(res.status).toBe(200);
-  });
-
-  it("undo checkout (no file) resets checkout fields and logs audit", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
-    const res = await POST(makeCheckinRequest(), { params });
-    expect(res.status).toBe(200);
-
-    // Should update files table to clear checkout
-    expect(updateCalls.length).toBe(1);
-    expect(updateCalls[0].data).toMatchObject({
-      isCheckedOut: false,
-      checkedOutById: null,
-      checkedOutAt: null,
+    expect(await res.json()).toEqual({ success: true, version: 3 });
+    expect(file()).toMatchObject({ currentVersion: 3, isCheckedOut: false, checkedOutById: null });
+    expect(state.fake.rows("file_versions").find((v) => v.version === 3)).toMatchObject({
+      storageKey: key,
+      fileSize: 80 * 1024 * 1024,
+      comment: "Thickened the web",
+      revision: "A",
     });
-
+    expect(state.afterTasks).toHaveLength(1);
     expect(logAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "file.undo_checkout",
-        entityId: "file-1",
+        action: "file.checkin",
+        details: { name: "bracket.sldprt", version: 3 },
       })
     );
   });
 
-  it("returns 409 for a new version if file became frozen during checkout", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = {
-      data: { ...checkedOutFile, isFrozen: true },
-      error: null,
-    };
-    const res = await POST(makeCheckinRequest(newVersion()), { params });
+  it("refuses at prepare, before any bytes move, when the file is not checked out", async () => {
+    file().isCheckedOut = false;
+    const res = await prepare(
+      post(`/api/files/${FILE_ID}/checkin/upload`, { fileName: "bracket.sldprt", size: 10 }),
+      params()
+    );
     expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toMatch(/frozen/i);
-    expect(insertCalls).toHaveLength(0);
-    expect(updateCalls).toHaveLength(0);
+    expect(state.fake.signedUploadKeys).toHaveLength(0);
+  });
+
+  it("refuses a version for a file that froze while it uploaded, and removes the upload", async () => {
+    const { token, key } = await uploadedVersion();
+    file().isFrozen = true;
+
+    const res = await checkIn({ uploadToken: token });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/frozen/i);
+    expect(file().currentVersion).toBe(2);
+    expect(state.fake.objects.has(key)).toBe(false);
+  });
+
+  /** A version checked in mid-review is what the approval would release, unreviewed. */
+  it("refuses a new version while a transition on the file is awaiting approval", async () => {
+    const { token } = await uploadedVersion();
+    state.fake.tables.approval_requests = [
+      {
+        id: "req-1",
+        tenantId: TENANT,
+        entityType: "file",
+        entityId: FILE_ID,
+        status: "PENDING",
+        title: "Release",
+      },
+    ];
+
+    const res = await checkIn({ uploadToken: token });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/awaiting approval/i);
+    expect(state.fake.rows("file_versions")).toHaveLength(2);
+  });
+
+  it("refuses someone else's checkout for a non-admin", async () => {
+    file().checkedOutById = "user-2";
+    const res = await prepare(
+      post(`/api/files/${FILE_ID}/checkin/upload`, { fileName: "bracket.sldprt", size: 10 }),
+      params()
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/another user/i);
+  });
+
+  it("lets an admin check in someone else's file, and tells them", async () => {
+    file().checkedOutById = "user-2";
+    state.user = admin;
+    const { token } = await uploadedVersion();
+
+    const res = await checkIn({ uploadToken: token });
+
+    expect(res.status).toBe(200);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ["user-2"], title: "File checked in by admin" })
+    );
+  });
+
+  it("refuses a grant issued for another file", async () => {
+    const { token } = await uploadedVersion();
+    state.fake.tables.files.push({ ...checkedOutFile, id: OTHER_FILE_ID });
+    const res = await checkIn({ uploadToken: token }, OTHER_FILE_ID);
+    expect(res.status).toBe(403);
+  });
+
+  /**
+   * A checkout released and retaken while the upload ran — or another
+   * version landing — must not be silently overwritten. It used to be:
+   * the final update cleared whatever checkout was there.
+   */
+  it("refuses, and leaves no stray version row, when the file changed while committing", async () => {
+    const { token, key } = await uploadedVersion();
+    // After the commit has loaded the file and written its version row, but
+    // before it moves the file, the checkout is released and retaken by Bob.
+    state.fake.beforeNext.update.files = () => {
+      file().checkedOutById = "user-2";
+    };
+
+    const res = await checkIn({ uploadToken: token });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/changed while this version uploaded/);
+    // Bob's checkout survives, the file stays on version 2, and the version
+    // row written for this attempt is gone again.
+    expect(file()).toMatchObject({
+      currentVersion: 2,
+      checkedOutById: "user-2",
+      isCheckedOut: true,
+    });
+    expect(state.fake.rows("file_versions").map((v) => v.version)).toEqual([1, 2]);
+    expect(state.fake.objects.has(key)).toBe(false);
+  });
+
+  it("refuses when another version took the number first", async () => {
+    const { token, key } = await uploadedVersion();
+    state.fake.beforeNext.insert.file_versions = () => {
+      state.fake.tables.file_versions.push({
+        id: "v3-bob",
+        fileId: FILE_ID,
+        version: 3,
+        storageKey: "k3",
+        fileSize: 1,
+      });
+    };
+
+    const res = await checkIn({ uploadToken: token });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/added by someone else/);
+    expect(file().currentVersion).toBe(2);
+    expect(state.fake.objects.has(key)).toBe(false);
+  });
+
+  it("returns the version it created when a check-in that already landed is retried", async () => {
+    const { token, key } = await uploadedVersion();
+    await checkIn({ uploadToken: token });
+
+    const retry = await checkIn({ uploadToken: token });
+
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ success: true, version: 3 });
+    expect(state.fake.rows("file_versions")).toHaveLength(3);
+    expect(state.fake.objects.has(key)).toBe(true);
+  });
+
+  it("requires file.checkin", async () => {
+    state.user = { ...owner, role: { permissions: ["file.view"] } };
+    const res = await checkIn({});
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 401 when not signed in", async () => {
+    state.user = null;
+    expect((await checkIn({})).status).toBe(401);
+  });
+});
+
+describe("undoing a checkout", () => {
+  it("releases the checkout without a version and audits it", async () => {
+    const res = await checkIn({});
+
+    expect(res.status).toBe(200);
+    expect(file()).toMatchObject({ isCheckedOut: false, checkedOutById: null, currentVersion: 2 });
+    expect(state.fake.rows("file_versions")).toHaveLength(2);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "file.undo_checkout" })
+    );
+  });
+
+  it("returns 409 if the file is not checked out", async () => {
+    file().isCheckedOut = false;
+    const res = await checkIn({});
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/not checked out/i);
+  });
+
+  it("returns 403 for someone else's checkout (non-admin)", async () => {
+    state.user = otherUser;
+    const res = await checkIn({});
+    expect(res.status).toBe(403);
   });
 
   /**
    * The release valve. An approval that completed while the file was checked
-   * out left it frozen and checked out at once, and the frozen check used to
-   * run before the undo branch — so the undo its own message recommended was
-   * refused too, and only SQL could free the file. Undo writes no version, so
-   * the released artifact is untouched.
+   * out left it frozen and checked out at once; undo writes no version, so it
+   * stays allowed.
    */
-  it("lets the checkout of a frozen file be undone, without writing a version", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = { data: { ...checkedOutFile, isFrozen: true }, error: null };
-
-    const res = await POST(makeCheckinRequest(), { params });
-
+  it("lets the checkout of a frozen file be undone", async () => {
+    file().isFrozen = true;
+    const res = await checkIn({});
     expect(res.status).toBe(200);
-    expect(insertCalls).toHaveLength(0);
-    expect(updateCalls).toHaveLength(1);
-    expect(updateCalls[0].data).toEqual({
-      isCheckedOut: false,
-      checkedOutById: null,
-      checkedOutAt: null,
-      updatedAt: expect.any(String),
-    });
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "file.undo_checkout", entityId: "file-1" })
-    );
+    expect(file().isCheckedOut).toBe(false);
   });
 
   it("lets an admin unlock someone else's checkout of a frozen file", async () => {
-    mockTenantUser.current = { ...admin, role: { permissions: ["*", "admin.settings"] } };
-    tableResults["files"] = { data: { ...checkedOutFile, isFrozen: true }, error: null };
-
-    const res = await POST(makeCheckinRequest(), { params });
-
+    file().isFrozen = true;
+    file().checkedOutById = "user-2";
+    state.user = admin;
+    const res = await checkIn({});
     expect(res.status).toBe(200);
-    expect(updateCalls[0].data).toMatchObject({ isCheckedOut: false });
-  });
-
-  /**
-   * A version checked in while a transition awaits approval is what the
-   * approval would release, unreviewed.
-   */
-  it("refuses a new version while a transition on the file is awaiting approval", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
-    tableResults["approval_requests"] = { data: [pendingRelease], error: null };
-
-    const res = await POST(makeCheckinRequest(newVersion()), { params });
-
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/awaiting approval/i);
-    expect(insertCalls).toHaveLength(0);
-    expect(updateCalls).toHaveLength(0);
   });
 
   it("still lets the checkout be undone while awaiting approval", async () => {
-    mockTenantUser.current = owner;
-    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
-    tableResults["approval_requests"] = { data: [pendingRelease], error: null };
-
-    const res = await POST(makeCheckinRequest(), { params });
-
+    state.fake.tables.approval_requests = [
+      { id: "req-1", tenantId: TENANT, entityType: "file", entityId: FILE_ID, status: "PENDING" },
+    ];
+    const res = await checkIn({});
     expect(res.status).toBe(200);
-    expect(updateCalls[0].data).toMatchObject({ isCheckedOut: false });
   });
 
-  // File size validation (> 5 GB) is not testable in unit tests because
-  // the File constructor's size property is derived from the Blob content
-  // and cannot be overridden. The guard is tested implicitly via the
-  // upload route's integration test.
+  it("404s a file in another tenant", async () => {
+    file().tenantId = "tenant-b";
+    expect((await checkIn({})).status).toBe(404);
+  });
 });

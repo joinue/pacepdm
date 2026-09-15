@@ -556,8 +556,9 @@ describe("Multi-tenant isolation (API routes)", () => {
         return { data: [], error: null };
       });
 
-      const req = new Request("http://test.local/api/files?folderId=folder-1");
-      const res = await listFiles(req as never);
+      const res = await listFiles(
+        makeRequest("http://test.local/api/files?folderId=folder-1") as never
+      );
 
       expect(res.status).toBe(200);
       // The route MUST have applied .eq("tenantId", tenantUser.tenantId).
@@ -567,8 +568,9 @@ describe("Multi-tenant isolation (API routes)", () => {
 
     it("returns 401 when no tenant user is authenticated", async () => {
       mockTenantUser.current = null;
-      const req = new Request("http://test.local/api/files?folderId=folder-1");
-      const res = await listFiles(req as never);
+      const res = await listFiles(
+        makeRequest("http://test.local/api/files?folderId=folder-1") as never
+      );
       expect(res.status).toBe(401);
     });
   });

@@ -647,13 +647,11 @@ export function FileDetailPanel({
       )
     )
       return;
-    const res = await fetch(`/api/files/${fileId}/checkin`, {
-      method: "POST",
-      body: new FormData(), // no file = undo checkout
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      toast.error(d.error);
+    try {
+      // No upload token = undo the checkout.
+      await fetchJson(`/api/files/${fileId}/checkin`, { method: "POST", body: {} });
+    } catch (err) {
+      toast.error(errorMessage(err));
       return;
     }
     toast.success("Checkout unlocked");

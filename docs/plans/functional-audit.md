@@ -786,20 +786,72 @@ unique index), 1 unreachable (`fileSize` INTEGER behind a 100 MB body limit).
    an existing member's, and confirm the 409; download a file and confirm it
    saves under its own name.
 
-### Stages 2–4 — not started
+### Stage 2 — before loading the real vault. In progress
 
-Headline order, by finding ID:
+**The upload pipeline — done 2026-09-15.** VLT-1, VLT-4, VLT-6, and the
+listing half of OPS-6.
 
-- **Stage 2, before loading the real vault.** Upload straight to storage with
-  signed upload URLs (VLT-1: every upload goes through a route handler, so
-  Vercel's 100 MB body limit and the bucket limit apply, behind a generic
-  error); fix the SolidWorks preview scan, which is quadratic — 31 s for
-  50 MB, 161 s and 1.46 GB for 100 MB (VLT-2); storage keys from ids, since raw
-  names with Ø ° [ ] are refused (VLT-4); zip manifests server-side, since the
-  token in the URL fails past ~50 files (VLT-5); multi-file upload (VLT-6); CSV
-  into an existing BOM, LOCKED cost source, AUTO numbering (BOM-1, 2, 7);
-  folder listing paging (OPS-6); unsaved panel edits and record links (UI-2,
-  UI-3).
+- **Bytes no longer pass through a function.** Upload, check-in and "upload as
+  new version" are each three steps: a prepare route checks what it can
+  before any bytes move (permission, folder access, name, size, duplicate name,
+  checkout, frozen, pending review) and returns a signed storage upload URL
+  plus an HMAC-signed _grant_; the browser PUTs the file straight to storage
+  with progress (XHR, because fetch cannot report upload progress); the commit
+  route re-checks, confirms with `storage.info()` that the object arrived at
+  the authorised size, and writes the rows. See `src/lib/vault-uploads.ts`.
+  The grant names tenant, user, file id, key, name, size and purpose, so it
+  cannot be replayed for another file, user, tenant or route. The 100 MB
+  Vercel ceiling is gone; the storage project limit is now the only one, and
+  the client names it when storage refuses.
+- **Commits are retry-safe.** A retried commit returns the file or version it
+  already created (recognised by file id, or by storage key for versions)
+  instead of recording a duplicate or deleting its own object. A commit that
+  loses a race refuses without damage: the file only moves if its version and
+  checkout are exactly as loaded, and otherwise the version row just written is
+  deleted again — which also closes VLT-7's cleared-checkout race and VLT-9's
+  "retry collides forever" wedge on these paths.
+- **Keys from ids.** `<tenant>/files/<fileId>/<uuid>` for content and
+  `<tenant>/thumbnails/files/<fileId>-<uuid>.<ext>` for thumbnails (the
+  regenerate and manual-set routes too). Names are display values only; a name
+  is refused only for `/`, `\`, dot segments or control characters.
+- **Thumbnails after the response.** Extraction runs through
+  `runAfterResponse`, skips files over 200 MB or of types the extractor cannot
+  read, stamps `thumbnailAttemptedAt` on every outcome, and only lands on the
+  version it was extracted from. The folder listing no longer extracts inline:
+  it claims up to three untried files per view and queues them. Upload and
+  check-in responses no longer carry thumbnail `warnings`.
+- **Multi-file and folder upload.** The picker takes several files; a drop
+  walks folders (`src/lib/dropped-files.ts`, including batched `readEntries`
+  and skipping `.DS_Store` and `~$` lock files) and recreates subfolders under
+  the current folder, creating each once. Several files go through a queue
+  with a line each, three at a time, with "upload as version N" or skip for
+  names that already exist.
+- **Listing paged.** `GET /api/files` reads files, versions and approvals with
+  `selectAll` / `selectAllIn` (`src/lib/paged-query.ts`), and signs thumbnail
+  URLs in one call.
+- Also fixed on the way: the upload dialog's part link reports its own failure
+  (UI-5), refuses a typed-but-unpicked part, and forgets picked files on close;
+  the preview dialog's Download opened the JSON route.
+- Routes converted to `withTenant`: `files` (GET, POST), `checkin`,
+  `upload-version`, plus three new prepare routes.
+- Tests run against `src/lib/__mocks__/fake-supabase.ts`, an in-memory client
+  that filters rows, caps responses at 1,000, refuses `.in()` past 200 ids,
+  enforces the `files` and `file_versions` unique indexes and keeps storage
+  objects — so the races and retries above are exercised, not asserted.
+
+**Not verified in a browser.** The XHR PUT mirrors storage-js's
+`uploadToSignedUrl` body (multipart, `x-upsert: false`, `apikey`), but the
+first real upload after deploy is the check: a 60 MB file should show progress
+and arrive. If storage refuses with a CORS error, the signed-upload path needs
+the storage CORS settings checked.
+
+**Still to do in Stage 2:** the SolidWorks preview scan itself (VLT-2 — the
+quadratic `inflateSync` loop in `src/lib/thumbnail.ts`), zip manifests
+server-side (VLT-5), CSV into an existing BOM, LOCKED cost source, AUTO
+numbering (BOM-1, 2, 7), unsaved panel edits and record links (UI-2, UI-3).
+
+### Stages 3–4 — not started
+
 - **Stage 3, before the product is the release record.** Recall and rework
   leave an ECO where it can be approved directly, skipping its workflow
   (CHG-1); files on an approved ECO are not locked and implement reports

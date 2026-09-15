@@ -10,6 +10,9 @@ import { useVaultBrowser } from "@/hooks/use-vault-browser";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { PERMISSIONS } from "@/lib/permissions";
+import { errorMessage } from "@/lib/api-client";
+import { readDroppedFiles, type DroppedFile } from "@/lib/dropped-files";
+import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { CreateFolderDialog } from "./create-folder-dialog";
 import { UploadFileDialog } from "./upload-file-dialog";
@@ -64,9 +67,10 @@ export function VaultBrowser({
     onChange: vault.refreshFromRemote,
   });
 
-  // External file drop: detect files dragged from the desktop onto the vault
-  // area and open the upload dialog with the dropped file pre-populated.
-  const [externalDropFile, setExternalDropFile] = useState<File | null>(null);
+  // External drop: files or whole folders dragged from the desktop onto the
+  // vault open the upload dialog with everything that was dropped. Only the
+  // first file used to be kept, and a dropped folder failed.
+  const [externalDropItems, setExternalDropItems] = useState<DroppedFile[] | null>(null);
   const [showDropOverlay, setShowDropOverlay] = useState(false);
   const dragCounter = useRef(0);
 
@@ -99,11 +103,15 @@ export function VaultBrowser({
       e.preventDefault();
       dragCounter.current = 0;
       setShowDropOverlay(false);
-      const dropped = e.dataTransfer.files?.[0];
-      if (dropped) {
-        setExternalDropFile(dropped);
-        vault.setShowUpload(true);
-      }
+      // Reads the entries synchronously before its first await; the
+      // DataTransfer is emptied once this handler yields.
+      readDroppedFiles(e.dataTransfer)
+        .then((dropped) => {
+          if (dropped.length === 0) return;
+          setExternalDropItems(dropped);
+          vault.setShowUpload(true);
+        })
+        .catch((err) => toast.error(errorMessage(err)));
     },
     [vault]
   );
@@ -112,7 +120,7 @@ export function VaultBrowser({
   const handleUploadDialogChange = useCallback(
     (open: boolean) => {
       vault.setShowUpload(open);
-      if (!open) setExternalDropFile(null);
+      if (!open) setExternalDropItems(null);
     },
     [vault]
   );
@@ -239,7 +247,7 @@ export function VaultBrowser({
         onOpenChange={handleUploadDialogChange}
         folderId={vault.currentFolderId}
         onUploaded={() => vault.refresh()}
-        initialFile={externalDropFile}
+        initialItems={externalDropItems}
       />
       {vault.checkInFileId && (
         <CheckInDialog
