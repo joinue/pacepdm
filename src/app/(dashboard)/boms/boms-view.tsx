@@ -64,6 +64,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { buildBomTree, visibleRows, type BomTreeNode } from "./bom-hierarchy";
+import {
+  parseBomLinesCsv,
+  describeSkippedRows,
+  MAX_IMPORT_LINES,
+  type BulkImportResult,
+} from "./bom-csv-import";
 import { PageContainer } from "@/components/ui/page-container";
 
 /**
@@ -372,76 +378,68 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
     window.open(`/api/boms/${bomId}/export`, "_blank");
   }
 
-  // ─── CSV import (uses the bulk endpoint added in migration round) ────
+  // ─── CSV import: append lines to this BOM ────────────────────────────
   async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!selectedBomId || !e.target.files?.[0]) return;
-    const file = e.target.files[0];
-    const text = await file.text();
-    const lines = text.split("\n").filter((l) => l.trim());
-    if (lines.length < 2) {
-      toast.error("CSV must have a header row and at least one data row");
+    const input = e.target;
+    const file = input.files?.[0];
+    // Cleared up front so choosing the same file again (after fixing it)
+    // still fires onChange.
+    input.value = "";
+    if (!selectedBomId || !file) return;
+
+    const parsed = parseBomLinesCsv(await file.text(), {
+      firstItemNumber: Number(getNextItemNumber()),
+      firstSortOrder: items.reduce((max, i) => Math.max(max, i.sortOrder + 1), 0),
+    });
+    if (!parsed.ok) {
+      toast.error(parsed.error);
       return;
     }
-
-    const headers = lines[0].split(",").map((h) => h.replace(/"/g, "").trim().toLowerCase());
-    const itemNumIdx = headers.findIndex((h) => h.includes("item"));
-    const pnIdx = headers.findIndex((h) => h.includes("part") && h.includes("num"));
-    const nameIdx = headers.findIndex((h) => h === "name" || h.includes("description"));
-    const qtyIdx = headers.findIndex((h) => h.includes("qty") || h.includes("quantity"));
-    const unitIdx = headers.findIndex((h) => h.includes("unit"));
-    const matIdx = headers.findIndex((h) => h.includes("material"));
-    const vendorIdx = headers.findIndex((h) => h.includes("vendor"));
-    const costIdx = headers.findIndex((h) => h.includes("cost"));
-
-    if (nameIdx === -1) {
-      toast.error("CSV must have a 'Name' column");
-      return;
-    }
-
-    // Parse all rows up-front, then send in a single batch request.
-    const rowsToImport: Record<string, unknown>[] = [];
-    let skipped = 0;
-    for (let i = 1; i < lines.length; i++) {
-      const cols =
-        lines[i]
-          .match(/(".*?"|[^",]+|(?<=,)(?=,)|(?<=,)$)/g)
-          ?.map((c) => c.replace(/^"|"$/g, "").trim()) || [];
-      const name = cols[nameIdx];
-      if (!name) {
-        skipped++;
-        continue;
-      }
-      rowsToImport.push({
-        itemNumber:
-          cols[itemNumIdx] || String(items.length + rowsToImport.length + 1).padStart(3, "0"),
-        partNumber: pnIdx >= 0 ? cols[pnIdx] || null : null,
-        name,
-        quantity: qtyIdx >= 0 ? parseFloat(cols[qtyIdx]) || 1 : 1,
-        unit: unitIdx >= 0 ? cols[unitIdx] || "EA" : "EA",
-        material: matIdx >= 0 ? cols[matIdx] || null : null,
-        vendor: vendorIdx >= 0 ? cols[vendorIdx] || null : null,
-        unitCost: costIdx >= 0 ? parseFloat(cols[costIdx]) || null : null,
-        sortOrder: items.length + rowsToImport.length,
+    const { lines, skipped } = parsed;
+    const skippedDetail = describeSkippedRows(skipped);
+    if (lines.length === 0) {
+      toast.error("Nothing was imported: no row in the CSV could be used.", {
+        description: skippedDetail,
       });
+      return;
     }
-
-    if (rowsToImport.length === 0) {
-      toast.error("No valid rows to import");
-      e.target.value = "";
+    if (lines.length > MAX_IMPORT_LINES) {
+      toast.error(
+        `The CSV has ${lines.length} lines; one import can add at most ${MAX_IMPORT_LINES}. Split the file.`
+      );
       return;
     }
 
     try {
-      const result = await fetchJson<{ inserted: number }>(`/api/boms/${selectedBomId}/items`, {
+      const result = await fetchJson<BulkImportResult>(`/api/boms/${selectedBomId}/items`, {
         method: "POST",
-        body: { items: rowsToImport },
+        body: { items: lines },
       });
-      const summary = `Imported ${result.inserted} item${result.inserted !== 1 ? "s" : ""}`;
-      toast.success(skipped > 0 ? `${summary} (${skipped} skipped — missing name)` : summary);
+      const parts = [
+        `Imported ${result.inserted} line${result.inserted === 1 ? "" : "s"}`,
+        `${result.linked} linked to parts`,
+      ];
+      if (skipped.length > 0)
+        parts.push(`${skipped.length} row${skipped.length === 1 ? "" : "s"} skipped`);
+      const details = [
+        result.unmatchedPartNumbers.length > 0
+          ? `Not in the parts library, so not linked: ${result.unmatchedPartNumbers.slice(0, 5).join(", ")}` +
+            (result.unmatchedPartNumbers.length > 5
+              ? ` and ${result.unmatchedPartNumbers.length - 5} more`
+              : "") +
+            ". Link these lines before sending the BOM for review."
+          : null,
+        skippedDetail,
+      ].filter(Boolean);
+      const message = parts.join(" · ");
+      if (skipped.length > 0 || result.unmatchedPartNumbers.length > 0) {
+        toast.warning(message, { description: details.join(" "), duration: 15000 });
+      } else {
+        toast.success(message);
+      }
     } catch (err) {
-      toast.error(errorMessage(err) || "Failed to import CSV");
+      toast.error(`Could not import the CSV: ${errorMessage(err)}`);
     }
-    e.target.value = "";
     refreshItems();
   }
 

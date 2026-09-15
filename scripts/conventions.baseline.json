@@ -54,7 +54,7 @@
     "unwrapped-route": 5
   },
   "src/app/api/boms/[bomId]/items/route.ts": {
-    "unwrapped-route": 13
+    "unwrapped-route": 11
   },
   "src/app/api/boms/[bomId]/rollup/route.ts": {
     "unwrapped-route": 4

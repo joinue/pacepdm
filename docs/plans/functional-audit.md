@@ -882,8 +882,11 @@ offsets as valid streams.
 - Release and part zips have no prepare step, so they rely on the in-stream
   limits. Their folder-ACL gap is ACL-1, Stage 3.
 
-**Still to do in Stage 2:** CSV into an existing BOM, LOCKED cost source, AUTO
-numbering (BOM-1, 2, 7), unsaved panel edits and record links (UI-2, UI-3).
+**Small fixes — done 2026-09-15.**
+
+- **BOM-1, CSV import into an existing BOM — done.** The `items` key now decides the schema, so a bad batch is a 400 instead of one blank line. The client parser (`boms/bom-csv-import.ts`, on `parseCsv`) matches headers exactly, including SOLIDWORKS names like `ITEM NO.` and `QTY.`, refuses bad quantities with a reason instead of coercing them, and skips Level > 1 rows so a re-imported export does not double-count. Part numbers link to the tenant's parts, chunked.
+
+**Still to do in Stage 2:** LOCKED cost source (BOM-2), AUTO numbering (BOM-7), unsaved panel edits (UI-2), record links (UI-3).
 
 ### Stages 3–4 — not started
 

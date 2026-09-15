@@ -3,10 +3,21 @@ import { getServiceClient } from "@/lib/db";
 import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
-import { z, parseBody, nonEmptyString, optionalString, optionalUuid } from "@/lib/validation";
+import {
+  z,
+  parseBody,
+  formatZodError,
+  nonEmptyString,
+  optionalString,
+  optionalUuid,
+} from "@/lib/validation";
 import { wouldCreateCycle, type RollupBom } from "@/lib/bom-rollup";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 import { getBomContentLock } from "@/lib/bom-lock";
+import { selectAllIn } from "@/lib/paged-query";
+
+/** The raw service client, which this route still resolves for itself. */
+type ItemsDb = ReturnType<typeof getServiceClient>;
 
 // ─── Mutation guard ───────────────────────────────────────────────────────
 //
@@ -24,7 +35,7 @@ import { getBomContentLock } from "@/lib/bom-lock";
 // the released file would then drift from the BOM rows. BOMs without a
 // parent file (`fileId IS NULL`) bypass rule 3.
 async function requireBomMutable(
-  db: ReturnType<typeof getServiceClient>,
+  db: ItemsDb,
   bomId: string,
   tenantId: string
 ): Promise<
@@ -73,7 +84,7 @@ async function requireBomMutable(
 // so a cross-tenant link is rejected as "BOM not found" before we even
 // reach the cycle check.
 async function checkLinkedBomSafe(
-  db: ReturnType<typeof getServiceClient>,
+  db: ItemsDb,
   tenantId: string,
   parentBomId: string,
   targetBomId: string
@@ -180,16 +191,47 @@ const BomItemInputSchema = z.object({
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
-const PostBodySchema = z.union([
-  // Single-item insert
-  BomItemInputSchema,
-  // Bulk insert (CSV import path)
-  z.object({
-    items: z
-      .array(BomItemInputSchema)
-      .max(1000, "Cannot insert more than 1000 items in a single batch"),
-  }),
-]);
+// Bulk insert (the CSV import path).
+//
+// This was one arm of a `z.union` with the single-item schema listed first.
+// Every field of a single item is optional and unknown keys are stripped, so
+// `{ items: [...] }` parsed as a single item with nothing in it: the route
+// inserted one blank line, returned that row, and the client toasted
+// "Imported undefined items". CSV import into an existing BOM had never
+// worked. The two shapes are now told apart by the `items` key before either
+// schema runs (see `parsePostBody`), so a malformed batch is a 400 rather than
+// a quiet fall-through to the other shape.
+const BulkPostBodySchema = z.object({
+  items: z
+    .array(BomItemInputSchema)
+    .max(1000, "Cannot insert more than 1000 items in a single batch"),
+});
+
+type PostBody =
+  | { kind: "bulk"; data: z.infer<typeof BulkPostBodySchema> }
+  | { kind: "single"; data: z.infer<typeof BomItemInputSchema> };
+
+function parsePostBody(
+  raw: Record<string, unknown>
+): { ok: true; body: PostBody } | { ok: false; response: NextResponse } {
+  const invalid = (error: z.ZodError) => ({
+    ok: false as const,
+    response: NextResponse.json(
+      { error: "Validation failed", details: formatZodError(error) },
+      { status: 400 }
+    ),
+  });
+  if ("items" in raw) {
+    const result = BulkPostBodySchema.safeParse(raw);
+    return result.success
+      ? { ok: true, body: { kind: "bulk", data: result.data } }
+      : invalid(result.error);
+  }
+  const result = BomItemInputSchema.safeParse(raw);
+  return result.success
+    ? { ok: true, body: { kind: "single", data: result.data } }
+    : invalid(result.error);
+}
 
 const PutBodySchema = BomItemInputSchema.extend({
   itemId: nonEmptyString,
@@ -280,39 +322,49 @@ interface PartSnapshot {
   vendor: string | null;
 }
 
-// Fetch parts AND their primary vendor (one round-trip each), then merge.
-// Two queries instead of one nested join because Supabase's PostgREST join
-// syntax for "first row matching a filter" is awkward and the dataset here
-// is tiny (≤ 1000 parts per bulk insert).
+// Fetch parts AND their primary vendor, then merge. Two queries instead of
+// one nested join because Supabase's PostgREST join syntax for "first row
+// matching a filter" is awkward.
+//
+// Chunked: a bulk insert of up to 1000 lines can name hundreds of parts, and
+// one `.in("id", …)` over all of them is a URL the gateway refuses.
 async function fetchPartSnapshots(
-  db: ReturnType<typeof getServiceClient>,
+  db: ItemsDb,
   tenantId: string,
   inputs: BomItemInput[]
 ): Promise<Map<string, PartSnapshot>> {
   const ids = Array.from(new Set(inputs.map((i) => i.partId).filter((v): v is string => !!v)));
   if (ids.length === 0) return new Map();
 
-  const [{ data: parts, error: partsError }, { data: primaryLinks }] = await Promise.all([
-    db
-      .from("parts")
-      .select("id, partNumber, name, description, material, unitCost, unit")
-      .eq("tenantId", tenantId)
-      .is("deletedAt", null)
-      .in("id", ids),
-    db
-      .from("part_vendors")
-      .select("partId, unitCost, vendor:vendors!part_vendors_vendorId_fkey(name)")
-      .in("partId", ids)
-      .eq("isPrimary", true),
+  // Thrown rather than read as "no parts" (selectAllIn throws on a query
+  // error): an empty map means "not in this tenant", and a failed query must
+  // not be reported as that.
+  const [parts, primaryLinks] = await Promise.all([
+    selectAllIn(ids, (chunk, from, to) =>
+      db
+        .from("parts")
+        .select("id, partNumber, name, description, material, unitCost, unit")
+        .eq("tenantId", tenantId)
+        .is("deletedAt", null)
+        .in("id", chunk)
+        .order("id")
+        .range(from, to)
+    ),
+    selectAllIn(ids, (chunk, from, to) =>
+      db
+        .from("part_vendors")
+        .select("id, partId, unitCost, vendor:vendors!part_vendors_vendorId_fkey(name)")
+        .in("partId", chunk)
+        .eq("isPrimary", true)
+        .order("id")
+        .range(from, to)
+    ),
   ]);
-  // Thrown rather than read as "no parts": an empty map now means "not in
-  // this tenant", and a failed query must not be reported as that.
-  if (partsError) throw partsError;
 
   // primaryLinks is keyed by partId — each part has at most one primary
   // vendor (enforced by the UI which clears others on insert).
   const primaryByPart = new Map<string, { unitCost: number | null; vendorName: string | null }>();
-  for (const row of (primaryLinks || []) as unknown as Array<{
+  for (const row of primaryLinks as unknown as Array<{
     partId: string;
     unitCost: number | null;
     vendor: { name: string } | null;
@@ -324,7 +376,7 @@ async function fetchPartSnapshots(
   }
 
   const map = new Map<string, PartSnapshot>();
-  for (const row of (parts || []) as unknown as Array<{
+  for (const row of parts as unknown as Array<{
     id: string;
     partNumber: string | null;
     name: string | null;
@@ -377,19 +429,69 @@ async function checkLineReferences(
   const fileIds = Array.from(new Set(inputs.map((i) => i.fileId).filter((v): v is string => !!v)));
   if (fileIds.length === 0) return { ok: true };
 
-  const { data: files, error } = await db
-    .from("files")
-    .select("id")
-    .eq("tenantId", tenantId)
-    .is("deletedAt", null)
-    .in("id", fileIds);
-  if (error) throw error;
-  const found = new Set(((files ?? []) as Array<{ id: string }>).map((f) => f.id));
+  const files = await selectAllIn(fileIds, (chunk, from, to) =>
+    db
+      .from("files")
+      .select("id")
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null)
+      .in("id", chunk)
+      .order("id")
+      .range(from, to)
+  );
+  const found = new Set((files as Array<{ id: string }>).map((f) => f.id));
   const missingFile = fileIds.find((id) => !found.has(id));
   if (missingFile) {
     return { ok: false, error: `File not found: ${missingFile}` };
   }
   return { ok: true };
+}
+
+// Link imported lines to the tenant's parts by part number.
+//
+// A CSV line carries a part number, not a part id, and a line without a
+// `partId` is free text: it cannot leave DRAFT (PUT /api/boms/[bomId] refuses
+// unresolved lines), where-used cannot find it, and it rolls up no cost. The
+// import used to send part numbers only, so a BOM built from a CSV could never
+// be sent for review.
+//
+// Only lines that name neither a part nor a sub-assembly are resolved, so an
+// explicit id always wins. Matching is exact and case-sensitive, like the
+// `parts_tenantId_partNumber_key` index, and ignores parts in the trash — the
+// reference check below refuses those anyway. Chunked, because a 1000-line
+// import is 1000 part numbers and one `.in()` over them is a URL the gateway
+// refuses.
+async function resolvePartNumbers(
+  db: Parameters<typeof fetchPartSnapshots>[0],
+  tenantId: string,
+  inputs: BomItemInput[]
+): Promise<{ inputs: BomItemInput[]; unmatchedPartNumbers: string[] }> {
+  const wanted = (i: BomItemInput) => !i.partId && !i.linkedBomId && !!i.partNumber;
+  const numbers = Array.from(new Set(inputs.filter(wanted).map((i) => i.partNumber as string)));
+  if (numbers.length === 0) return { inputs, unmatchedPartNumbers: [] };
+
+  const rows = await selectAllIn(numbers, (chunk, from, to) =>
+    db
+      .from("parts")
+      .select("id, partNumber")
+      .eq("tenantId", tenantId)
+      .is("deletedAt", null)
+      .in("partNumber", chunk)
+      .order("id")
+      .range(from, to)
+  );
+  const idByNumber = new Map(
+    (rows as Array<{ id: string; partNumber: string }>).map((r) => [r.partNumber, r.id])
+  );
+
+  return {
+    inputs: inputs.map((i) =>
+      wanted(i) && idByNumber.has(i.partNumber as string)
+        ? { ...i, partId: idByNumber.get(i.partNumber as string) }
+        : i
+    ),
+    unmatchedPartNumbers: numbers.filter((n) => !idByNumber.has(n)),
+  };
 }
 
 // Fill missing fields on the input from the snapshot. "Missing" means
@@ -453,9 +555,12 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const parsed = await parseBody(request, PostBodySchema);
+    // Any JSON object; which of the two shapes it is gets decided below.
+    const parsed = await parseBody(request, z.record(z.string(), z.unknown()));
     if (!parsed.ok) return parsed.response;
-    const body = parsed.data;
+    const post = parsePostBody(parsed.data);
+    if (!post.ok) return post.response;
+    const body = post.body;
 
     const { bomId } = await params;
     const db = getServiceClient();
@@ -466,12 +571,13 @@ export async function POST(
       return NextResponse.json({ error: guard.error }, { status: guard.status });
     }
 
-    // Bulk path: schema discriminates on the presence of `items`
-    if ("items" in body) {
-      const inputs = body.items;
-      if (inputs.length === 0) {
-        return NextResponse.json({ items: [], inserted: 0 });
+    // Bulk path: the body named `items`.
+    if (body.kind === "bulk") {
+      if (body.data.items.length === 0) {
+        return NextResponse.json({ items: [], inserted: 0, linked: 0, unmatchedPartNumbers: [] });
       }
+      const resolved = await resolvePartNumbers(db, tenantUser.tenantId, body.data.items);
+      const inputs = resolved.inputs;
 
       // Cycle check for any sub-assembly links in the batch. Done up
       // front so a single bad row aborts the whole batch instead of
@@ -491,26 +597,42 @@ export async function POST(
       if (!refs.ok) {
         return NextResponse.json({ error: refs.error }, { status: 404 });
       }
-      const rows = inputs.map((it) =>
-        buildItemRow(bomId, applyPartSnapshot(it, partSnaps.get(it.partId || "")), now)
-      );
+      const rows = inputs.map((it) => {
+        const filled = applyPartSnapshot(it, partSnaps.get(it.partId || ""));
+        // A line imported with a part number and no name that matched no
+        // part would otherwise land with a blank name.
+        return buildItemRow(
+          bomId,
+          { ...filled, name: filled.name || filled.partNumber || "" },
+          now
+        );
+      });
       const { data: inserted, error } = await db.from("bom_items").insert(rows).select();
       if (error) throw error;
 
+      const count = inserted?.length ?? 0;
+      const linked = rows.filter((r) => r.partId).length;
       await logAudit({
         tenantId: tenantUser.tenantId,
         userId: tenantUser.id,
         action: "bom.item.bulk_add",
         entityType: "bom",
         entityId: bomId,
-        details: { count: inserted?.length ?? 0 },
+        details: { count, linked, unmatched: resolved.unmatchedPartNumbers.length },
       });
 
-      return NextResponse.json({ items: inserted, inserted: inserted?.length ?? 0 });
+      return NextResponse.json({
+        items: inserted,
+        inserted: count,
+        /** Lines that point at a part, by id or by a part number that matched. */
+        linked,
+        /** Part numbers no part in this tenant carries; those lines are free text. */
+        unmatchedPartNumbers: resolved.unmatchedPartNumbers,
+      });
     }
 
     // Single-item path
-    const single = body;
+    const single = body.data;
     if (single.linkedBomId) {
       const check = await checkLinkedBomSafe(db, tenantUser.tenantId, bomId, single.linkedBomId);
       if (!check.ok) {

@@ -13,23 +13,32 @@ import { NextRequest } from "next/server";
  *    part number, cost and thumbnail.
  */
 
-const { tables, writes, mockFrom } = vi.hoisted(() => {
+const { tables, writes, inFilters, mockFrom } = vi.hoisted(() => {
   type Row = Record<string, unknown>;
   const tables: Record<string, Row[]> = {};
   const writes: Array<{ table: string; op: "insert" | "update" | "delete"; data?: unknown }> = [];
+  /** Every `.in()` filter applied, so a test can see how many values went in one URL. */
+  const inFilters: Array<{ table: string; column: string; size: number }> = [];
 
   function makeChain(table: string) {
     const preds: Array<(r: Row) => boolean> = [];
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
-    const rows = () => (tables[table] ?? []).filter((r) => preds.every((p) => p(r)));
+    let range: [number, number] | null = null;
+    const rows = () => {
+      const matched = (tables[table] ?? []).filter((r) => preds.every((p) => p(r)));
+      // PostgREST's max-rows: no read returns more than 1,000, however it asks.
+      return (range ? matched.slice(range[0], range[1] + 1) : matched).slice(0, 1000);
+    };
 
     for (const m of ["select", "order", "limit"] as const) chain[m] = () => chain;
     chain.eq = (col, v) => (preds.push((r) => r[col as string] === v), chain);
     chain.is = (col, v) => (preds.push((r) => (r[col as string] ?? null) === v), chain);
-    chain.in = (col, vs) => (
-      preds.push((r) => (vs as unknown[]).includes(r[col as string])),
-      chain
-    );
+    chain.in = (col, vs) => {
+      inFilters.push({ table, column: col as string, size: (vs as unknown[]).length });
+      preds.push((r) => (vs as unknown[]).includes(r[col as string]));
+      return chain;
+    };
+    chain.range = (from, to) => ((range = [from as number, to as number]), chain);
     chain.single = () => ({ data: rows()[0] ?? null, error: null });
     chain.maybeSingle = () => ({ data: rows()[0] ?? null, error: null });
     chain.then = ((resolve: (v: unknown) => void) =>
@@ -61,7 +70,7 @@ const { tables, writes, mockFrom } = vi.hoisted(() => {
     return chain;
   }
 
-  return { tables, writes, mockFrom: (t: string) => makeChain(t) };
+  return { tables, writes, inFilters, mockFrom: (t: string) => makeChain(t) };
 });
 
 const mockTenantUser = vi.hoisted(() => ({
@@ -156,6 +165,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockTenantUser.current = engineer;
   writes.length = 0;
+  inFilters.length = 0;
   for (const k of Object.keys(tables)) delete tables[k];
 });
 
@@ -259,5 +269,183 @@ describe("BOM lines may only reference the caller's own parts and files", () => 
     });
     expect(res.status).toBe(200);
     expect(bomItemWrites()[0].data).toMatchObject({ fileId: OWN_FILE, partId: null });
+  });
+});
+
+/**
+ * CSV import into an existing BOM had never worked.
+ *
+ * The POST schema was a union with the single-item shape first. Every field of
+ * that shape is optional and unknown keys are stripped, so `{ items: [...] }`
+ * parsed as one empty item: the route inserted a single blank line and
+ * answered with that row, and the client toasted "Imported undefined items".
+ * And even had the lines landed, they carried part numbers and no `partId`, so
+ * a BOM built from a CSV could never be sent for review.
+ */
+describe("bulk POST — importing lines into an existing BOM", () => {
+  const insertedRows = () =>
+    bomItemWrites()
+      .filter((w) => w.op === "insert")
+      .flatMap((w) => (Array.isArray(w.data) ? w.data : [w.data])) as Array<
+      Record<string, unknown>
+    >;
+
+  it("inserts every line and reports the count — not one blank line", async () => {
+    state();
+    const res = await POST(
+      req("POST", {
+        items: [
+          { itemNumber: "001", name: "Frame", quantity: 2 },
+          { itemNumber: "002", name: "Cover", quantity: 0 },
+        ],
+      }),
+      { params }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.inserted).toBe(2);
+    expect(insertedRows()).toHaveLength(2);
+    expect(insertedRows().map((r) => r.name)).toEqual(["Frame", "Cover"]);
+    // A quantity of 0 is a value, not a blank to default.
+    expect(insertedRows()[1].quantity).toBe(0);
+  });
+
+  it("refuses a malformed batch outright instead of reading it as a single item", async () => {
+    state();
+    const res = await POST(req("POST", { items: [{ name: "Frame", quantity: -1 }] }), { params });
+    expect(res.status).toBe(400);
+    expect((await res.json()).details).toHaveProperty(["items.0.quantity"]);
+    expect(bomItemWrites()).toHaveLength(0);
+  });
+
+  it("refuses an items value that is not a list", async () => {
+    state();
+    const res = await POST(req("POST", { items: "Frame" }), { params });
+    expect(res.status).toBe(400);
+    expect(bomItemWrites()).toHaveLength(0);
+  });
+
+  it("links lines to the caller's parts by part number, and says which did not match", async () => {
+    state();
+    const res = await POST(
+      req("POST", {
+        items: [
+          { name: "", partNumber: "P-1", quantity: 1 },
+          { name: "Mystery", partNumber: "NOPE-7", quantity: 1 },
+        ],
+      }),
+      { params }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.linked).toBe(1);
+    expect(body.unmatchedPartNumbers).toEqual(["NOPE-7"]);
+    const [matched, unmatched] = insertedRows();
+    // Linked, and the blank name filled from the part.
+    expect(matched).toMatchObject({ partId: OWN_PART, partNumber: "P-1", name: "Bracket" });
+    expect(unmatched).toMatchObject({ partId: null, partNumber: "NOPE-7", name: "Mystery" });
+  });
+
+  it("never links to another tenant's part that happens to share the number", async () => {
+    state();
+    const res = await POST(
+      req("POST", { items: [{ name: "Copy", partNumber: "SECRET-9", quantity: 1 }] }),
+      { params }
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).unmatchedPartNumbers).toEqual(["SECRET-9"]);
+    expect(insertedRows()[0]).toMatchObject({ partId: null });
+  });
+
+  it("does not link to a part in the trash", async () => {
+    state();
+    tables["parts"][0].deletedAt = "2026-09-01T00:00:00Z";
+    const res = await POST(
+      req("POST", { items: [{ name: "Old", partNumber: "P-1", quantity: 1 }] }),
+      { params }
+    );
+    expect(res.status).toBe(200);
+    expect(insertedRows()[0]).toMatchObject({ partId: null });
+  });
+
+  it("falls back to the part number for a line with no name that matched nothing", async () => {
+    state();
+    await POST(req("POST", { items: [{ name: "", partNumber: "NOPE-7", quantity: 1 }] }), {
+      params,
+    });
+    expect(insertedRows()[0]).toMatchObject({ name: "NOPE-7" });
+  });
+
+  it("keeps an explicit partId rather than re-matching by number", async () => {
+    state();
+    tables["parts"].push({
+      id: "88888888-8888-4888-8888-888888888888",
+      tenantId: "tenant-1",
+      partNumber: "P-2",
+      name: "Other",
+      deletedAt: null,
+    });
+    await POST(req("POST", { items: [{ partId: OWN_PART, partNumber: "P-2", quantity: 1 }] }), {
+      params,
+    });
+    expect(insertedRows()[0]).toMatchObject({ partId: OWN_PART });
+  });
+
+  it("looks part numbers up in URL-sized chunks, and still links every line", async () => {
+    state();
+    const count = 450;
+    for (let i = 0; i < count; i++) {
+      tables["parts"].push({
+        id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+        tenantId: "tenant-1",
+        partNumber: `BULK-${i}`,
+        name: `Bulk ${i}`,
+        deletedAt: null,
+      });
+    }
+    const res = await POST(
+      req("POST", {
+        items: Array.from({ length: count }, (_, i) => ({
+          name: "",
+          partNumber: `BULK-${i}`,
+          quantity: 1,
+        })),
+      }),
+      { params }
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).linked).toBe(count);
+    const lookups = inFilters.filter((f) => f.table === "parts" || f.table === "part_vendors");
+    expect(Math.max(...lookups.map((f) => f.size))).toBeLessThanOrEqual(100);
+  });
+
+  it("is still refused while an in-flight ECO carries the BOM", async () => {
+    state({ ecoStatus: "APPROVED" });
+    const res = await POST(req("POST", { items: [{ name: "Late", quantity: 1 }] }), { params });
+    expect(res.status).toBe(409);
+    expect(bomItemWrites()).toHaveLength(0);
+  });
+
+  it("is still refused on a released BOM", async () => {
+    state({ bomStatus: "RELEASED" });
+    const res = await POST(req("POST", { items: [{ name: "Late", quantity: 1 }] }), { params });
+    expect(res.status).toBe(400);
+    expect(bomItemWrites()).toHaveLength(0);
+  });
+
+  it("404s another tenant's BOM", async () => {
+    state();
+    tables["boms"][0].tenantId = "tenant-OTHER";
+    const res = await POST(req("POST", { items: [{ name: "x", quantity: 1 }] }), { params });
+    expect(res.status).toBe(404);
+    expect(bomItemWrites()).toHaveLength(0);
+  });
+
+  it("still adds a single line when the body has no items key", async () => {
+    state();
+    const res = await POST(req("POST", { name: "Single", quantity: 3 }), { params });
+    expect(res.status).toBe(200);
+    expect(insertedRows()).toHaveLength(1);
+    expect(insertedRows()[0]).toMatchObject({ name: "Single", quantity: 3 });
   });
 });

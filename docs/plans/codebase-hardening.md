@@ -5,7 +5,7 @@
 <!-- plan-metrics
 routes-total: 115
 routes-wrapped: 56
-unwrapped-route: 288
+unwrapped-route: 286
 raw-fetch: 35
 generic-error-toast: 5
 swallowed-error: 6
