@@ -2,8 +2,9 @@
  * Transactional email for in-app notifications.
  *
  * Uses Resend's REST API directly (no SDK dependency). The public entry
- * point is `sendNotificationEmail` — callers never hit Resend directly,
- * so swapping providers (Postmark, SES) is a one-file change.
+ * points are `sendNotificationEmail` and `sendInviteEmail` — callers never
+ * hit Resend directly, so swapping providers (Postmark, SES) is a one-file
+ * change.
  *
  * Environment:
  *   RESEND_API_KEY   — required. If missing, sendNotificationEmail is a no-op
@@ -16,7 +17,7 @@
  */
 
 import { getServiceClient } from "@/lib/db";
-import { renderNotificationEmail, type EmailType } from "./templates";
+import { renderInviteEmail, renderNotificationEmail, type EmailType } from "./templates";
 
 export type EmailPrefs = Record<EmailType, boolean>;
 
@@ -173,5 +174,78 @@ export async function sendNotificationEmail(
       );
     }
     return { ok: false, reason: msg };
+  }
+}
+
+/**
+ * Whether the app can send email itself. A caller with a fallback checks this
+ * first: users/invite hands the invitation to Supabase's mailer instead.
+ */
+export function appEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+}
+
+interface SendInviteEmailParams {
+  to: string;
+  recipientName: string;
+  inviterName: string;
+  tenantId: string;
+  tenantName: string;
+  /** Absolute URL of the app page that verifies the invite token. */
+  link: string;
+  replyTo?: string;
+}
+
+/**
+ * Send a workspace invitation.
+ *
+ * Unlike sendNotificationEmail this ignores notification preferences — the
+ * recipient has no account to hold any yet, and an invitation that quietly
+ * does not arrive is the one email the flow cannot work without. It also
+ * writes nothing back, so the caller decides what a failed send means.
+ */
+export async function sendInviteEmail(params: SendInviteEmailParams): Promise<SendResult> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return { ok: false, skipped: true, reason: "no-api-key" };
+  const from = process.env.EMAIL_FROM;
+  if (!from) return { ok: false, skipped: true, reason: "no-from-address" };
+
+  const { subject, html, text } = renderInviteEmail({
+    tenantName: params.tenantName,
+    inviterName: params.inviterName,
+    recipientName: params.recipientName,
+    link: params.link,
+  });
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [params.to],
+        subject,
+        html,
+        text,
+        reply_to: params.replyTo,
+        tags: [
+          { name: "type", value: "invite" },
+          { name: "tenant", value: params.tenantId },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, reason: `resend ${res.status}: ${body.slice(0, 200)}` };
+    }
+
+    const data = (await res.json().catch(() => ({}))) as { id?: string };
+    return { ok: true, providerId: data.id };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }

@@ -84,3 +84,58 @@ ${ctaHtml}
 
   return { subject, html, text };
 }
+
+interface RenderInviteParams {
+  tenantName: string;
+  inviterName: string;
+  recipientName: string;
+  /** Absolute URL of the app page that verifies the invite token. */
+  link: string;
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * The invitation a new teammate receives. Sent by the app rather than by
+ * Supabase's mailer, so the link is the one the app built — see
+ * src/app/api/users/invite/route.ts for why that matters.
+ */
+export function renderInviteEmail(p: RenderInviteParams): Rendered {
+  const subject = `${p.inviterName} invited you to ${p.tenantName} on PACE PDM`;
+  const firstName = p.recipientName.split(" ")[0] || p.recipientName;
+  const lede = `${p.inviterName} has invited you to join ${p.tenantName} on PACE PDM. Accept the invitation to set your password and sign in.`;
+  const footer =
+    "The link works once. If it has expired, ask the person who invited you to send a new invitation. If you weren't expecting this, you can ignore this email.";
+
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:32px 0"><tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;border:1px solid #e5e7eb">
+<tr><td style="padding:28px 32px 8px 32px">
+<p style="margin:0;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(p.tenantName)} &middot; Invitation</p>
+<h1 style="margin:8px 0 0 0;font-size:20px;color:#111827">You're invited to ${escapeHtml(p.tenantName)}</h1>
+</td></tr>
+<tr><td style="padding:8px 32px 24px 32px;font-size:14px;color:#374151;line-height:1.55">
+<p style="margin:0 0 12px 0">Hi ${escapeHtml(firstName)},</p>
+<p style="margin:0">${escapeHtml(lede)}</p>
+<p style="margin:24px 0"><a href="${escapeHtml(p.link)}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:500">Accept invitation</a></p>
+<p style="margin:24px 0 0 0;font-size:12px;color:#6b7280">${escapeHtml(footer)}</p>
+</td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+
+  const text = [
+    `${p.tenantName} — Invitation`,
+    "",
+    `Hi ${firstName},`,
+    "",
+    lede,
+    "",
+    `Accept invitation: ${p.link}`,
+    "",
+    footer,
+  ].join("\n");
+
+  return { subject, html, text };
+}

@@ -8,14 +8,42 @@ import {
 } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { appEmailConfigured, sendInviteEmail } from "@/lib/email/send";
 
 const InviteSchema = z.object({
   email: z.string().email("Must be a valid email"),
   fullName: nonEmptyString,
   roleId: nonEmptyString,
 });
+
+const AUTH_USERS_PAGE_SIZE = 1000;
+
+/**
+ * Find an auth user by email across every page of the project's users.
+ *
+ * listUsers() with no arguments returns only the first page — 50 users — so
+ * once the Supabase project (every tenant together) outgrew that, re-inviting
+ * an existing account found nothing and failed with "already registered".
+ * Supabase stores emails lowercased; the admin may not type them that way.
+ */
+async function findAuthUserByEmail(admin: SupabaseClient, email: string) {
+  const target = email.toLowerCase();
+  // Stops on an empty page rather than a short one, so a server-side cap on
+  // perPage cannot end the search early. The bound is only a backstop.
+  for (let page = 1; page <= 1000; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: AUTH_USERS_PAGE_SIZE,
+    });
+    if (error) throw error;
+    if (data.users.length === 0) return null;
+    const match = data.users.find((u) => u.email?.toLowerCase() === target);
+    if (match) return match;
+  }
+  return null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -98,7 +126,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create auth user + send invite email via Supabase Admin API
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -106,25 +133,51 @@ export async function POST(request: NextRequest) {
     );
 
     const origin = new URL(request.url).origin;
-    const redirectTo = `${origin}/auth/callback?next=/accept-invite`;
 
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-      email,
-      { data: { full_name: fullName }, redirectTo }
-    );
+    // Create the auth user and get the invitation to them.
+    //
+    // This used to be inviteUserByEmail with redirectTo /auth/callback, which
+    // only worked if the Supabase dashboard's invite template had been
+    // customised. The default template links to Supabase's /verify endpoint,
+    // which signs the invitee in with tokens in the URL #fragment (invites
+    // cannot use PKCE). A server route never sees a fragment, so /auth/callback
+    // found no ?code= and sent them to /login?error=missing_code.
+    //
+    // So the app builds the link itself: generateLink creates the user and
+    // returns the hashed token without sending anything, and the email points
+    // at /auth/confirm, which verifies token_hash on a click. No template or
+    // redirect allowlist is involved. Only when the app has no email provider
+    // configured does it fall back to Supabase's mailer, and that path still
+    // depends on the template.
+    const useAppEmail = appEmailConfigured();
+    if (!useAppEmail) {
+      console.warn(
+        "[invite] RESEND_API_KEY/EMAIL_FROM not set; sending the invitation through Supabase's mailer, which depends on the dashboard invite template"
+      );
+    }
+    const generated = useAppEmail
+      ? await supabaseAdmin.auth.admin.generateLink({
+          type: "invite",
+          email,
+          options: { data: { full_name: fullName } },
+        })
+      : null;
+    const { data: authData, error: authError } =
+      generated ??
+      (await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        data: { full_name: fullName },
+        redirectTo: `${origin}/auth/confirm?next=/accept-invite`,
+      }));
 
     if (authError) {
       // User might already exist in auth but not in this tenant
       if (
+        authError.code === "email_exists" ||
         authError.message.includes("already been registered") ||
         authError.message.toLowerCase().includes("already registered") ||
         authError.message.toLowerCase().includes("already exists")
       ) {
-        // Look up existing auth user
-        const {
-          data: { users },
-        } = await supabaseAdmin.auth.admin.listUsers();
-        const existingAuthUser = users.find((u) => u.email === email);
+        const existingAuthUser = await findAuthUserByEmail(supabaseAdmin, email);
 
         if (existingAuthUser) {
           const now = new Date().toISOString();
@@ -159,6 +212,38 @@ export async function POST(request: NextRequest) {
         }
       }
       return NextResponse.json({ error: authError.message }, { status: 400 });
+    }
+
+    if (generated) {
+      const hashedToken = generated.data.properties?.hashed_token;
+      if (!hashedToken) throw new Error("Supabase returned no invitation token");
+
+      const link = new URL("/auth/confirm", origin);
+      link.searchParams.set("token_hash", hashedToken);
+      link.searchParams.set("type", "invite");
+      link.searchParams.set("next", "/accept-invite");
+
+      const tenant = tenantUser.tenant as { name?: string; settings?: Record<string, unknown> };
+      const replyTo = tenant?.settings?.emailReplyTo;
+      const sent = await sendInviteEmail({
+        to: email,
+        recipientName: fullName,
+        inviterName: tenantUser.fullName,
+        tenantId: tenantUser.tenantId,
+        tenantName: tenant?.name || "PACE PDM",
+        link: link.toString(),
+        replyTo: typeof replyTo === "string" && replyTo ? replyTo : undefined,
+      });
+
+      // Nothing is added to the workspace when the email does not go out, so
+      // the admin can simply retry: generateLink reissues the token for an
+      // invitee who has not accepted yet.
+      if (!sent.ok) {
+        return NextResponse.json(
+          { error: `The invitation email could not be sent: ${sent.reason}` },
+          { status: 502 }
+        );
+      }
     }
 
     // Create tenant user

@@ -537,6 +537,28 @@ which `GET` returned that part's number, name, cost and a signed thumbnail URL.
 Lines now refuse a `partId` or `fileId` that does not resolve in the caller's
 tenant. Rows written before this need a one-off read-only query to find.
 
+### ~~E. Invitation links landed on a login error~~ Fixed 2026-09-14
+
+`users/invite` called `inviteUserByEmail` with `redirectTo` `/auth/callback`,
+which reads only a PKCE `?code=`. Invites cannot use PKCE (auth-js says so), so
+Supabase's default template signs the invitee in through a URL `#fragment` the
+server route never sees, and they landed on `/login?error=missing_code`. It
+worked only if someone had pointed the dashboard's invite template at
+`/auth/confirm` — a setting the repo cannot show, and the invite route was never
+changed to match when the recovery flow was.
+
+The route now calls `generateLink` and sends the invitation itself through
+Resend, linking to `/auth/confirm?token_hash=…&type=invite` — the same
+click-to-verify page the recovery flow uses. No dashboard template or redirect
+allowlist is involved. Supabase's mailer is the fallback only when
+`RESEND_API_KEY`/`EMAIL_FROM` are unset, and logs that it is. The existing-account
+lookup also searched only the first 50 auth users, case-sensitively; it now
+pages through all of them.
+
+**Verify after deploy:** invite an address you control; the button must link to
+the app's `/auth/confirm`, not `supabase.co/auth/v1/verify`. Anyone invited
+before this who could not get in needs removing and re-inviting.
+
 ---
 
 ## Related

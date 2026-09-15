@@ -48,11 +48,18 @@ function ConfirmInner() {
     router.refresh();
   }
 
-  const heading = type === "recovery" ? "Reset your password" : "Confirm your email";
+  const heading =
+    type === "recovery"
+      ? "Reset your password"
+      : type === "invite"
+        ? "Accept your invitation"
+        : "Confirm your email";
   const body =
     type === "recovery"
       ? "Click the button below to continue to the password reset page."
-      : "Click the button below to finish confirming your email address.";
+      : type === "invite"
+        ? "Click the button below to continue and set your password."
+        : "Click the button below to finish confirming your email address.";
 
   return (
     <div className="min-h-dvh flex flex-col sm:items-center sm:justify-center bg-background">
