@@ -63,7 +63,11 @@ export async function PUT(
         `process mentions for approval decision ${decisionId}`
       );
 
-      return NextResponse.json({ success: true, requestStatus: "REWORK" });
+      return NextResponse.json({
+        success: true,
+        requestStatus: "REWORK",
+        warning: "warning" in result ? result.warning : undefined,
+      });
     }
 
     if (!status) {

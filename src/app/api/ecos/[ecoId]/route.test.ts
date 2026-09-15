@@ -87,11 +87,16 @@ vi.mock("@/lib/notifications", () => ({
 // No workflow assigned — the fall-through path that made this reachable.
 vi.mock("@/lib/approval-engine", () => ({
   findWorkflowForTrigger: vi.fn().mockResolvedValue(null),
+  findEcoApprovalWorkflow: vi.fn().mockResolvedValue(null),
   startWorkflow: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 import { PUT } from "./route";
-import { findWorkflowForTrigger, startWorkflow } from "@/lib/approval-engine";
+import {
+  findEcoApprovalWorkflow,
+  findWorkflowForTrigger,
+  startWorkflow,
+} from "@/lib/approval-engine";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 import { fromDateInputValue } from "@/app/(dashboard)/ecos/effectivity";
@@ -335,6 +340,50 @@ describe("direct status changes while an approval request is pending", () => {
  * to SUBMITTED and no request behind it, so it waited on an approval that did
  * not exist and nothing said so.
  */
+/**
+ * AUD-003 CHG-1. Once a request was recalled or sent back for rework, an ECO
+ * sat in SUBMITTED or IN_REVIEW with nothing pending, and a Manager could
+ * approve it here while the tenant's workflow never ran.
+ */
+describe("direct approval while a workflow governs ECO approvals", () => {
+  beforeEach(() => {
+    vi.mocked(findEcoApprovalWorkflow).mockResolvedValue({ id: "wf-1", name: "ECO Board" });
+  });
+
+  it("refuses a Manager approving an ECO directly", async () => {
+    mockTenantUser.current = manager;
+
+    const res = await PUT(req({ status: "APPROVED" }), { params });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/go through the "ECO Board" workflow/);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+  });
+
+  it("still allows a direct rejection, which releases nothing", async () => {
+    mockTenantUser.current = manager;
+    const res = await PUT(req({ status: "REJECTED" }), { params });
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses rather than allows when the workflow lookup fails", async () => {
+    mockTenantUser.current = manager;
+    vi.mocked(findEcoApprovalWorkflow).mockRejectedValue(new Error("connection reset"));
+
+    const res = await PUT(req({ status: "APPROVED" }), { params });
+
+    expect(res.status).toBe(500);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+  });
+
+  it("still allows a direct approval for a tenant with no ECO workflow", async () => {
+    vi.mocked(findEcoApprovalWorkflow).mockResolvedValue(null);
+    mockTenantUser.current = manager;
+    const res = await PUT(req({ status: "APPROVED" }), { params });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("submitting into a workflow that cannot start", () => {
   it("puts the ECO back and surfaces the reason", async () => {
     mockTenantUser.current = engineer;

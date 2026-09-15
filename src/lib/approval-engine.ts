@@ -294,7 +294,69 @@ export async function startWorkflow(params: StartWorkflowParams) {
     details: { title: params.title },
   });
 
+  await supersedeReworkRequests(params, requestId);
+
   return { success: true, requestId, pendingApproval: true, message: `Approval workflow started` };
+}
+
+/**
+ * Close the requests a new one replaces: any for the same entity (and
+ * transition) still sitting in REWORK.
+ *
+ * An ECO sent back for rework is resubmitted by submitting the ECO again,
+ * which starts a fresh request. The old one used to stay in REWORK
+ * indefinitely, with a Resubmit button on the Approvals page that would put a
+ * second request for the same ECO into PENDING next to the new one. Done only
+ * once the new request exists, so a start that fails leaves the rework request
+ * and its comments where the requester left them.
+ */
+async function supersedeReworkRequests(
+  params: StartWorkflowParams,
+  replacedBy: string
+): Promise<void> {
+  const db = getServiceClient();
+  let query = db
+    .from("approval_requests")
+    .select("id")
+    .eq("tenantId", params.tenantId)
+    .eq("entityType", params.entityType)
+    .eq("entityId", params.entityId)
+    .eq("status", "REWORK");
+  query = params.transitionId
+    ? query.eq("transitionId", params.transitionId)
+    : query.is("transitionId", null);
+  const { data: reworked, error } = await query;
+  if (error) {
+    console.error(
+      `[approvals] could not look for rework requests replaced by ${replacedBy}:`,
+      error.message
+    );
+    return;
+  }
+
+  const now = new Date().toISOString();
+  for (const old of reworked ?? []) {
+    if (old.id === replacedBy) continue;
+    const closeFailed = await applied(
+      db
+        .from("approval_requests")
+        .update({ status: "RECALLED", updatedAt: now, completedAt: now })
+        .eq("id", old.id)
+        .eq("status", "REWORK"),
+      `The replaced rework request ${old.id} could not be closed`
+    );
+    if (closeFailed) {
+      console.error(`[approvals] ${closeFailed}`);
+      continue;
+    }
+    await closeOpenSeats({ requestId: old.id }, ["PENDING", "WAITING"]);
+    await addHistory(
+      old.id,
+      "SUPERSEDED",
+      params.userId,
+      "Replaced by a new approval request after rework"
+    );
+  }
 }
 
 /** Process a decision on a specific approval decision ID */
@@ -724,16 +786,23 @@ export async function recallRequest({
 
   if (!request) return { error: "Request not found" };
   if (request.requestedById !== userId) return { error: "Only the requester can recall" };
-  if (request.status !== "PENDING") return { error: "Can only recall pending requests" };
+  // A request sent back for rework can be withdrawn too. It used to be stuck:
+  // not pending, so not recallable, and only resubmittable unchanged.
+  if (request.status !== "PENDING" && request.status !== "REWORK") {
+    return { error: "Only a pending request, or one sent back for rework, can be recalled" };
+  }
 
-  const recallFailed = await applied(
-    db
-      .from("approval_requests")
-      .update({ status: "RECALLED", updatedAt: now, completedAt: now })
-      .eq("id", requestId),
-    "The request could not be recalled"
-  );
-  if (recallFailed) return { error: recallFailed };
+  // Conditional on the status just read: a decision landing in between must
+  // not be overwritten, or recorded as recalled when it was not.
+  const { data: recalled, error: recallError } = await db
+    .from("approval_requests")
+    .update({ status: "RECALLED", updatedAt: now, completedAt: now })
+    .eq("id", requestId)
+    .eq("status", request.status)
+    .select("id")
+    .maybeSingle();
+  if (recallError) return { error: `The request could not be recalled: ${recallError.message}` };
+  if (!recalled) return { error: "The request was decided before it could be recalled" };
 
   // Reset all pending/waiting decisions
   const clearFailed = await applied(
@@ -748,6 +817,14 @@ export async function recallRequest({
 
   void userFullName; // UI renders actor from user.fullName — don't double it
   await addHistory(requestId, "RECALLED", userId, `Request recalled`);
+
+  // The ECO goes back to its author. Left in SUBMITTED or IN_REVIEW with no
+  // request out, nothing stopped a Manager approving it directly from the ECO
+  // page — the multi-step workflow simply never ran (AUD-003 CHG-1).
+  if (request.entityType === "eco") {
+    const warning = await returnEcoToDraft(tenantId, request.entityId, userId, "recalled");
+    if (warning) return { success: true, warning };
+  }
 
   return { success: true };
 }
@@ -832,19 +909,30 @@ export async function rejectForRework({
 
   await addHistory(request.id, "REWORK_REQUESTED", userId, `Rework requested: "${comment}"`);
 
+  // An ECO sent back for changes has to be changeable. It used to stay in
+  // SUBMITTED, where its fields and items are read-only, so the only move
+  // left to the author was resubmitting it unchanged — and, with no request
+  // pending, a Manager could approve it directly around the workflow.
+  const isEco = request.entityType === "eco";
+  const warning = isEco
+    ? await returnEcoToDraft(tenantId, request.entityId, userId, "rework")
+    : null;
+
   // Notify the requester
   await notify({
     tenantId,
     userIds: [request.requestedById],
     title: "Rework Requested",
-    message: `${userFullName} requested changes on "${request.title}": "${comment}"`,
+    message: isEco
+      ? `${userFullName} requested changes on "${request.title}": "${comment}". It is back in Draft — make the changes and submit it again.`
+      : `${userFullName} requested changes on "${request.title}": "${comment}"`,
     type: "approval",
-    link: "/approvals",
+    link: isEco ? `/ecos/${request.entityId}` : "/approvals",
     refId: request.id,
     actorId: userId,
   });
 
-  return { success: true };
+  return warning ? { success: true, warning } : { success: true };
 }
 
 /** Resubmit after rework — resets the workflow back to step 1 */
@@ -872,6 +960,17 @@ export async function resubmitAfterRework({
   if (!request) return { error: "Request not found" };
   if (request.requestedById !== userId) return { error: "Only the requester can resubmit" };
   if (request.status !== "REWORK") return { error: "Request must be in rework status" };
+  // Rework returns the ECO to DRAFT so the changes can be made there, and
+  // submitting it again starts a fresh request (closing this one). Resetting
+  // this request instead would put it back in front of approvers while the
+  // ECO itself sits in DRAFT.
+  if (request.entityType === "eco") {
+    return {
+      error:
+        "An ECO sent back for rework is resubmitted from the ECO itself: make the changes, " +
+        "then submit it again. That starts a fresh approval.",
+    };
+  }
 
   // The requester acted on the rework notification — clear it.
   await markNotificationsReadByRef({ tenantId, userId, refId: requestId });
@@ -1300,6 +1399,64 @@ async function closeOpenSeats(scope: { requestId: string; stepId?: string }, sta
 }
 
 /**
+ * Put an ECO whose approval request was recalled or sent back for rework back
+ * into DRAFT, and audit the move.
+ *
+ * Conditional on the ECO still being in the status it was read in, and only
+ * from the statuses an approval can be out in, so an ECO that moved on
+ * meanwhile is left alone. Returns null when it moved or had nothing to do,
+ * or a message when the write failed — the caller's own action has already
+ * landed, so this is a warning, not an error.
+ */
+async function returnEcoToDraft(
+  tenantId: string,
+  ecoId: string,
+  userId: string,
+  cause: "recalled" | "rework"
+): Promise<string | null> {
+  const db = getServiceClient();
+  const { data: eco, error: readError } = await db
+    .from("ecos")
+    .select("ecoNumber, status")
+    .eq("id", ecoId)
+    .eq("tenantId", tenantId)
+    .is("deletedAt", null)
+    .maybeSingle();
+  if (readError) {
+    return `The ECO could not be read to move it back to Draft: ${readError.message}`;
+  }
+  if (!eco || !ecoAwaitsApproval(eco.status)) return null;
+
+  const { data: moved, error: moveError } = await db
+    .from("ecos")
+    .update({ status: "DRAFT", updatedAt: new Date().toISOString() })
+    .eq("id", ecoId)
+    .eq("tenantId", tenantId)
+    .eq("status", eco.status)
+    .select("id")
+    .maybeSingle();
+  if (moveError) {
+    return `${eco.ecoNumber} could not be moved back to Draft: ${moveError.message}`;
+  }
+  if (!moved) return null;
+
+  await logAudit({
+    tenantId,
+    userId,
+    action: "eco.status_change",
+    entityType: "eco",
+    entityId: ecoId,
+    details: {
+      ecoNumber: eco.ecoNumber,
+      from: eco.status,
+      to: "DRAFT",
+      reason: cause === "recalled" ? "approval_request_recalled" : "rework_requested",
+    },
+  });
+  return null;
+}
+
+/**
  * Remove a request that failed partway through creation, seats first.
  * Returns null when it is gone, or the reason it is not.
  */
@@ -1369,6 +1526,40 @@ export async function getRequestTimeline(requestId: string) {
     .order("createdAt");
 
   return data || [];
+}
+
+/**
+ * The active workflow ECO approvals go through, if the tenant has assigned one
+ * to either ECO trigger. While one exists an ECO is decided by its approval
+ * request, never directly from the ECO page.
+ *
+ * Throws on a failed lookup rather than returning null: null would read as
+ * "no workflow" and let a direct approval through, which is the bypass this
+ * exists to close.
+ */
+export async function findEcoApprovalWorkflow(
+  tenantId: string
+): Promise<{ id: string; name: string } | null> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from("approval_workflow_assignments")
+    .select(
+      "ecoTrigger, workflow:approval_workflows!approval_workflow_assignments_workflowId_fkey(id, name, isActive)"
+    )
+    .eq("tenantId", tenantId)
+    .in("ecoTrigger", [...ECO_STATUSES_AWAITING_APPROVAL]);
+  if (error) {
+    throw new Error(`Could not check whether ECOs have an approval workflow: ${error.message}`);
+  }
+  for (const assignment of data ?? []) {
+    const workflow = assignment.workflow as unknown as {
+      id: string;
+      name: string;
+      isActive: boolean;
+    } | null;
+    if (workflow?.isActive) return { id: workflow.id, name: workflow.name };
+  }
+  return null;
 }
 
 /** Find the workflow assigned to a transition or ECO trigger */

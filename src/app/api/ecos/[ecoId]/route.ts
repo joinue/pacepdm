@@ -2,7 +2,11 @@ import { withTenant, badRequest, notFound, forbidden, conflict } from "@/lib/api
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
-import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
+import {
+  startWorkflow,
+  findWorkflowForTrigger,
+  findEcoApprovalWorkflow,
+} from "@/lib/approval-engine";
 import { ECO_STATUS_FLOW as VALID_TRANSITIONS, ecoAwaitsApproval } from "@/lib/status-flows";
 import { z, optionalString, uuid } from "@/lib/validation";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
@@ -293,6 +297,27 @@ export const PUT = withTenant(
           `Moving an ECO to ${status} requires the "Approve ECOs" permission. ` +
             `Ask an approver to decide it.`
         );
+      }
+
+      // While the tenant routes ECO approvals through a workflow, approving
+      // one is the workflow's job. The pending-request check above only covered
+      // an ECO whose request was still out: once a request was recalled or sent
+      // back for rework, the ECO sat in SUBMITTED or IN_REVIEW with nothing
+      // pending, and a Manager could approve it here — the multi-step workflow
+      // never ran (AUD-003 CHG-1). Recall and rework now return the ECO to
+      // DRAFT; this refuses what is left, including an ECO submitted before the
+      // workflow was assigned. A direct rejection stays allowed: it releases
+      // nothing, and REJECTED → DRAFT is how such an ECO gets back in line.
+      if (status === "APPROVED") {
+        const governing = await findEcoApprovalWorkflow(tenantUser.tenantId);
+        if (governing) {
+          throw conflict(
+            `ECO approvals go through the "${governing.name}" workflow, so ${eco.ecoNumber} ` +
+              `cannot be approved directly. Its approvers decide it on the Approvals page once ` +
+              `it has been submitted into that workflow; if it was submitted before the ` +
+              `workflow existed, reject it and submit it again.`
+          );
+        }
       }
 
       // Self-approval, if the tenant has turned it off.

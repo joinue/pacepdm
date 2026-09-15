@@ -642,7 +642,9 @@ describe("recallRequest", () => {
       userId: "user-1",
       userFullName: "John Doe",
     });
-    expect(result.error).toBe("Can only recall pending requests");
+    expect(result.error).toBe(
+      "Only a pending request, or one sent back for rework, can be recalled"
+    );
   });
 
   it("succeeds when requester recalls their pending request", async () => {
@@ -2180,6 +2182,233 @@ describe("resubmitAfterRework", () => {
       userId: "user-1",
       refId: "req-1",
     });
+  });
+});
+
+// ── Recall and rework return an ECO to its author (AUD-003 CHG-1) ───────────
+
+/**
+ * Recalling or reworking an ECO's request used to leave the ECO in SUBMITTED
+ * or IN_REVIEW with nothing pending. Its fields and items are read-only there,
+ * so the author could not make the changes asked for — and a Manager could
+ * approve it directly from the ECO page, so the multi-step workflow never ran.
+ */
+describe("recall and rework send an ECO back to DRAFT", () => {
+  beforeEach(resetMockState);
+
+  const recall = {
+    requestId: "req-1",
+    tenantId: "tenant-1",
+    userId: "user-1",
+    userFullName: "Alice",
+  };
+
+  function givenEcoRequest(status: "PENDING" | "REWORK", ecoStatus = "IN_REVIEW") {
+    tableResults["approval_requests"] = {
+      data: {
+        id: "req-1",
+        tenantId: "tenant-1",
+        requestedById: "user-1",
+        entityType: "eco",
+        entityId: "eco-1",
+        status,
+      },
+      error: null,
+    };
+    tableResults["ecos"] = { data: { ecoNumber: "ECO-0042", status: ecoStatus }, error: null };
+  }
+
+  it("moves a recalled ECO back to DRAFT, conditionally, and audits it", async () => {
+    givenEcoRequest("PENDING", "IN_REVIEW");
+
+    expect(await recallRequest(recall)).toEqual({ success: true });
+
+    const move = lastUpdate("ecos")!;
+    expect(move.data).toMatchObject({ status: "DRAFT" });
+    expect(move.filters).toMatchObject({ id: "eco-1", tenantId: "tenant-1", status: "IN_REVIEW" });
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "eco.status_change",
+        entityId: "eco-1",
+        details: expect.objectContaining({
+          from: "IN_REVIEW",
+          to: "DRAFT",
+          reason: "approval_request_recalled",
+        }),
+      })
+    );
+  });
+
+  it("recalls a request that was sent back for rework", async () => {
+    givenEcoRequest("REWORK", "SUBMITTED");
+    expect(await recallRequest(recall)).toEqual({ success: true });
+    expect(lastUpdate("approval_requests")!.filters).toMatchObject({ status: "REWORK" });
+  });
+
+  it("does not record a recall that lost its race with a decision", async () => {
+    givenEcoRequest("PENDING");
+    claimResult.current = (table) =>
+      table === "approval_requests"
+        ? { data: null, error: null }
+        : { data: { id: "x" }, error: null };
+
+    const result = await recallRequest(recall);
+
+    expect(result).toEqual({ error: "The request was decided before it could be recalled" });
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(insertCalls.filter((c) => c.table === "approval_history")).toHaveLength(0);
+  });
+
+  it("leaves an ECO alone that has already moved on", async () => {
+    givenEcoRequest("REWORK", "DRAFT");
+    expect(await recallRequest(recall)).toEqual({ success: true });
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+  });
+
+  it("reports, without undoing the recall, an ECO that could not be moved", async () => {
+    givenEcoRequest("PENDING", "SUBMITTED");
+    claimResult.current = (table) =>
+      table === "ecos"
+        ? { data: null, error: { message: "connection reset" } }
+        : { data: { id: "req-1" }, error: null };
+
+    const result = await recallRequest(recall);
+
+    expect(result).toMatchObject({
+      success: true,
+      warning: expect.stringMatching(/ECO-0042.*Draft/),
+    });
+  });
+
+  it("does not touch ECOs when a file request is recalled", async () => {
+    tableResults["approval_requests"] = {
+      data: {
+        id: "req-1",
+        requestedById: "user-1",
+        entityType: "file",
+        entityId: "f-1",
+        status: "PENDING",
+      },
+      error: null,
+    };
+    await recallRequest(recall);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+  });
+
+  it("sends a reworked ECO back to DRAFT and points its author at the ECO", async () => {
+    givenDecision({ request: { entityType: "eco", entityId: "eco-1" } });
+    tableResults["ecos"] = { data: { ecoNumber: "ECO-0042", status: "SUBMITTED" }, error: null };
+
+    const result = await rejectForRework({
+      decisionId: "dec-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "Alice",
+      comment: "Add the drawing revision",
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(lastUpdate("ecos")!.data).toMatchObject({ status: "DRAFT" });
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ details: expect.objectContaining({ reason: "rework_requested" }) })
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        link: "/ecos/eco-1",
+        message: expect.stringContaining("back in Draft"),
+      })
+    );
+  });
+
+  it("refuses to resubmit an ECO request from the Approvals page", async () => {
+    tableResults["approval_requests"] = {
+      data: {
+        id: "req-1",
+        requestedById: "user-1",
+        status: "REWORK",
+        entityType: "eco",
+        entityId: "eco-1",
+      },
+      error: null,
+    };
+
+    const result = await resubmitAfterRework(recall);
+
+    expect(result.error).toMatch(/resubmitted from the ECO itself/);
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
+/**
+ * Submitting a reworked ECO starts a fresh request. The old one used to stay
+ * in REWORK with a Resubmit button that would put a second request for the
+ * same ECO into PENDING beside the new one.
+ */
+describe("startWorkflow closes the rework requests a new request replaces", () => {
+  beforeEach(resetMockState);
+
+  const ecoParams = {
+    ...baseParams,
+    type: "ECO",
+    entityType: "eco",
+    entityId: "eco-1",
+    transitionId: undefined,
+    title: "ECO ECO-0042: Bracket change",
+  };
+
+  function oneStepWorkflow() {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Approval",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Engineering" },
+        },
+      ],
+      error: null,
+    };
+  }
+
+  it("marks the old rework request RECALLED once the new request exists", async () => {
+    oneStepWorkflow();
+    tableResults["approval_requests"] = (filters) =>
+      filters.status === "REWORK"
+        ? { data: [{ id: "req-old" }], error: null }
+        : { data: null, error: null };
+
+    const result = await startWorkflow(ecoParams);
+
+    expect(result.success).toBe(true);
+    const closed = updateCalls.find(
+      (c) => c.table === "approval_requests" && c.filters.id === "req-old"
+    )!;
+    expect(closed.data).toMatchObject({ status: "RECALLED" });
+    expect(closed.filters).toMatchObject({ status: "REWORK" });
+    expect(
+      insertCalls.find(
+        (c) =>
+          c.table === "approval_history" &&
+          (c.data as Record<string, unknown>).requestId === "req-old" &&
+          (c.data as Record<string, unknown>).event === "SUPERSEDED"
+      )
+    ).toBeDefined();
+  });
+
+  it("leaves the rework request alone when the new request fails to start", async () => {
+    tableResults["approval_workflow_steps"] = { data: [], error: null };
+    tableResults["approval_requests"] = (filters) =>
+      filters.status === "REWORK"
+        ? { data: [{ id: "req-old" }], error: null }
+        : { data: null, error: null };
+
+    const result = await startWorkflow(ecoParams);
+
+    expect(result.success).toBe(false);
+    expect(updateCalls.filter((c) => c.table === "approval_requests")).toHaveLength(0);
   });
 });
 

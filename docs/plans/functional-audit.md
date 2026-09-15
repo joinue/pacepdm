@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stages 3–4 queued
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1 done)
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -643,8 +643,8 @@ roughly this order within an area.
 - `implement_eco` (migration 049) bumps part revisions with `chr(ascii+1)`, onto
   reserved letters, and audits a skipped checked-out file as transitioned. Needs
   a migration.
-- A PUT that combines field edits with a status change drops the fields; a
-  REWORK request cannot be recalled.
+- A PUT that combines field edits with a status change drops the fields. ~~A
+  REWORK request cannot be recalled.~~ Fixed 2026-09-15 with CHG-1, below.
 
 **BOMs**
 
@@ -892,11 +892,48 @@ offsets as valid streams.
 
 **Stage 2 is done in code.** Nothing from the Stage 2 list is left. Before loading the real vault, check in a browser: a 60 MB upload shows progress and arrives; a drop of a folder with subfolders recreates them; a 70-file folder zips; a CSV imports into an existing BOM.
 
-### Stages 3–4 — not started
+### Stage 3 — before the product is the release record. In progress
 
-- **Stage 3, before the product is the release record.** Recall and rework
-  leave an ECO where it can be approved directly, skipping its workflow
-  (CHG-1); files on an approved ECO are not locked and implement reports
+**CHG-1, recall and rework left an ECO open to direct approval — done
+2026-09-15.**
+
+- Recalling or reworking an ECO's request now returns the ECO to DRAFT (a
+  conditional write, audited as `eco.status_change` with the reason). It used
+  to stay in SUBMITTED or IN_REVIEW with nothing pending: read-only for its
+  author, so rework could only be resubmitted unchanged, and approvable
+  directly by a Manager, so the workflow never ran.
+- A reworked ECO is resubmitted by submitting the ECO again, which starts a
+  fresh request; `startWorkflow` then closes any request for the same entity
+  still in REWORK (as RECALLED, with a SUPERSEDED history row) — for file
+  transitions too, which had the same second-request hole. Resubmitting an ECO
+  request from the Approvals page is refused with that instruction. The rework
+  notification links to the ECO.
+- A request in REWORK can now be recalled (A5b above).
+- Recall is conditional on the request's status, so a decision landing first
+  is not overwritten or recorded as recalled.
+- `PUT /api/ecos/[ecoId]` refuses a direct move to APPROVED while any active
+  workflow is assigned to an ECO trigger (`findEcoApprovalWorkflow`, which
+  throws on a failed lookup instead of reading it as "no workflow"). Direct
+  rejection stays allowed: it releases nothing, and REJECTED → DRAFT is the way
+  back for an ECO that was stuck before this fix.
+- Not done: the ECO page still shows Approve to approvers when a workflow
+  governs; clicking it now returns a 409 naming the workflow. Hiding it belongs
+  with UI-6.
+
+To find ECOs stuck by the old behaviour — waiting in SUBMITTED or IN_REVIEW
+with no request pending — run this read-only query; each can be rejected and
+resubmitted, or approved through the workflow after resubmission:
+
+```sql
+select e."tenantId", e."ecoNumber", e.status from ecos e
+where e.status in ('SUBMITTED', 'IN_REVIEW') and e."deletedAt" is null
+  and not exists (select 1 from approval_requests r
+    where r."entityType" = 'eco' and r."entityId" = e.id and r.status = 'PENDING');
+```
+
+### Stages 3–4 — still to do
+
+- **Stage 3, before the product is the release record.** Files on an approved ECO are not locked and implement reports
   partial work as success (CHG-2); an approved ECO whose implement fails has no
   exit (CHG-3); parts can be set Released or re-lettered with `file.edit`
   (CHG-4); lifecycle edits silently remove approval gates, and the gate fails

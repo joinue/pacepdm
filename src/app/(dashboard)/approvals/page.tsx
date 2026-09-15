@@ -269,11 +269,13 @@ export default function ApprovalsPage() {
 
   async function handleRecall(requestId: string) {
     try {
-      await fetchJson("/api/approvals/requests", {
+      const result = await fetchJson<{ warning?: string }>("/api/approvals/requests", {
         method: "POST",
         body: { requestId, action: "recall" },
       });
       toast.success("Request recalled");
+      // The recall landed but the ECO could not be put back into Draft.
+      if (result.warning) toast.warning(result.warning);
       refreshApprovals();
     } catch (err) {
       toast.error(errorMessage(err));
