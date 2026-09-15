@@ -58,6 +58,15 @@ import type { FileWhereUsed } from "@/lib/where-used";
 import { CadViewer } from "@/components/vault/cad-viewer-lazy";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { Link as LinkIcon } from "lucide-react";
+import {
+  dirtyFields,
+  discardChanges,
+  markSaved,
+  mergeRefresh,
+  propertiesFromFile,
+  type FileProperties,
+  type PropertiesForm,
+} from "./file-properties-draft";
 
 // Labels, the category list, and the extension mapping all come from
 // lib/file-categories.ts. They used to be restated here and in the upload
@@ -424,11 +433,18 @@ export function FileDetailPanel({
   userId,
   isAdmin = false,
   layout = "full",
+  onDirtyChange,
 }: {
   fileId: string;
   metadataFields: MetadataFieldDef[];
   onClose: () => void;
   onRefresh: () => void;
+  /**
+   * Told whenever the panel starts or stops holding unsaved property edits, so
+   * the page can ask before navigating away from them. Called with `false` on
+   * unmount.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
   onCheckIn?: () => void;
   onChangeState?: () => void;
   onRename?: () => void;
@@ -441,10 +457,12 @@ export function FileDetailPanel({
   const [file, setFile] = useState<FileDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [partNumber, setPartNumber] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [metadataValues, setMetadataValues] = useState<Record<string, string>>({});
+  // Part Number, Description, Category and custom properties: what the inputs
+  // show, and what the server last said. See file-properties-draft.ts for why
+  // a refresh no longer simply overwrites them.
+  const [form, setForm] = useState<PropertiesForm | null>(null);
+  const draft = form?.draft;
+  const dirty = dirtyFields(form).length > 0;
   const [whereUsedData, setWhereUsedData] = useState<FileWhereUsed | null>(null);
   const [linkedParts, setLinkedParts] = useState<
     {
@@ -501,15 +519,9 @@ export function FileDetailPanel({
         ]);
         if (signal?.aborted) return;
         setFile(data);
-        setPartNumber(data.partNumber || "");
-        setDescription(data.description || "");
-        setCategory(data.category || "");
-
-        const values: Record<string, string> = {};
-        for (const mv of data.metadata) {
-          values[mv.fieldId] = mv.value;
-        }
-        setMetadataValues(values);
+        // Fields the user is editing keep their text; everything else takes
+        // the server's value.
+        setForm((prev) => mergeRefresh(prev, fileId, propertiesFromFile(data)));
         setWhereUsedData(wu ?? null);
         setRevisions(Array.isArray(revs) ? revs : []);
         setLinkedParts(Array.isArray(parts) ? parts : []);
@@ -575,30 +587,63 @@ export function FileDetailPanel({
     onChange: refreshFromRemote,
   });
 
+  // Tell the page whether there is anything to lose, so leaving the file (the
+  // back button, a breadcrumb, Cmd-K to another file) can ask first. Read
+  // through a ref so a parent passing a fresh callback each render does not
+  // re-run this.
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange;
+  }, [onDirtyChange]);
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty);
+  }, [dirty]);
+  useEffect(() => () => onDirtyChangeRef.current?.(false), []);
+
+  // Closing the tab or reloading the page with edits in the panel.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const updateDraft = useCallback((change: (draft: FileProperties) => FileProperties) => {
+    setForm((prev) => (prev ? { ...prev, draft: change(prev.draft) } : prev));
+  }, []);
+
   async function handleSaveMetadata() {
+    if (!form) return;
+    // What was sent becomes the server's value on success. Anything typed
+    // while the request is out stays marked as unsaved.
+    const sent = form.draft;
     setSaving(true);
     try {
-      const metadata = Object.entries(metadataValues)
+      const metadata = Object.entries(sent.metadata)
         .filter(([, value]) => value !== "")
         .map(([fieldId, value]) => ({ fieldId, value }));
 
-      const res = await fetch(`/api/files/${fileId}/metadata`, {
+      await fetchJson(`/api/files/${fileId}/metadata`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partNumber, description, category, metadata }),
+        body: {
+          partNumber: sent.partNumber,
+          description: sent.description,
+          category: sent.category,
+          metadata,
+        },
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || "Failed to save");
-      } else {
-        toast.success("Metadata saved");
-        onRefresh();
-      }
-    } catch {
-      toast.error("Failed to save metadata");
+      setForm((prev) => (prev ? markSaved(prev, sent) : prev));
+      toast.success("Properties saved");
+      void refreshAfterWrite();
+      onRefresh();
+    } catch (err) {
+      toast.error(`Could not save properties: ${errorMessage(err)}`);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   function handleDownload(version?: number) {
@@ -709,7 +754,7 @@ export function FileDetailPanel({
     void refreshAfterWrite();
   }
 
-  if (loading || !file) {
+  if (loading || !file || !draft) {
     return (
       <div className="flex items-center justify-center p-12 text-muted-foreground text-sm h-full">
         Loading...
@@ -838,8 +883,8 @@ export function FileDetailPanel({
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
               <Select
-                value={category}
-                onValueChange={(v) => setCategory(v ?? "")}
+                value={draft.category}
+                onValueChange={(v) => updateDraft((d) => ({ ...d, category: v ?? "" }))}
                 disabled={editDisabled}
               >
                 <SelectTrigger className="h-8 text-sm">
@@ -979,8 +1024,11 @@ export function FileDetailPanel({
               </Label>
               <Input
                 id="pn"
-                value={partNumber}
-                onChange={(e) => setPartNumber(e.target.value)}
+                value={draft.partNumber}
+                onChange={(e) => {
+                  const partNumber = e.target.value;
+                  updateDraft((d) => ({ ...d, partNumber }));
+                }}
                 className="h-8 text-sm"
                 disabled={editDisabled}
               />
@@ -991,8 +1039,11 @@ export function FileDetailPanel({
               </Label>
               <Textarea
                 id="desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                value={draft.description}
+                onChange={(e) => {
+                  const description = e.target.value;
+                  updateDraft((d) => ({ ...d, description }));
+                }}
                 className="text-sm"
                 rows={2}
                 disabled={editDisabled}
@@ -1006,15 +1057,20 @@ export function FileDetailPanel({
           <div className="space-y-3">
             {metadataFields.map((field) => (
               <div key={field.id} className="space-y-1">
-                <Label className="text-xs">{field.name}</Label>
+                <Label htmlFor={`meta-${field.id}`} className="text-xs">
+                  {field.name}
+                </Label>
                 {field.fieldType === "SELECT" && field.options ? (
                   <Select
-                    value={metadataValues[field.id] || ""}
+                    value={draft.metadata[field.id] || ""}
                     onValueChange={(v) =>
-                      setMetadataValues((prev) => ({ ...prev, [field.id]: v ?? "" }))
+                      updateDraft((d) => ({
+                        ...d,
+                        metadata: { ...d.metadata, [field.id]: v ?? "" },
+                      }))
                     }
                   >
-                    <SelectTrigger className="h-8 text-sm">
+                    <SelectTrigger id={`meta-${field.id}`} className="h-8 text-sm">
                       <SelectValue placeholder="Select..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -1027,17 +1083,43 @@ export function FileDetailPanel({
                   </Select>
                 ) : (
                   <Input
+                    id={`meta-${field.id}`}
                     type={field.fieldType === "NUMBER" ? "number" : "text"}
-                    value={metadataValues[field.id] || ""}
-                    onChange={(e) =>
-                      setMetadataValues((prev) => ({ ...prev, [field.id]: e.target.value }))
-                    }
+                    value={draft.metadata[field.id] || ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      updateDraft((d) => ({
+                        ...d,
+                        metadata: { ...d.metadata, [field.id]: value },
+                      }));
+                    }}
                     className="h-8 text-sm"
                   />
                 )}
               </div>
             ))}
           </div>
+
+          {form?.changedElsewhere && (
+            <div
+              role="status"
+              className="bg-warning/10 border border-warning/30 rounded p-2 text-xs space-y-1.5"
+            >
+              <p>
+                Someone else changed this file&apos;s properties while you were editing. Your
+                unsaved changes are still here; saving will overwrite theirs.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setForm((prev) => (prev ? discardChanges(prev) : prev))}
+              >
+                <RotateCcw className="w-3 h-3 mr-1" />
+                Discard mine and reload
+              </Button>
+            </div>
+          )}
 
           <Button
             onClick={handleSaveMetadata}
@@ -1048,6 +1130,9 @@ export function FileDetailPanel({
             <Save className="w-4 h-4 mr-2" />
             {saving ? "Saving..." : "Save Properties"}
           </Button>
+          {dirty && !saving && (
+            <p className="text-xs text-muted-foreground text-center">Unsaved changes</p>
+          )}
 
           {whereUsedData &&
             whereUsedData.boms.length +

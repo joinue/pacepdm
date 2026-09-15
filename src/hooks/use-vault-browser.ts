@@ -78,7 +78,8 @@ export function useVaultBrowser({ rootFolderId, userId, userFullName }: UseVault
   const fileActions = useFileActions({
     refresh,
     selectedFile: navigation.selectedFile,
-    onSelectedFileDeleted: () => navigation.selectFile(null),
+    // The file is gone, so there is nothing left to save: no leave check.
+    onSelectedFileDeleted: () => navigation.selectFile(null, { force: true }),
     rootFolderId,
     currentUser: { id: userId, fullName: userFullName },
     patchFile: contents.patchFile,
@@ -124,6 +125,7 @@ export function useVaultBrowser({ rootFolderId, userId, userFullName }: UseVault
     navigateToBreadcrumb: navigation.navigateToBreadcrumb,
     enterFlatView: navigation.enterFlatView,
     exitFlatView: navigation.exitFlatView,
+    setLeaveGuard: navigation.setLeaveGuard,
 
     // Contents
     folders: contents.folders,

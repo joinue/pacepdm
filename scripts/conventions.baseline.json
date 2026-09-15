@@ -223,8 +223,7 @@
     "raw-fetch": 1
   },
   "src/components/vault/file-detail-panel.tsx": {
-    "generic-error-toast": 1,
-    "raw-fetch": 10
+    "raw-fetch": 9
   },
   "src/components/vault/folder-access-dialog.tsx": {
     "swallowed-error": 1

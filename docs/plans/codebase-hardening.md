@@ -6,11 +6,11 @@
 routes-total: 115
 routes-wrapped: 56
 unwrapped-route: 286
-raw-fetch: 35
-generic-error-toast: 5
+raw-fetch: 34
+generic-error-toast: 4
 swallowed-error: 6
 token-violations: 6
-component-tests: 14-->
+component-tests: 16-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -95,10 +95,10 @@ npm run probe:rls                                      # live RLS posture
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
 | Routes on `withTenant`                | 0                | **56 / 115**                          | 115                                                   |
-| `raw-fetch` in client components      | 112              | **35**                                | 0                                                     |
-| `generic-error-toast`                 | 14               | **5**                                 | 0                                                     |
+| `raw-fetch` in client components      | 112              | **34**                                | 0                                                     |
+| `generic-error-toast`                 | 14               | **4**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
-| Component tests                       | 0                | **14** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
+| Component tests                       | 0                | **16** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
 | Route segments with `error.tsx`       | 0                | **4** + `global-error`                | every segment that fetches                            |
 
 ### How the ratchet works
@@ -195,7 +195,7 @@ Things that will trip you up:
 - **Helpers that take a raw client** (`captureBomSnapshot`, `getFileWhereUsed`, `getReleaseById`) need `db.unscoped("reason")`. They scope by the `tenantId` you pass them.
 - **Add a case to `src/app/api/tenant-isolation.test.ts`** for any route that resolves a record by id. That file is the registry of what is proven safe.
 
-### 2. Adopt `useFetch` / `fetchJson` — 35 sites
+### 2. Adopt `useFetch` / `fetchJson` — 34 sites
 
 ```bash
 node scripts/lint-conventions.mjs --list raw-fetch

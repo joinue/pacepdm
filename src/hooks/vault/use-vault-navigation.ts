@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchJson, isAbortError, errorMessage } from "@/lib/api-client";
 import type { BreadcrumbEntry } from "@/components/vault/vault-types";
@@ -56,6 +56,19 @@ export function useVaultNavigation(rootFolderId: string) {
     searchParams.get("fileId") || null
   );
 
+  // Asked before any navigation that would close the open file. The detail
+  // panel holds unsaved property edits, and every way out of it — the back
+  // button, a breadcrumb, a flat view — used to drop them without a word.
+  const leaveGuardRef = useRef<(() => boolean) | null>(null);
+  /**
+   * Register the check (or `null` to remove it). It returns true when leaving
+   * is fine — nothing unsaved, or the user agreed to discard it.
+   */
+  const setLeaveGuard = useCallback((guard: (() => boolean) | null) => {
+    leaveGuardRef.current = guard;
+  }, []);
+  const mayLeaveFile = useCallback(() => leaveGuardRef.current?.() ?? true, []);
+
   // URL is the source of truth for sharing/deep-linking, so every state
   // transition below routes through `updateUrl`. The `view` param takes
   // precedence over `folderId` — a flat view is conceptually rootless,
@@ -77,6 +90,7 @@ export function useVaultNavigation(rootFolderId: string) {
 
   const navigateToFolder = useCallback(
     (folder: NavigableFolder) => {
+      if (!mayLeaveFile()) return;
       setViewMode("folder");
       setCurrentFolderId(folder.id);
       setBreadcrumbs((prev) => {
@@ -89,11 +103,12 @@ export function useVaultNavigation(rootFolderId: string) {
       setSelectedFile(null);
       updateUrl("folder", folder.id, null);
     },
-    [rootFolderId, updateUrl]
+    [rootFolderId, updateUrl, mayLeaveFile]
   );
 
   const navigateToBreadcrumb = useCallback(
     (index: number) => {
+      if (!mayLeaveFile()) return;
       const next = breadcrumbs.slice(0, index + 1);
       const entry = next[next.length - 1];
       setViewMode("folder");
@@ -102,15 +117,20 @@ export function useVaultNavigation(rootFolderId: string) {
       setSelectedFile(null);
       updateUrl("folder", entry.id, null);
     },
-    [breadcrumbs, updateUrl]
+    [breadcrumbs, updateUrl, mayLeaveFile]
   );
 
+  /**
+   * Open a file, or close the open one with `null`. `force` skips the leave
+   * check, for when the file is gone anyway (it was just deleted).
+   */
   const selectFile = useCallback(
-    (fileId: string | null) => {
+    (fileId: string | null, options: { force?: boolean } = {}) => {
+      if (fileId !== selectedFile && !options.force && !mayLeaveFile()) return;
       setSelectedFile(fileId);
       updateUrl(viewMode, currentFolderId, fileId);
     },
-    [viewMode, currentFolderId, updateUrl]
+    [viewMode, currentFolderId, updateUrl, selectedFile, mayLeaveFile]
   );
 
   /**
@@ -120,11 +140,12 @@ export function useVaultNavigation(rootFolderId: string) {
    */
   const enterFlatView = useCallback(
     (view: FlatView) => {
+      if (!mayLeaveFile()) return;
       setViewMode(view);
       setSelectedFile(null);
       updateUrl(view, currentFolderId, null);
     },
-    [currentFolderId, updateUrl]
+    [currentFolderId, updateUrl, mayLeaveFile]
   );
 
   /**
@@ -132,10 +153,11 @@ export function useVaultNavigation(rootFolderId: string) {
    * whatever folder the user was in before entering the flat view.
    */
   const exitFlatView = useCallback(() => {
+    if (!mayLeaveFile()) return;
     setViewMode("folder");
     setSelectedFile(null);
     updateUrl("folder", currentFolderId, null);
-  }, [currentFolderId, updateUrl]);
+  }, [currentFolderId, updateUrl, mayLeaveFile]);
 
   /**
    * Hydrates the breadcrumb trail when a user deep-links to a nested folder
@@ -176,6 +198,7 @@ export function useVaultNavigation(rootFolderId: string) {
     enterFlatView,
     exitFlatView,
     hydrateBreadcrumbsFromDeepLink,
+    setLeaveGuard,
   };
 }
 

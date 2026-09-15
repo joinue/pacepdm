@@ -24,6 +24,9 @@ import { TrashList } from "./trash-list";
 import { VaultDialogs } from "./vault-dialogs";
 import type { MetadataFieldDef } from "./vault-types";
 
+const UNSAVED_PROPERTIES_PROMPT =
+  "This file has property changes that have not been saved. Leave and discard them?";
+
 export function VaultBrowser({
   rootFolderId,
   metadataFields,
@@ -40,6 +43,15 @@ export function VaultBrowser({
   });
   const { can } = usePermissions();
   const { clearRef } = useNotifications();
+
+  // Unsaved property edits in the detail panel. Every navigation that would
+  // close the file asks first; see `setLeaveGuard` in use-vault-navigation.
+  const [panelDirty, setPanelDirty] = useState(false);
+  const { setLeaveGuard } = vault;
+  useEffect(() => {
+    setLeaveGuard(panelDirty ? () => window.confirm(UNSAVED_PROPERTIES_PROMPT) : null);
+    return () => setLeaveGuard(null);
+  }, [panelDirty, setLeaveGuard]);
 
   // When a file is opened in the detail panel, auto-clear its unread
   // notifications — consistent with BOM and ECO detail views.
@@ -173,6 +185,7 @@ export function VaultBrowser({
             }
           : undefined,
         isAdmin: can("admin.settings") || can("*"),
+        onDirtyChange: setPanelDirty,
       }
     : null;
 

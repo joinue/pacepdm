@@ -887,8 +887,9 @@ offsets as valid streams.
 - **BOM-1, CSV import into an existing BOM — done.** The `items` key now decides the schema, so a bad batch is a 400 instead of one blank line. The client parser (`boms/bom-csv-import.ts`, on `parseCsv`) matches headers exactly, including SOLIDWORKS names like `ITEM NO.` and `QTY.`, refuses bad quantities with a reason instead of coercing them, and skips Level > 1 rows so a re-imported export does not double-count. Part numbers link to the tenant's parts, chunked.
 - **BOM-2, LOCKED cost source — done.** Part edits are refused only when the cost would actually change (`unitCostWouldChange`), the form stops sending cost under the lock, create refuses a cost, and the CSV importer skips cost and says so. The QuickBooks importer still writes cost under the lock, on the reading that QuickBooks is the system the lock defers to — confirm.
 - **BOM-7, AUTO part numbering — done.** On a collision the next number is moved past the highest existing number the prefix and padding could produce (trash included — trashed parts keep their number under the unique index), using PostgREST's regex `match` operator, with the same compare-and-swap. Manual numbers and CSV imports advance the counter. Not yet checked against production PostgREST; if `match` is refused, creation falls back to stepping one number at a time.
+- **UI-2, unsaved panel edits — done.** A refresh updates only fields the user has not changed (`file-properties-draft.ts`); a concurrent change to a field being edited shows a notice with a reload option. The vault warns before in-vault navigation or closing the tab with unsaved edits. Navigating to another app page from the sidebar still does not warn.
 
-**Still to do in Stage 2:** unsaved panel edits (UI-2), record links (UI-3).
+**Still to do in Stage 2:** record links (UI-3).
 
 ### Stages 3–4 — not started
 
