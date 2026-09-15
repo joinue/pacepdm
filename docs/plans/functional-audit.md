@@ -559,6 +559,24 @@ pages through all of them.
 the app's `/auth/confirm`, not `supabase.co/auth/v1/verify`. Anyone invited
 before this who could not get in needs removing and re-inviting.
 
+### ~~F. ECO numbers came from a row count~~ Fixed 2026-09-14
+
+`POST /api/ecos` numbered the next ECO `count + 1`, which assumes numbers run
+1..count with no gaps. Two creates at once read the same count, and the loser's
+23505 on `ecos_tenantId_ecoNumber_key` went to a handler that assumed every
+unique violation was the idempotency key — a 500. Worse, any gap is permanent:
+ECOs were hard-deleted until soft delete arrived (cf39805, 2026-04-17), so a
+tenant that deleted one before then has `count + 1` equal to a number it
+already holds, and **every** create collides.
+
+The next number is now one past the highest ever issued, soft-deleted rows
+included; a collision on the number index — told apart from the key index by
+constraint name, never by key text — retries with the next free number. Part
+AUTO numbers were already safe (a compare-and-swap counter on `tenants`).
+
+To find a tenant wedged by this before deploy:
+`select "tenantId", count(*), max(substring("ecoNumber" from '^ECO-(\d+)$')::int) from ecos group by 1 having count(*) <> max(substring("ecoNumber" from '^ECO-(\d+)$')::int)`.
+
 ---
 
 ## Related

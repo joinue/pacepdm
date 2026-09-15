@@ -14,6 +14,29 @@ const CreateEcoSchema = z.object({
   changeType: optionalString,
 });
 
+const ECO_NUMBER_PATTERN = /^ECO-(\d+)$/;
+const ECO_NUMBER_ATTEMPTS = 5;
+// PostgREST's default max-rows. A page shorter than this is the last one.
+const ECO_NUMBER_PAGE_SIZE = 1000;
+
+function formatEcoNumber(sequence: number): string {
+  return `ECO-${String(sequence).padStart(4, "0")}`;
+}
+
+/**
+ * Is this a unique violation on (tenantId, ecoNumber), as opposed to the
+ * idempotency-key index? Both are 23505, and only this one means "pick
+ * another number". Read from the constraint name in the message and the
+ * column list in the details, never from the key values — those include the
+ * client's idempotency key, which could contain any text.
+ */
+function isEcoNumberCollision(error: { code?: string; message?: string; details?: string }) {
+  if (error.code !== "23505") return false;
+  const constraint = /unique constraint "([^"]+)"/.exec(error.message ?? "")?.[1] ?? "";
+  const columns = /^Key \(([^)]*)\)=/.exec(error.details ?? "")?.[1] ?? "";
+  return constraint.includes("ecoNumber") || columns.includes("ecoNumber");
+}
+
 export async function GET() {
   try {
     const tenantUser = await getApiTenantUser();
@@ -70,41 +93,79 @@ export async function POST(request: NextRequest) {
       if (existing) return NextResponse.json(existing);
     }
 
-    // Generate ECO number based on total count for this tenant.
-    // Deliberately counts soft-deleted ECOs too: excluding them would
-    // make the next ECO reuse a number that already exists on a deleted
-    // row, and ECO numbers appear on released documentation.
-    const { count } = await db
-      .from("ecos")
-      .select("*", { count: "exact", head: true })
-      .eq("tenantId", tenantUser.tenantId);
+    // The next ECO number is one past the highest this tenant has ever
+    // issued, soft-deleted rows included: ECO numbers appear on released
+    // documentation, so a deleted ECO's number is never handed out again.
+    //
+    // This used to be the row count plus one, which assumed the numbers ran
+    // 1..count with no gaps. Any gap (a row hard-deleted before soft delete
+    // existed, or a number skipped by a concurrent create) made count + 1 an
+    // existing number, and every create after it failed on the unique index
+    // until someone intervened.
+    const highestEcoSequence = async (): Promise<number> => {
+      let highest = 0;
+      for (let from = 0; ; from += ECO_NUMBER_PAGE_SIZE) {
+        const { data: rows, error: readError } = await db
+          .from("ecos")
+          .select("ecoNumber")
+          .eq("tenantId", tenantUser.tenantId)
+          .order("id")
+          .range(from, from + ECO_NUMBER_PAGE_SIZE - 1);
+        if (readError) throw readError;
+        for (const row of rows ?? []) {
+          const match = ECO_NUMBER_PATTERN.exec((row.ecoNumber as string | null) ?? "");
+          if (match) highest = Math.max(highest, Number(match[1]));
+        }
+        if (!rows || rows.length < ECO_NUMBER_PAGE_SIZE) return highest;
+      }
+    };
 
-    const ecoNumber = `ECO-${String((count || 0) + 1).padStart(4, "0")}`;
+    let sequence = (await highestEcoSequence()) + 1;
+    let eco = null;
 
-    const { data: eco, error } = await db
-      .from("ecos")
-      .insert({
-        id: uuid(),
-        tenantId: tenantUser.tenantId,
-        ecoNumber,
-        title,
-        description: description ?? null,
-        status: "DRAFT",
-        priority: priority || "MEDIUM",
-        reason: reason ?? null,
-        changeType: changeType ?? null,
-        costImpact: null,
-        disposition: null,
-        effectivity: null,
-        createdById: tenantUser.id,
-        clientRequestKey: idempotencyKey,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .select()
-      .single();
+    for (let attempt = 1; ; attempt++) {
+      const { data, error } = await db
+        .from("ecos")
+        .insert({
+          id: uuid(),
+          tenantId: tenantUser.tenantId,
+          ecoNumber: formatEcoNumber(sequence),
+          title,
+          description: description ?? null,
+          status: "DRAFT",
+          priority: priority || "MEDIUM",
+          reason: reason ?? null,
+          changeType: changeType ?? null,
+          costImpact: null,
+          disposition: null,
+          effectivity: null,
+          createdById: tenantUser.id,
+          clientRequestKey: idempotencyKey,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .select()
+        .single();
 
-    if (error) {
+      if (!error) {
+        eco = data;
+        break;
+      }
+
+      // Two creates read the same highest number and both chose the next
+      // one. The loser moves past whatever is there now and tries again.
+      if (isEcoNumberCollision(error)) {
+        if (attempt >= ECO_NUMBER_ATTEMPTS) {
+          return NextResponse.json(
+            { error: "Could not allocate a unique ECO number. Please try again." },
+            { status: 409 }
+          );
+        }
+        sequence = Math.max(sequence, await highestEcoSequence()) + 1;
+        continue;
+      }
+
+      // Race: another request with the same idempotency key landed first.
       if (error.code === "23505" && idempotencyKey) {
         const { data: existing } = await db
           .from("ecos")
@@ -116,6 +177,8 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
+
+    const ecoNumber = eco.ecoNumber as string;
 
     await logAudit({
       tenantId: tenantUser.tenantId,
