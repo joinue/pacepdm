@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1 to CHG-3 done)
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1 to CHG-4 done)
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -1014,11 +1014,41 @@ where e.status = 'APPROVED' and e."deletedAt" is null
 Each can now be implemented if the app can follow the revision on (R3 → R4),
 or rejected and reopened to set one.
 
+**CHG-4, a part could be marked Released, or re-lettered, without an ECO —
+done 2026-09-15.** No migration.
+
+- **Revision and lifecycle state are ECO-only.** `PUT /api/parts/[partId]`
+  refuses a body naming either, rather than dropping it silently; creating a
+  part refuses any state but WIP, and takes a starting revision, which releases
+  nothing. Both fields are still schema fields so the refusal can name them —
+  the old behaviour coming back unnoticed is the risk worth spending a line on.
+- **A released part locks what the release recorded** (`src/lib/part-lock.ts`):
+  part number, name, description, category, material, weight, unit and the
+  end-item flag. Cost, estimated cost, currency, notes, the thumbnail and
+  vendor links stay editable — they are not in the release manifest, and an
+  ECO to correct a supplier price helps nobody. The refusal only fires on a
+  field that actually changes, because the part form sends every field it
+  shows. Admins are exempt, as they are on a frozen file's metadata, so a typo
+  is fixable without a change order. Anything that has left WIP is covered, so
+  Obsolete locks too.
+- **Importers stopped moving the record.** A CSV re-import of a part already
+  in the workspace ignores its Revision and Lifecycle State columns and warns
+  on the row; a new part still arrives with both, which is how an existing
+  library is loaded. The BOM importer did the same thing more quietly — it
+  overwrote an existing part's revision from the sheet — and now warns
+  instead.
+- **The audit row says what changed.** `part.update` carried only the part
+  number, so the log could not answer "who changed this, and from what". It
+  now carries each changed field with its old and new value; `logAudit`'s
+  `details` accepts nested values for it.
+- Not done: `parts` is still the largest unconverted route domain (7 routes on
+  hand-rolled auth). Converting it is queued in `codebase-hardening.md`, not
+  here — this change touched three of those routes and left their shape alone.
+
 ### Stages 3–4 — still to do
 
-- **Stage 3, before the product is the release record.** Parts can be set
-  Released or re-lettered with `file.edit`
-  (CHG-4); lifecycle edits silently remove approval gates, and the gate fails
+- **Stage 3, before the product is the release record.** Lifecycle edits
+  silently remove approval gates, and the gate fails
   open (CHG-5); implemented ECOs are deletable (CHG-6); folder ACLs are skipped
   by part and release zips, part and release shares, and direct PostgREST
   reads under tenant-only RLS (ACL-1–3); removing a user nulls them out of the

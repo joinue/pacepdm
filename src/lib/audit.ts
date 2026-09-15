@@ -1,6 +1,14 @@
 import { getServiceClient } from "@/lib/db";
 import { v4 as uuid } from "uuid";
 
+/**
+ * Anything that survives a round trip through the `details` jsonb column.
+ * Nested because a row that records a change carries what the value was:
+ * `{ changes: { name: { from: "Bracket", to: "Bracket, left" } } }`.
+ */
+export type AuditValue =
+  string | number | boolean | null | AuditValue[] | { [key: string]: AuditValue };
+
 export async function logAudit({
   tenantId,
   userId,
@@ -15,7 +23,7 @@ export async function logAudit({
   action: string;
   entityType: string;
   entityId: string;
-  details?: Record<string, string | number | boolean | null>;
+  details?: Record<string, AuditValue>;
   ipAddress?: string;
 }) {
   const db = getServiceClient();

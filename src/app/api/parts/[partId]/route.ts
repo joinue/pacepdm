@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getCostSource, unitCostWouldChange, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
 import { z, parseBody, optionalString } from "@/lib/validation";
+import { partEditRefusal, changedFields, PART_REVISION_REFUSAL } from "@/lib/part-lock";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
 
 // Update is partial — any of these fields can be supplied. The schema
@@ -13,6 +14,12 @@ const UpdatePartSchema = z.object({
   name: z.string().trim().min(1).optional(),
   description: optionalString,
   category: z.string().optional(),
+  /**
+   * Accepted only to be refused: both are the release record, set by
+   * implementing an ECO (lib/part-lock.ts). Dropping them from the schema
+   * would let a client send one and hear "part updated" while nothing
+   * happened, which is how the old behaviour would come back unnoticed.
+   */
   revision: z.string().optional(),
   lifecycleState: z.string().optional(),
   material: optionalString,
@@ -184,13 +191,18 @@ export async function PUT(
 
     const { data: existing } = await db
       .from("parts")
-      .select("partNumber, unitCost")
+      .select("*")
       .eq("id", partId)
       .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
       .single();
     if (!existing) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
+
+    // The release record: only implement_eco writes these (AUD-003 CHG-4).
+    if (body.revision !== undefined || body.lifecycleState !== undefined) {
+      return NextResponse.json({ error: PART_REVISION_REFUSAL }, { status: 400 });
     }
 
     // `unitCost` is the authoritative figure. When the tenant has locked it,
@@ -202,6 +214,8 @@ export async function PUT(
     // Refused only when the figure would actually change. This used to refuse
     // any body that named `unitCost`, and the part form always sends it, so
     // locking cost made every part in the tenant uneditable.
+    // Neither revision nor lifecycleState can be in here: the refusal above
+    // returns before this, and an absent field is skipped by the loop below.
     const { unitCost, ...rest } = body;
     const costChanges = unitCostWouldChange(existing.unitCost, unitCost);
     if (costChanges) {
@@ -217,6 +231,13 @@ export async function PUT(
     }
     // An unchanged cost is not rewritten, locked or not.
     if (costChanges) updates.unitCost = unitCost;
+
+    // A part that has left WIP was released as it stands, so the fields the
+    // release recorded are locked. Cost, currency and notes stay editable.
+    const refusal = partEditRefusal(existing, updates, permissions.includes("*"));
+    if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
+
+    const changes = changedFields(existing, updates);
 
     const { data: part, error } = await db
       .from("parts")
@@ -240,7 +261,9 @@ export async function PUT(
       action: "part.update",
       entityType: "part",
       entityId: partId,
-      details: { partNumber: part.partNumber },
+      // What changed, and what it was. The row used to carry only the part
+      // number, so the log could not answer "who changed this, from what".
+      details: { partNumber: part.partNumber, changes },
     });
 
     return NextResponse.json(part);

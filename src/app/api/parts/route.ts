@@ -15,6 +15,7 @@ import {
 import { sideEffect } from "@/lib/notifications";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 import { getCostSource, unitCostWouldChange, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
+import { PART_EDITABLE_STATE } from "@/lib/part-lock";
 
 const CreatePartSchema = z.object({
   // Optional — when omitted and the tenant is in AUTO mode the server allocates
@@ -23,7 +24,13 @@ const CreatePartSchema = z.object({
   name: nonEmptyString,
   description: optionalString,
   category: z.string().optional(),
+  /** Where the part's revision history starts. Nothing is released by creating it. */
   revision: z.string().optional(),
+  /**
+   * Accepted only to be refused for anything but WIP: a part becomes Released
+   * by implementing an ECO (lib/part-lock.ts). A library of already-released
+   * parts arrives through the importer, which records the state it came with.
+   */
   lifecycleState: z.string().optional(),
   material: optionalString,
   weight: z.number().nullable().optional(),
@@ -96,6 +103,18 @@ export async function POST(request: NextRequest) {
     if (!parsed.ok) return parsed.response;
     const body = parsed.data;
 
+    if (body.lifecycleState && body.lifecycleState !== PART_EDITABLE_STATE) {
+      return NextResponse.json(
+        {
+          error:
+            `A new part starts at ${PART_EDITABLE_STATE}. It reaches ` +
+            `${body.lifecycleState} by being carried on an ECO that is implemented — or, for a ` +
+            `library that is already released elsewhere, through the parts importer.`,
+        },
+        { status: 400 }
+      );
+    }
+
     const db = getServiceClient();
     const now = new Date().toISOString();
 
@@ -136,7 +155,7 @@ export async function POST(request: NextRequest) {
       description: body.description ?? null,
       category: body.category || "MANUFACTURED",
       revision: body.revision || "A",
-      lifecycleState: body.lifecycleState || "WIP",
+      lifecycleState: PART_EDITABLE_STATE,
       material: body.material ?? null,
       weight: body.weight ?? null,
       weightUnit: body.weightUnit || "kg",

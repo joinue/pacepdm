@@ -207,6 +207,24 @@ function formatPrt(n: number) {
   return `PRT-${String(n).padStart(5, "0")}`;
 }
 
+describe("POST /api/parts — lifecycle state", () => {
+  beforeEach(() => tenant({ partNumberMode: "MANUAL" }));
+
+  it("refuses creating a part that is already Released", async () => {
+    // Released is what implementing an ECO means (AUD-003 CHG-4).
+    const res = await create({ partNumber: "PN-1", name: "Idler", lifecycleState: "Released" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/A new part starts at WIP/);
+    expect(partInserts()).toHaveLength(0);
+  });
+
+  it("creates in WIP, whatever the revision it starts from", async () => {
+    const res = await create({ partNumber: "PN-1", name: "Idler", revision: "R2" });
+    expect(res.status).toBe(200);
+    expect(partInserts()[0].data).toMatchObject({ lifecycleState: "WIP", revision: "R2" });
+  });
+});
+
 describe("POST /api/parts — locked unit cost", () => {
   it("refuses a new part that arrives with a unit cost", async () => {
     tenant({ costSource: "LOCKED" });

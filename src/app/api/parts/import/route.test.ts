@@ -461,6 +461,43 @@ describe("POST /api/parts/import — updating an existing part", () => {
   });
 });
 
+describe("POST /api/parts/import — an existing part's revision and state", () => {
+  /** The fields the update wrote, without the mock's bookkeeping. */
+  function partUpdate() {
+    const update = updates.find((u) => u.__table === "parts");
+    expect(update).toBeDefined();
+    return Object.fromEntries(Object.entries(update!).filter(([k]) => !k.startsWith("__")));
+  }
+
+  beforeEach(() => {
+    tableResults.parts = { data: [{ id: "part-1", partNumber: "PN-1" }], error: null };
+  });
+
+  it("does not re-letter or release a part already in the workspace", async () => {
+    // Re-importing last month's export used to do exactly that (AUD-003 CHG-4).
+    const body = await (
+      await POST(csv("Part Number,Name,Revision,Lifecycle State\nPN-1,Bracket,C,Released"))
+    ).json();
+
+    expect(body).toMatchObject({ updated: 1, failed: 0, warned: 1 });
+    expect(partUpdate()).not.toHaveProperty("revision");
+    expect(partUpdate()).not.toHaveProperty("lifecycleState");
+    expect(body.results[0].warning).toMatch(
+      /Revision and Lifecycle State were not imported.*implementing an ECO/
+    );
+  });
+
+  it("names only the column the sheet actually has", async () => {
+    const body = await (await POST(csv("Part Number,Name,Revision\nPN-1,Bracket,C"))).json();
+    expect(body.results[0].warning).toMatch(/Revision was not imported/);
+  });
+
+  it("still writes the rest of the row", async () => {
+    await POST(csv("Part Number,Name,Revision,Notes\nPN-1,Bracket,C,From the ERP"));
+    expect(partUpdate()).toMatchObject({ notes: "From the ERP" });
+  });
+});
+
 describe("POST /api/parts/import — inserting a new part", () => {
   it("keeps the defaults, and warns on an unparseable number", async () => {
     const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,TBD"))).json();

@@ -112,8 +112,11 @@ export const POST = withTenant(
     if (partReadError) throw new Error(partReadError.message);
 
     const partIdByNumber = new Map<string, string>();
+    /** The revision each existing part is at, to compare against the file's. */
+    const partRevisionByNumber = new Map<string, string | null>();
     for (const row of existingParts ?? []) {
       partIdByNumber.set(row.partNumber as string, row.id as string);
+      partRevisionByNumber.set(row.partNumber as string, (row.revision as string) ?? null);
     }
 
     for (const part of partSummaries.values()) {
@@ -139,8 +142,19 @@ export const POST = withTenant(
         // Never overwrite a name or description already curated in PACE
         // with the nothing this file carries for leaf parts.
         const patch: Record<string, unknown> = { updatedAt: now };
-        if (part.revision) patch.revision = part.revision;
         if (part.description) patch.description = part.description;
+        // The file does not get to re-letter a part that is already here: a
+        // part's revision is the release record, set by implementing an ECO
+        // (lib/part-lock.ts). Said out loud, since the sheet says otherwise
+        // (AUD-003 CHG-4).
+        const currentRevision = partRevisionByNumber.get(part.partNumber) ?? null;
+        if (part.revision && part.revision !== currentRevision) {
+          summary.warnings.push(
+            `${part.partNumber} is at revision ${currentRevision ?? "none"} here and ` +
+              `${part.revision} in the file. The file's revision was not imported — a part's ` +
+              `revision changes by implementing an ECO.`
+          );
+        }
         const { error } = await db.from("parts").update(patch).eq("id", existingId);
         if (error) throw new Error(error.message);
         summary.partsUpdated++;

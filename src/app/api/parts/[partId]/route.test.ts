@@ -51,6 +51,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
 
 import { PUT } from "./route";
+import { logAudit } from "@/lib/audit";
 
 const PART_ID = "33333333-3333-4333-8333-333333333333";
 const engineer = { id: "user-1", tenantId: "tenant-1", role: { permissions: ["file.edit"] } };
@@ -70,10 +71,21 @@ function state({
   costSource = "LOCKED",
   unitCost = 4.25 as number | null,
   tenantId = "tenant-1",
+  lifecycleState = "WIP",
+  revision = "B",
 } = {}) {
   tables["tenants"] = [{ id: "tenant-1", settings: { costSource } }];
   tables["parts"] = [
-    { id: PART_ID, tenantId, partNumber: "PN-1042", name: "Idler", unitCost, deletedAt: null },
+    {
+      id: PART_ID,
+      tenantId,
+      partNumber: "PN-1042",
+      name: "Idler",
+      unitCost,
+      revision,
+      lifecycleState,
+      deletedAt: null,
+    },
   ];
 }
 
@@ -134,6 +146,77 @@ describe("PUT /api/parts/[partId] — open unit cost", () => {
     const res = await put({ unitCost: 9.99 });
     expect(res.status).toBe(200);
     expect(partUpdates()[0].data).toMatchObject({ unitCost: 9.99 });
+  });
+});
+
+/**
+ * A part's revision and lifecycle state are what a share link, a release
+ * package and a BOM line show a supplier. Anyone with `file.edit` could set
+ * either here, so a part could read `rev C Released` with no ECO and no
+ * approver behind it (AUD-003 CHG-4).
+ */
+describe("PUT /api/parts/[partId] — revision and lifecycle state", () => {
+  it("refuses a revision, naming the ECO as the way", async () => {
+    state({ costSource: "OPEN" });
+    const res = await put({ revision: "C" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/set by implementing an ECO/);
+    expect(partUpdates()).toHaveLength(0);
+  });
+
+  it("refuses marking a part Released", async () => {
+    state({ costSource: "OPEN" });
+    const res = await put({ name: "Idler", lifecycleState: "Released" });
+    expect(res.status).toBe(400);
+    expect(partUpdates()).toHaveLength(0);
+  });
+});
+
+describe("PUT /api/parts/[partId] — a released part", () => {
+  beforeEach(() => state({ costSource: "OPEN", lifecycleState: "Released" }));
+
+  it("refuses a change to what the release recorded", async () => {
+    const res = await put({ name: "Idler, left" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/PN-1042 is Released, so its name/);
+    expect(partUpdates()).toHaveLength(0);
+  });
+
+  it("still takes a cost or a note", async () => {
+    const res = await put({ unitCost: 9.99, notes: "Second source" });
+    expect(res.status).toBe(200);
+    expect(partUpdates()[0].data).toMatchObject({ unitCost: 9.99, notes: "Second source" });
+  });
+
+  it("takes the part form's unchanged fields without complaint", async () => {
+    // The form sends every field it shows, so a refusal keyed on the field
+    // being present rather than changing would lock the whole form.
+    const res = await put({ name: "Idler", unitCost: 9.99 });
+    expect(res.status).toBe(200);
+  });
+
+  it("lets an admin correct it", async () => {
+    mockTenantUser.current = { ...engineer, role: { permissions: ["*"] } };
+    expect((await put({ name: "Idler, left" })).status).toBe(200);
+  });
+});
+
+describe("PUT /api/parts/[partId] — the audit row", () => {
+  it("records what changed and what it was", async () => {
+    state({ costSource: "OPEN" });
+    await put({ name: "Roller", notes: "Second source" });
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "part.update",
+        details: {
+          partNumber: "PN-1042",
+          changes: {
+            name: { from: "Idler", to: "Roller" },
+            notes: { from: null, to: "Second source" },
+          },
+        },
+      })
+    );
   });
 });
 

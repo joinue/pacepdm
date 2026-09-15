@@ -246,6 +246,23 @@ describe("POST /api/boms/import", () => {
     expect(line.partId).toBe("part-existing");
   });
 
+  it("does not re-letter a part that is already here, and says so", async () => {
+    // The sheet carries LEAF-1 at R2. Taking that would move a part's release
+    // record with no ECO behind it (AUD-003 CHG-4).
+    tableResults["parts"] = {
+      data: [{ id: "part-leaf1", partNumber: "LEAF-1", revision: "R1", category: "MANUFACTURED" }],
+      error: null,
+    };
+
+    const body = await (await POST(makeRequest())).json();
+
+    const partUpdate = updates.find((u) => u.table === "parts")!;
+    expect(partUpdate.data).not.toHaveProperty("revision");
+    expect(body.warnings.join(" ")).toMatch(
+      /LEAF-1 is at revision R1 here and R2 in the file.*not imported/
+    );
+  });
+
   it("reports unusable rows without failing the import", async () => {
     const csv = CSV + "Item,Add BAD,Raw Good,BAD,many,ea\n";
     const body = await (await POST(makeRequest(csv))).json();

@@ -101,12 +101,19 @@ interface ParsedRow {
   unitCostRaw: string;
 }
 
-/** The optional fields an update writes, each only when the row has a value. */
+/**
+ * The optional fields an update writes, each only when the row has a value.
+ *
+ * `revision` and `lifecycleState` are deliberately absent. A part that is
+ * already in the PDM has its revision and state set by implementing an ECO
+ * (lib/part-lock.ts); re-importing last month's export would otherwise
+ * re-letter parts or mark them Released with nobody behind it (AUD-003
+ * CHG-4). A new part still arrives with both, which is how an existing
+ * library is loaded — see the insert below.
+ */
 const UPDATABLE_FIELDS = [
   "description",
   "category",
-  "revision",
-  "lifecycleState",
   "material",
   "weight",
   "weightUnit",
@@ -163,6 +170,16 @@ function warningsFor(
   // Under a locked cost source the cell is not read at all, parseable or not,
   // and the note says so instead of complaining about its format.
   if (costLocked && parsed.unitCostRaw) notes.push(unitCostNotImportedNote(parsed.unitCostRaw));
+  // Said plainly, because the sheet looks like it was applied otherwise.
+  if (updating && (parsed.revision || parsed.lifecycleState)) {
+    const named = [parsed.revision && "Revision", parsed.lifecycleState && "Lifecycle State"]
+      .filter(Boolean)
+      .join(" and ");
+    notes.push(
+      `${named} ${parsed.revision && parsed.lifecycleState ? "were" : "was"} not imported: ` +
+        `this part is already in the workspace, and those change by implementing an ECO.`
+    );
+  }
   for (const { column, raw } of parsed.unparsedNumbers) {
     if (costLocked && column === UNIT_COST_COLUMN) continue;
     notes.push(
