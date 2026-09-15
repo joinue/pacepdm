@@ -36,6 +36,7 @@ import { EcoDetailsTab } from "./components/eco-details-tab";
 import { EcoItemsTab } from "./components/eco-items-tab";
 import { EcoApprovalTab } from "./components/eco-approval-tab";
 import { EcoBomImpact } from "./components/eco-bom-impact";
+import { EcoBlockersPanel, blockersFromError } from "./components/eco-blockers-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 
@@ -94,6 +95,13 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
   // (submit, implement) on an ECO that has zero affected items, we hold the
   // intended next status here and prompt "really?" before calling the API.
   const [pendingEmptyTransition, setPendingEmptyTransition] = useState<string | null>(null);
+  // Everything that stopped the last submit or implement, kept on the ECO it
+  // was about so it cannot show against another one.
+  const [blocked, setBlocked] = useState<{
+    ecoId: string;
+    status: string;
+    blockers: string[];
+  } | null>(null);
 
   // ─── Loaders ─────────────────────────────────────────────────────────
   const loadEcos = useCallback(async () => {
@@ -323,6 +331,7 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
         // Capture the release id so the detail header can show the
         // "View release" link immediately, without waiting for a refetch.
         if (result.releaseId) setReleaseIdForSelected(result.releaseId);
+        setBlocked(null);
         // Refresh the list so the derived selectedEco picks up the new status
         await refreshEcos();
         return;
@@ -341,10 +350,21 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
       } else {
         toast.success(`Status changed to ${newStatus.replace("_", " ")}`);
       }
+      setBlocked(null);
       await refreshEcos();
       void loadApproval(selectedEco.id);
     } catch (err) {
-      toast.error(errorMessage(err));
+      const blockers = blockersFromError(err);
+      if (blockers) {
+        setBlocked({ ecoId: selectedEco.id, status: newStatus, blockers });
+        const verb = newStatus === "IMPLEMENTED" ? "implemented" : "submitted";
+        const count = blockers.length === 1 ? "one thing" : `${blockers.length} things`;
+        toast.error(
+          `${selectedEco.ecoNumber} cannot be ${verb} yet — ${count} to fix, listed on the ECO`
+        );
+      } else {
+        toast.error(errorMessage(err));
+      }
     } finally {
       setTransitioning(false);
     }
@@ -486,6 +506,17 @@ export function EcosView({ selectedEcoId }: { selectedEcoId: string | null }) {
                 </Button>
               ))}
             </div>
+          )}
+
+          {blocked?.ecoId === selectedEco.id && (
+            <EcoBlockersPanel
+              ecoNumber={selectedEco.ecoNumber}
+              action={blocked.status === "IMPLEMENTED" ? "implemented" : "submitted"}
+              blockers={blocked.blockers}
+              retrying={transitioning}
+              onRetry={() => void performTransition(blocked.status)}
+              onDismiss={() => setBlocked(null)}
+            />
           )}
 
           {/* BOM impact — shows which downstream BOMs are affected */}

@@ -958,6 +958,10 @@ mishandle.
   file the ECO touched, including ones already released or skipped; it now
   notifies only the files the check found in WIP, and logs when the function's
   count disagrees. The route is on `withTenant`.
+- **The ECO page lists every blocker.** The refusal's message names four, all
+  a toast has room for; the page now reads `details.blockers` and shows the
+  whole list on the ECO, with a Try again button
+  (`ecos/components/eco-blockers-panel.tsx`).
 - Not done, and worth knowing: a file released through a part still gets no
   audit row of its own, only the part's `part.eco_released` row. The release
   manifest still does not filter by state (AUD-4), but for a release made from

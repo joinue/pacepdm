@@ -10,7 +10,7 @@ raw-fetch: 34
 generic-error-toast: 4
 swallowed-error: 6
 token-violations: 6
-component-tests: 16-->
+component-tests: 17-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -98,7 +98,7 @@ npm run probe:rls                                      # live RLS posture
 | `raw-fetch` in client components      | 112              | **34**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **4**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
-| Component tests                       | 0                | **16** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
+| Component tests                       | 0                | **17** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
 | Route segments with `error.tsx`       | 0                | **4** + `global-error`                | every segment that fetches                            |
 
 ### How the ratchet works
