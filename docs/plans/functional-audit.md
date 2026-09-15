@@ -498,6 +498,24 @@ QuickBooks pages are ordered. The test mock now caps at 1,000 rows, enforces
 the unique index and reverses unordered reads — a mock that does none of that is
 why none of this was caught.
 
+### ~~C. A file could change under review, and purge destroyed what it could not delete~~ Fixed 2026-09-14
+
+Checkout, check-in and upload-version never looked for a pending approval. A
+version checked in mid-review was what the approval released, and a checkout
+still open when the last decision landed left the file frozen _and_ checked out
+— which check-in, transition, delete and upload-version all refuse, so only SQL
+could free it. Checkout, check-in with a file, upload-version, restore,
+metadata, thumbnail and rename now refuse while a request on the file is
+`PENDING` ([`src/lib/pending-approval.ts`](../../src/lib/pending-approval.ts)).
+Undoing a checkout is allowed on a frozen file, so files already stuck can be
+unlocked from the UI.
+
+Purge removed storage and version rows before the file row, and
+`eco_items_fileId_fkey` is RESTRICT: a file that had been on an ECO lost its
+contents and then failed to delete, leaving a release manifest pointing at
+nothing. Purge now refuses a file an ECO lists or released, and deletes the row
+before the blobs.
+
 ---
 
 ## Related

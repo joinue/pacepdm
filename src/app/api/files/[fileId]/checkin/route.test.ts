@@ -165,6 +165,12 @@ const checkedOutFile = {
   thumbnailKey: null,
 };
 
+const pendingRelease = { id: "req-1", title: "Release: bracket.sldprt" };
+
+function newVersion(): File {
+  return new File(["solid"], "bracket.sldprt", { type: "application/octet-stream" });
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────
 
 describe("POST /api/files/[fileId]/checkin", () => {
@@ -232,16 +238,83 @@ describe("POST /api/files/[fileId]/checkin", () => {
     );
   });
 
-  it("returns 409 if file became frozen during checkout", async () => {
+  it("returns 409 for a new version if file became frozen during checkout", async () => {
     mockTenantUser.current = owner;
     tableResults["files"] = {
       data: { ...checkedOutFile, isFrozen: true },
       error: null,
     };
-    const res = await POST(makeCheckinRequest(), { params });
+    const res = await POST(makeCheckinRequest(newVersion()), { params });
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toMatch(/frozen/i);
+    expect(insertCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  /**
+   * The release valve. An approval that completed while the file was checked
+   * out left it frozen and checked out at once, and the frozen check used to
+   * run before the undo branch — so the undo its own message recommended was
+   * refused too, and only SQL could free the file. Undo writes no version, so
+   * the released artifact is untouched.
+   */
+  it("lets the checkout of a frozen file be undone, without writing a version", async () => {
+    mockTenantUser.current = owner;
+    tableResults["files"] = { data: { ...checkedOutFile, isFrozen: true }, error: null };
+
+    const res = await POST(makeCheckinRequest(), { params });
+
+    expect(res.status).toBe(200);
+    expect(insertCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].data).toEqual({
+      isCheckedOut: false,
+      checkedOutById: null,
+      checkedOutAt: null,
+      updatedAt: expect.any(String),
+    });
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "file.undo_checkout", entityId: "file-1" })
+    );
+  });
+
+  it("lets an admin unlock someone else's checkout of a frozen file", async () => {
+    mockTenantUser.current = { ...admin, role: { permissions: ["*", "admin.settings"] } };
+    tableResults["files"] = { data: { ...checkedOutFile, isFrozen: true }, error: null };
+
+    const res = await POST(makeCheckinRequest(), { params });
+
+    expect(res.status).toBe(200);
+    expect(updateCalls[0].data).toMatchObject({ isCheckedOut: false });
+  });
+
+  /**
+   * A version checked in while a transition awaits approval is what the
+   * approval would release, unreviewed.
+   */
+  it("refuses a new version while a transition on the file is awaiting approval", async () => {
+    mockTenantUser.current = owner;
+    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
+    tableResults["approval_requests"] = { data: [pendingRelease], error: null };
+
+    const res = await POST(makeCheckinRequest(newVersion()), { params });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/awaiting approval/i);
+    expect(insertCalls).toHaveLength(0);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("still lets the checkout be undone while awaiting approval", async () => {
+    mockTenantUser.current = owner;
+    tableResults["files"] = { data: { ...checkedOutFile }, error: null };
+    tableResults["approval_requests"] = { data: [pendingRelease], error: null };
+
+    const res = await POST(makeCheckinRequest(), { params });
+
+    expect(res.status).toBe(200);
+    expect(updateCalls[0].data).toMatchObject({ isCheckedOut: false });
   });
 
   // File size validation (> 5 GB) is not testable in unit tests because

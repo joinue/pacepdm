@@ -146,6 +146,34 @@ describe("PUT /api/files/[fileId]/metadata", () => {
     expect(body.error).toMatch(/frozen/i);
   });
 
+  /**
+   * Part number, description and custom fields are released with the file,
+   * so editing them mid-review changes what the approval releases.
+   */
+  it("returns 409 while a transition on the file is awaiting approval", async () => {
+    mockTenantUser.current = editor;
+    tableResults["files"] = { data: { ...wipFile }, error: null };
+    tableResults["approval_requests"] = {
+      data: [{ id: "req-1", title: "Release: bracket.sldprt" }],
+      error: null,
+    };
+    const res = await PUT(makeRequest({ description: "new" }), { params });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/awaiting approval/i);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("lets an admin edit during a pending approval, as it can a frozen file", async () => {
+    mockTenantUser.current = admin;
+    tableResults["files"] = { data: { ...wipFile }, error: null };
+    tableResults["approval_requests"] = {
+      data: [{ id: "req-1", title: "Release: bracket.sldprt" }],
+      error: null,
+    };
+    const res = await PUT(makeRequest({ description: "admin edit" }), { params });
+    expect(res.status).toBe(200);
+  });
+
   it("returns 423 when file is checked out by another user", async () => {
     mockTenantUser.current = editor;
     tableResults["files"] = {

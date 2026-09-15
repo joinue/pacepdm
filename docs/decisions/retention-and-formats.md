@@ -19,11 +19,18 @@ in the trash, one at a time.
 deliberately absent from `DEFAULT_ROLES`, so Admin holds it through `"*"` and
 Manager, who can move files to the trash, does not.
 
-Storage blobs are removed before any row. Rows-first would orphan the blobs
-with nothing pointing at them: unrecoverable _and_ invisible. Failing this way
-round leaves the file in the trash, whole and retryable. A live file cannot be
-purged at all — only rows with `deletedAt` set resolve — so destruction is
-always two separate decisions.
+A file an ECO lists (`eco_items_fileId_fkey` is ON DELETE RESTRICT) or an ECO
+released (a version stamped with `ecoId`, or a release manifest naming it) is
+refused before anything is touched. The `files` row then goes first, in one
+statement that cascades its versions, and storage blobs are removed only once
+that delete has provably happened. This was originally the other way round,
+reasoning that orphaned blobs are unrecoverable _and_ invisible — but a row
+delete refused after storage had gone destroyed the only copy of the contents
+and left the record behind, which is worse. An orphaned blob costs storage, not
+data: a storage failure after the row delete is logged, with its keys on the
+audit row, and does not fail the purge. A live file cannot be purged at all —
+only rows with `deletedAt` set resolve — so destruction is always two separate
+decisions.
 
 The audit row survives the file. It is append-only and this route never touches
 it, so what existed and who destroyed it outlives the deletion. A permanent

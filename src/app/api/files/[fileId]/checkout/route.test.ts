@@ -126,6 +126,23 @@ function ownedBy(tenantId: string, row: Record<string, unknown>) {
     filters.tenantId === tenantId ? { data: row, error: null } : { data: null, error: null };
 }
 
+/** Serve the approval requests matching every `.eq()` filter the query applied. */
+function approvalRequests(rows: Array<Record<string, unknown>>) {
+  tableResults["approval_requests"] = (filters) => ({
+    data: rows.filter((row) => Object.entries(filters).every(([k, v]) => row[k] === v)),
+    error: null,
+  });
+}
+
+const pendingRelease = {
+  id: "req-1",
+  tenantId: "tenant-1",
+  entityType: "file",
+  entityId: FILE_ID,
+  status: "PENDING",
+  title: "Release: bracket.sldprt",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   updateCalls.length = 0;
@@ -169,6 +186,39 @@ describe("POST /api/files/[fileId]/checkout", () => {
     const res = await POST(makeRequest(), { params });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/already checked out/i);
+  });
+
+  /**
+   * The approval engine releases and freezes whatever the file holds when the
+   * last decision lands. A checkout open at that moment left a file frozen and
+   * checked out at once, which every route refused to touch.
+   */
+  it("returns 409 while a transition on the file is awaiting approval", async () => {
+    mockTenantUser.current = engineer;
+    ownedBy("tenant-1", { ...wipFile });
+    approvalRequests([pendingRelease]);
+
+    const res = await POST(makeRequest(), { params });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/awaiting approval/i);
+    expect(updateCalls).toHaveLength(0);
+    expect(logAudit).not.toHaveBeenCalled();
+  });
+
+  it("is not blocked by requests that are finished, in rework, or not for this file", async () => {
+    mockTenantUser.current = engineer;
+    ownedBy("tenant-1", { ...wipFile });
+    approvalRequests([
+      // Rework exists so the requester can change the file before resubmitting.
+      { ...pendingRelease, id: "req-rework", status: "REWORK" },
+      { ...pendingRelease, id: "req-done", status: "APPROVED" },
+      { ...pendingRelease, id: "req-foreign", tenantId: "tenant-OTHER" },
+      { ...pendingRelease, id: "req-other-file", entityId: "some-other-file" },
+      { ...pendingRelease, id: "req-eco", entityType: "eco" },
+    ]);
+
+    expect((await POST(makeRequest(), { params })).status).toBe(200);
   });
 
   it("succeeds for a WIP file and logs audit", async () => {

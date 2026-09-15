@@ -297,7 +297,7 @@ Not refactors — real missing behaviour, worth their own tickets.
   **`DELETE /api/files/[fileId]/purge`** destroys one named file for good, gated on the new `FILE_PURGE` permission. Four things the next person should know:
 
   - **`FILE_PURGE` is deliberately absent from `DEFAULT_ROLES`.** Admin holds it through `"*"`; Manager holds `FILE_DELETE` and does not get this. That is why no backfill migration was needed — see [`../decisions/system-roles.md`](../decisions/system-roles.md) for when one is.
-  - **Storage is removed before any row.** If the rows went first and storage failed, the blobs would be orphaned with nothing pointing at them — unrecoverable _and_ invisible. Failing the other way leaves the file in the trash, whole and retryable.
+  - **~~Storage is removed before any row.~~ Reversed 2026-09-14: referenced files are refused, and the database goes first.** Storage-first destroyed the contents of any file an ECO listed, because `eco_items_fileId_fkey` is RESTRICT and refused the row delete only after the blobs were gone. A file an ECO lists or released is now refused before anything is touched; the `files` row goes in one cascading statement, then storage. A storage failure after that orphans blobs (logged, keys on the audit row) rather than losing data. See [`../decisions/retention-and-formats.md`](../decisions/retention-and-formats.md).
   - **A live file cannot be purged.** `loadDeletedFile` resolves only rows with `deletedAt` set, so destruction is always two separate decisions.
   - **The audit row outlives the file.** Append-only and untouched by the route, so what existed and who destroyed it survives. A permanent deletion that erased its own evidence would be worse than none.
 

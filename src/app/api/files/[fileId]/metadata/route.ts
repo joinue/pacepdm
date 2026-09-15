@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, optionalString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 
 const MetadataSchema = z.object({
   partNumber: optionalString,
@@ -54,6 +55,17 @@ export async function PUT(
         { error: "Cannot edit a frozen/released file. Revise it first." },
         { status: 409 }
       );
+    }
+
+    // Part number, description and custom fields are released with the file,
+    // so they lock while it is under review, with the same admin exception as
+    // the frozen check above — an admin can edit them once released anyway.
+    // See lib/pending-approval.ts.
+    if (!permissions.includes("*")) {
+      const refusal = await pendingApprovalRefusal(tenantUser.tenantId, fileId, "edited");
+      if (refusal) {
+        return NextResponse.json({ error: refusal }, { status: 409 });
+      }
     }
 
     // Checked-out files can only be edited by the checkout owner — no exceptions.

@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -44,6 +45,18 @@ export async function POST(
 
     if (file.isCheckedOut && file.checkedOutById !== tenantUser.id) {
       return NextResponse.json({ error: "File is checked out by another user" }, { status: 409 });
+    }
+
+    // This adds a version without a checkout, so the checkout lock alone does
+    // not stop it replacing what reviewers are approving. See
+    // lib/pending-approval.ts.
+    const refusal = await pendingApprovalRefusal(
+      tenantUser.tenantId,
+      fileId,
+      "given a new version"
+    );
+    if (refusal) {
+      return NextResponse.json({ error: refusal }, { status: 409 });
     }
 
     const formData = await request.formData();

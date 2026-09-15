@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 
 const RenameSchema = z.object({ name: nonEmptyString });
 
@@ -42,6 +43,12 @@ export async function PUT(
         { error: "Cannot rename a frozen/released file. Revise it first." },
         { status: 409 }
       );
+    }
+    // Nor while a release of it is under review: the name reviewers approved
+    // is the name that should be released. See lib/pending-approval.ts.
+    const refusal = await pendingApprovalRefusal(tenantUser.tenantId, fileId, "renamed");
+    if (refusal) {
+      return NextResponse.json({ error: refusal }, { status: 409 });
     }
 
     // Checked-out files can only be renamed by the checkout owner (or admins)

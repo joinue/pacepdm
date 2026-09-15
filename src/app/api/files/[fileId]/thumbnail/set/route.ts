@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 
 /**
  * POST /api/files/[fileId]/thumbnail/set
@@ -54,6 +55,16 @@ export async function POST(
         { error: "Cannot change the thumbnail of a frozen/released file. Revise it first." },
         { status: 409 }
       );
+    }
+    // For the same reason, it cannot change while that approval is pending.
+    // See lib/pending-approval.ts.
+    const refusal = await pendingApprovalRefusal(
+      tenantUser.tenantId,
+      fileId,
+      "given a new thumbnail"
+    );
+    if (refusal) {
+      return NextResponse.json({ error: refusal }, { status: 409 });
     }
 
     const formData = await request.formData();

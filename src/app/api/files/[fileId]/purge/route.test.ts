@@ -6,35 +6,59 @@ import { NextRequest } from "next/server";
  * the only one with no undo, so the tests are mostly about what it refuses and
  * about the order it does things in.
  *
- * The order matters more than it looks. Storage goes first: if the blobs are
- * removed and a later step fails, the file is broken but visible and can be
- * purged again. If the rows went first and storage failed, the blobs would be
- * orphaned with nothing pointing at them — unrecoverable *and* invisible,
- * which is the one outcome worth engineering against.
+ * The order is the one that shipped wrong. Storage used to go first, so a file
+ * an ECO still listed — `eco_items_fileId_fkey` is ON DELETE RESTRICT — lost
+ * its stored contents and its version rows, and only then did the row delete
+ * fail. Now everything that would refuse or be broken by the delete is checked
+ * before anything is touched, the database goes first, and storage is only
+ * removed once the row is provably gone.
  */
 
-const { tableResults, deletes, storage, mockFrom, mockStorage } = vi.hoisted(() => {
+const { tableResults, readFilters, ops, storage, mockFrom, mockStorage } = vi.hoisted(() => {
   type QueryResult = { data: unknown; error: unknown };
   const tableResults: Record<string, QueryResult> = {};
-  const deletes: string[] = [];
+  /** The filters each table's last read was issued with. */
+  const readFilters: Record<string, Record<string, unknown>> = {};
+  /** Every destructive step, in the order it ran. */
+  const ops: string[] = [];
   const storage = {
     removed: [] as string[][],
     error: null as { message: string } | null,
   };
 
   function makeChain(table: string) {
+    const filters: Record<string, unknown> = {};
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
-    const resolvable = () => tableResults[table] ?? { data: null, error: null };
-    for (const m of ["select", "eq", "in", "is", "not", "order", "limit"] as const)
-      chain[m] = () => chain;
+    const resolvable = () => {
+      readFilters[table] = { ...filters };
+      return tableResults[table] ?? { data: null, error: null };
+    };
+    for (const m of ["select", "eq", "in", "is", "not", "contains", "order", "limit"] as const)
+      chain[m] = (...args: unknown[]) => {
+        if (m === "eq" || m === "contains") filters[`${m}:${args[0] as string}`] = args[1];
+        if (m === "not") filters[`not:${args[0] as string}`] = args.slice(1);
+        return chain;
+      };
     chain.single = () => resolvable();
     chain.maybeSingle = () => resolvable();
     chain.delete = () => {
-      deletes.push(table);
+      const deleteFilters: Record<string, unknown> = {};
       const d: Record<string, (...a: unknown[]) => unknown> = {};
-      d.eq = () => d;
-      d.then = ((r: (v: unknown) => void) =>
-        r({ data: null, error: tableResults[`${table}:delete`]?.error ?? null })) as never;
+      d.eq = (col: unknown, val: unknown) => ((deleteFilters[`eq:${col as string}`] = val), d);
+      d.not = (col: unknown, ...rest: unknown[]) => (
+        (deleteFilters[`not:${col as string}`] = rest),
+        d
+      );
+      d.select = () => d;
+      d.then = ((r: (v: unknown) => void) => {
+        ops.push(`delete:${table}`);
+        readFilters[`${table}:delete`] = deleteFilters;
+        const configured = tableResults[`${table}:delete`];
+        r({
+          data: configured ? configured.data : [{ id: "deleted" }],
+          error: configured?.error ?? null,
+        });
+      }) as never;
       return d;
     };
     chain.then = ((r: (v: unknown) => void) => r(resolvable())) as never;
@@ -44,13 +68,21 @@ const { tableResults, deletes, storage, mockFrom, mockStorage } = vi.hoisted(() 
   const mockStorage = {
     from: () => ({
       remove: (keys: string[]) => {
+        ops.push("storage:remove");
         storage.removed.push(keys);
         return Promise.resolve({ data: null, error: storage.error });
       },
     }),
   };
 
-  return { tableResults, deletes, storage, mockFrom: (t: string) => makeChain(t), mockStorage };
+  return {
+    tableResults,
+    readFilters,
+    ops,
+    storage,
+    mockFrom: (t: string) => makeChain(t),
+    mockStorage,
+  };
 });
 
 const mockTenantUser = vi.hoisted(() => ({
@@ -111,18 +143,21 @@ const deletedFile = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  deletes.length = 0;
+  ops.length = 0;
   storage.removed.length = 0;
   storage.error = null;
   for (const k of Object.keys(tableResults)) delete tableResults[k];
+  for (const k of Object.keys(readFilters)) delete readFilters[k];
   tableResults.files = { data: deletedFile, error: null };
   tableResults.file_versions = {
     data: [
-      { id: "v1", storageKey: "vault/t1/f1/v1" },
-      { id: "v2", storageKey: "vault/t1/f1/v2" },
+      { id: "v1", storageKey: "vault/t1/f1/v1", ecoId: null },
+      { id: "v2", storageKey: "vault/t1/f1/v2", ecoId: null },
     ],
     error: null,
   };
+  tableResults.eco_items = { data: [], error: null };
+  tableResults.releases = { data: [], error: null };
   mockTenantUser.current = admin;
 });
 
@@ -148,8 +183,7 @@ describe("DELETE /api/files/[fileId]/purge — who may", () => {
   it("400s a malformed file id before touching anything", async () => {
     const res = await DELETE(req(), { params: Promise.resolve({ fileId: "not-a-uuid" }) });
     expect(res.status).toBe(400);
-    expect(deletes).toHaveLength(0);
-    expect(storage.removed).toHaveLength(0);
+    expect(ops).toHaveLength(0);
   });
 
   /**
@@ -161,79 +195,191 @@ describe("DELETE /api/files/[fileId]/purge — who may", () => {
     tableResults.files = { data: null, error: null };
     const res = await DELETE(req(), { params });
     expect(res.status).toBe(404);
-    expect(deletes).toHaveLength(0);
-    expect(storage.removed).toHaveLength(0);
+    expect(ops).toHaveLength(0);
   });
 });
 
-describe("DELETE /api/files/[fileId]/purge — what it destroys", () => {
-  it("removes every version's stored blob, then the rows", async () => {
-    await DELETE(req(), { params });
-    expect(storage.removed).toEqual([["vault/t1/f1/v1", "vault/t1/f1/v2"]]);
-    expect(deletes).toEqual(["file_versions", "files"]);
+/**
+ * The shipped defect: a file an ECO still listed lost its bytes and versions
+ * before the RESTRICT foreign key refused the row delete. Each refusal here
+ * must leave storage and every row untouched.
+ */
+describe("DELETE /api/files/[fileId]/purge — what refuses it, before anything is touched", () => {
+  it("refuses a file an ECO lists, naming the ECO", async () => {
+    tableResults.eco_items = { data: [{ ecoId: "eco-12" }], error: null };
+    tableResults.ecos = { data: [{ id: "eco-12", ecoNumber: "ECO-0012" }], error: null };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(409);
+    const { error } = await res.json();
+    expect(error).toContain("listed on ECO-0012");
+    expect(error).toMatch(/nothing was deleted/i);
+    expect(ops).toHaveLength(0);
+    expect(logAudit).not.toHaveBeenCalled();
   });
 
-  it("deletes the version rows before the file row", async () => {
+  /**
+   * A file released through a part it is linked to never appears on
+   * eco_items, so the RESTRICT key would not stop it — but implement_eco
+   * stamped the version it released, and the release manifest holds that
+   * version's storage key.
+   */
+  it("refuses a file whose version an ECO released", async () => {
+    tableResults.file_versions = {
+      data: [{ id: "v1", storageKey: "vault/t1/f1/v1", ecoId: "eco-7" }],
+      error: null,
+    };
+    tableResults.ecos = { data: [{ id: "eco-7", ecoNumber: "ECO-0007" }], error: null };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("released under ECO-0007");
+    expect(ops).toHaveLength(0);
+  });
+
+  it("refuses a file a release manifest contains, looked up in the caller's tenant", async () => {
+    tableResults.releases = { data: [{ ecoId: "eco-3", ecoNumber: "ECO-0003" }], error: null };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("released under ECO-0003");
+    expect(readFilters.releases).toMatchObject({
+      "eq:tenantId": "tenant-1",
+      "contains:manifest": { files: [{ fileId: FILE_ID }] },
+    });
+    expect(ops).toHaveLength(0);
+  });
+
+  it("fails closed when it cannot check what refers to the file", async () => {
+    tableResults.eco_items = { data: null, error: { message: "statement timeout" } };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain("statement timeout");
+    expect(ops).toHaveLength(0);
+  });
+
+  it("fails closed when it cannot read the versions it would need to remove", async () => {
+    tableResults.file_versions = { data: null, error: { message: "connection reset" } };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(500);
+    expect(ops).toHaveLength(0);
+  });
+});
+
+describe("DELETE /api/files/[fileId]/purge — what it destroys, and in what order", () => {
+  it("deletes the file row, then removes every version's stored blob", async () => {
     await DELETE(req(), { params });
-    expect(deletes.indexOf("file_versions")).toBeLessThan(deletes.indexOf("files"));
+    expect(ops).toEqual(["delete:files", "storage:remove"]);
+    expect(storage.removed).toEqual([["vault/t1/f1/v1", "vault/t1/f1/v2"]]);
+  });
+
+  /**
+   * One statement. Two — versions, then the file — is how a failure between
+   * them left a trashed file with no versions.
+   */
+  it("deletes only the files row, letting the version rows cascade", async () => {
+    await DELETE(req(), { params });
+    expect(ops.filter((op) => op.startsWith("delete:"))).toEqual(["delete:files"]);
+  });
+
+  it("only deletes a row that is still in the trash, in the caller's tenant", async () => {
+    await DELETE(req(), { params });
+    expect(readFilters["files:delete"]).toMatchObject({
+      "eq:tenantId": "tenant-1",
+      "eq:id": FILE_ID,
+      "not:deletedAt": ["is", null],
+    });
   });
 
   it("copes with a file that has no versions", async () => {
     tableResults.file_versions = { data: [], error: null };
     expect((await DELETE(req(), { params })).status).toBe(200);
     // Nothing to remove, so storage is not called at all.
-    expect(storage.removed).toHaveLength(0);
-    expect(deletes).toEqual(["file_versions", "files"]);
+    expect(ops).toEqual(["delete:files"]);
   });
 
   it("skips version rows that carry no storage key", async () => {
     tableResults.file_versions = {
       data: [
-        { id: "v1", storageKey: null },
-        { id: "v2", storageKey: "vault/t1/f1/v2" },
+        { id: "v1", storageKey: null, ecoId: null },
+        { id: "v2", storageKey: "vault/t1/f1/v2", ecoId: null },
       ],
       error: null,
     };
     await DELETE(req(), { params });
     expect(storage.removed).toEqual([["vault/t1/f1/v2"]]);
   });
+
+  it("removes a key shared by a restored version once", async () => {
+    tableResults.file_versions = {
+      data: [
+        { id: "v1", storageKey: "vault/t1/f1/v1", ecoId: null },
+        { id: "v2", storageKey: "vault/t1/f1/v1", ecoId: null },
+      ],
+      error: null,
+    };
+    await DELETE(req(), { params });
+    expect(storage.removed).toEqual([["vault/t1/f1/v1"]]);
+  });
 });
 
-describe("DELETE /api/files/[fileId]/purge — failure leaves the file recoverable", () => {
+describe("DELETE /api/files/[fileId]/purge — a failure never costs the stored contents", () => {
   /**
-   * The important one. Storage runs first precisely so this branch can stop
-   * before anything is unrecoverable: the file stays in the trash, whole.
+   * The important one. The row delete is what can be refused, and it now runs
+   * before storage is touched: a refusal leaves the file whole in the trash.
    */
-  it("deletes no rows when storage removal fails", async () => {
-    storage.error = { message: "bucket unavailable" };
-    const res = await DELETE(req(), { params });
-
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/still in the trash/i);
-    expect(deletes).toHaveLength(0);
-  });
-
-  it("does not delete the file row when the version rows fail to go", async () => {
-    tableResults["file_versions:delete"] = { data: null, error: { message: "fk violation" } };
-    const res = await DELETE(req(), { params });
-
-    expect(res.status).toBe(409);
-    expect(deletes).toEqual(["file_versions"]);
-    // The message has to say the file is now incomplete, because it is.
-    expect((await res.json()).error).toMatch(/incomplete/i);
-  });
-
-  it("surfaces a failure to delete the file row", async () => {
+  it("leaves storage untouched when the file row cannot be deleted", async () => {
     tableResults["files:delete"] = { data: null, error: { message: "still referenced" } };
+
     const res = await DELETE(req(), { params });
+
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("still referenced");
+    const { error } = await res.json();
+    expect(error).toContain("still referenced");
+    expect(error).toMatch(/still in the trash/i);
+    expect(storage.removed).toHaveLength(0);
+    expect(logAudit).not.toHaveBeenCalled();
   });
 
-  it("writes no audit row when the purge did not complete", async () => {
-    storage.error = { message: "bucket unavailable" };
-    await DELETE(req(), { params });
+  it("leaves storage untouched when the file left the trash before the delete", async () => {
+    tableResults["files:delete"] = { data: [], error: null };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(409);
+    expect(storage.removed).toHaveLength(0);
     expect(logAudit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The record is already gone by then, so failing the request would report a
+   * purge that happened as one that did not. The orphaned keys go on the audit
+   * row so they can be cleaned up.
+   */
+  it("completes, and records the orphaned keys, when storage removal fails afterwards", async () => {
+    storage.error = { message: "bucket unavailable" };
+
+    const res = await DELETE(req(), { params });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).warnings?.[0]).toContain("bucket unavailable");
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "file.purge",
+        details: expect.objectContaining({
+          storageObjectsDestroyed: 0,
+          storageRemovalError: "bucket unavailable",
+          orphanedStorageKeys: JSON.stringify(["vault/t1/f1/v1", "vault/t1/f1/v2"]),
+        }),
+      })
+    );
   });
 });
 

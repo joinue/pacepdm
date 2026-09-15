@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 
 const RestoreSchema = z.object({
   version: z.number().int().positive(),
@@ -44,6 +45,16 @@ export async function POST(
         { error: "Cannot restore a frozen file. Use Change State first." },
         { status: 409 }
       );
+    }
+    // A restore is a new version, and would become what the approval
+    // releases. See lib/pending-approval.ts.
+    const refusal = await pendingApprovalRefusal(
+      tenantUser.tenantId,
+      fileId,
+      "restored to an earlier version"
+    );
+    if (refusal) {
+      return NextResponse.json({ error: refusal }, { status: 409 });
     }
 
     const parsed = await parseBody(request, RestoreSchema);

@@ -7,6 +7,7 @@ import { processMentions } from "@/lib/mentions";
 import { v4 as uuid } from "uuid";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { pendingApprovalRefusal } from "@/lib/pending-approval";
 
 export async function POST(
   request: NextRequest,
@@ -40,13 +41,19 @@ export async function POST(
         return NextResponse.json({ error: "File is checked out by another user" }, { status: 403 });
       }
     }
-    // Defense in depth: refuse to commit a new version if the file
-    // froze during the checkout window. In normal flow `isCheckedOut`
-    // and `isFrozen` are mutually exclusive (transition routes refuse
-    // checked-out files, checkout refuses frozen files), but a buggy
-    // path or direct DB write could still land us here. The released
-    // artifact stays immutable.
-    if (file.isFrozen) {
+    const formData = await request.formData();
+    const newFile = formData.get("file") as globalThis.File | null;
+    const comment = formData.get("comment") as string | null;
+
+    // Refuse to commit a new version if the file froze during the checkout
+    // window. The released artifact stays immutable.
+    //
+    // Undoing the checkout (no file) is let through on purpose: it writes no
+    // version, and it is the only way out for a file that is frozen and checked
+    // out at once. That state was reachable — an approval that completed while
+    // the file was checked out released it anyway — and before this, the
+    // message below pointed at an undo that this same check then refused.
+    if (newFile && file.isFrozen) {
       return NextResponse.json(
         {
           error:
@@ -55,10 +62,23 @@ export async function POST(
         { status: 409 }
       );
     }
+    // A version checked in mid-review is what the approval would release,
+    // unreviewed. Undoing the checkout changes nothing reviewers saw, so it
+    // stays allowed. See lib/pending-approval.ts.
+    if (newFile) {
+      const refusal = await pendingApprovalRefusal(
+        tenantUser.tenantId,
+        fileId,
+        "given a new version"
+      );
+      if (refusal) {
+        return NextResponse.json(
+          { error: `${refusal} Undo your checkout, or recall the request first.` },
+          { status: 409 }
+        );
+      }
+    }
 
-    const formData = await request.formData();
-    const newFile = formData.get("file") as globalThis.File | null;
-    const comment = formData.get("comment") as string | null;
     const now = new Date().toISOString();
     const newVersion = file.currentVersion + 1;
 
