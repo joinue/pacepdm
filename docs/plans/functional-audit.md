@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-14 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass fixes landing
+**Started:** 2026-08-05 · **Last updated:** 2026-09-14 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -576,6 +576,36 @@ AUTO numbers were already safe (a compare-and-swap counter on `tenants`).
 
 To find a tenant wedged by this before deploy:
 `select "tenantId", count(*), max(substring("ecoNumber" from '^ECO-(\d+)$')::int) from ecos group by 1 having count(*) <> max(substring("ecoNumber" from '^ECO-(\d+)$')::int)`.
+
+
+### ~~G. A leftover approval seat could decide a finished request~~ Fixed 2026-09-14
+
+Finding 4's fix gave ALL and MAJORITY steps one seat per member, and nothing
+closed the seats a step resolved without. `processDecision` checked only that a
+seat was `PENDING` — not that its request was, or that it was on the current
+step — and took the next step from `currentStepOrder + 1`. So on a two-step
+workflow whose first step was MAJORITY of three, the third member approving
+after step 2 opened completed the request with step 2 undecided; rejecting after
+completion wrote REJECTED onto the ECO, implemented or not.
+
+Around it: resolving a request was a plain update, so two deciding votes could
+both apply the outcome; completion applied a file transition without re-reading
+the file, releasing and freezing one still checked out (the stuck-file half of
+C); the ECO route let anyone move an ECO directly while its request was out; and
+a workflow that failed to start left the ECO SUBMITTED behind a seatless PENDING
+request.
+
+Now: stale seats are refused, a resolved step's seats become `NOT_NEEDED`,
+settling a step is a compare-and-swap, completion re-checks the file (not
+deleted, not checked out, still in the from-state) and the ECO (still SUBMITTED
+or IN_REVIEW) and returns a warning the Approvals page shows, the ECO route
+refuses status changes while a request is `PENDING`, and a failed start reverts.
+Typed effectivity is written at last — see
+[`change-control.md`](change-control.md) item 3.
+
+**Before deploy**, look for seatless requests an old failed start left behind —
+they will now hold their ECO until recalled:
+`select id, "entityId", title from approval_requests r where status = 'PENDING' and not exists (select 1 from approval_decisions d where d."requestId" = r.id and d.status = 'PENDING')`.
 
 ---
 

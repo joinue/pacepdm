@@ -93,6 +93,8 @@ export const approvalStatusConfig: Record<
   RECALLED: { label: "Recalled", variant: "muted" },
   REWORK: { label: "Rework", variant: "purple" },
   WAITING: { label: "Waiting", variant: "muted" },
+  // A seat its step resolved without. Missing, it rendered as "Pending".
+  NOT_NEEDED: { label: "Not needed", variant: "muted" },
 };
 
 export const modeLabels: Record<string, string> = {

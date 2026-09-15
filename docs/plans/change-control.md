@@ -166,6 +166,13 @@ Three things worth knowing before touching it:
 
 ### 3. Effectivity is stored but never read — **re-scoped 2026-08-06, and it shrank**
 
+**Correction, 2026-09-14: it was not stored either.** `PUT /api/ecos/[ecoId]`
+validated `effectivityType`, `effectiveFrom` and `effectiveSerial` and never
+wrote them, so every choice made in the ECO details tab since the columns
+shipped reported "ECO updated" and was gone on reload. Now written (DRAFT only),
+with a type switch clearing the value that no longer applies. Expect the live
+columns to be empty for ECOs edited before that date.
+
 The columns are typed, indexed and editable, and nothing queries them. The
 original framing of this item was "add the two queries that were impossible
 before". **That framing was wrong**, and correcting it is most of the value

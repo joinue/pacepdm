@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mock setup (vi.hoisted so variables are available in vi.mock factories) ──
 
-const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFrom } = vi.hoisted(
-  () => {
+const { tableResults, insertCalls, updateCalls, deleteCalls, claimResult, insertError, mockFrom } =
+  vi.hoisted(() => {
     type QueryResult = { data: unknown; error: unknown };
     /**
      * A table's result may be a fixed value or a function of the filters the
@@ -18,8 +18,18 @@ const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFr
     const insertCalls: Array<{ table: string; data: unknown }> = [];
     const updateCalls: Array<{ table: string; data: unknown; filters: Record<string, unknown> }> =
       [];
-    /** What the compare-and-swap claim in `processDecision` returns. */
-    const claimResult = { current: { data: { id: "dec-1" }, error: null } as QueryResult };
+    const deleteCalls: Array<{ table: string; filters: Record<string, unknown> }> = [];
+    /**
+     * What a conditional update's `.select().maybeSingle()` returns — the seat
+     * claim, the request's compare-and-swap, and the file and ECO writes. A
+     * function answers per table, so one of them can lose its race while the
+     * others land.
+     */
+    type ClaimHandler =
+      QueryResult | ((table: string, filters: Record<string, unknown>) => QueryResult);
+    const claimResult = {
+      current: { data: { id: "dec-1" }, error: null } as ClaimHandler,
+    };
     /**
      * Error returned by the next insert into `table`, which defaults to
      * `approval_requests` for the 23505 race. Point it at another table to
@@ -60,17 +70,34 @@ const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFr
         const entry = { table, data, filters: { ...filters } };
         updateCalls.push(entry);
         const updateChain: Record<string, (...args: unknown[]) => unknown> = {};
-        for (const m of ["eq", "in", "select"] as const) {
+        for (const m of ["eq", "in", "is", "select"] as const) {
           updateChain[m] = (...args: unknown[]) => {
-            if (m === "eq" && args.length === 2) entry.filters[args[0] as string] = args[1];
+            if (m !== "select" && args.length === 2) entry.filters[args[0] as string] = args[1];
             return updateChain;
           };
         }
-        updateChain.maybeSingle = () => claimResult.current;
-        updateChain.single = () => claimResult.current;
+        const claim = () => {
+          const handler = claimResult.current;
+          return typeof handler === "function" ? handler(table, entry.filters) : handler;
+        };
+        updateChain.maybeSingle = claim;
+        updateChain.single = claim;
         updateChain.then = ((resolve: (v: unknown) => void) =>
           resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
         return updateChain;
+      };
+
+      chain.delete = () => {
+        const entry = { table, filters: {} as Record<string, unknown> };
+        deleteCalls.push(entry);
+        const deleteChain: Record<string, (...args: unknown[]) => unknown> = {};
+        deleteChain.eq = (...args: unknown[]) => {
+          entry.filters[args[0] as string] = args[1];
+          return deleteChain;
+        };
+        deleteChain.then = ((resolve: (v: unknown) => void) =>
+          resolve({ data: null, error: null })) as unknown as (...args: unknown[]) => unknown;
+        return deleteChain;
       };
 
       chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
@@ -82,9 +109,16 @@ const { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFr
 
     const mockFrom = (table: string) => makeChain(table);
 
-    return { tableResults, insertCalls, updateCalls, claimResult, insertError, mockFrom };
-  }
-);
+    return {
+      tableResults,
+      insertCalls,
+      updateCalls,
+      deleteCalls,
+      claimResult,
+      insertError,
+      mockFrom,
+    };
+  });
 
 vi.mock("@/lib/db", () => ({
   getServiceClient: () => ({ from: mockFrom }),
@@ -126,6 +160,7 @@ function resetMockState() {
   vi.clearAllMocks();
   insertCalls.length = 0;
   updateCalls.length = 0;
+  deleteCalls.length = 0;
   claimResult.current = { data: { id: "dec-1" }, error: null };
   insertError.current = null;
   insertError.table = "approval_requests";
@@ -290,6 +325,96 @@ describe("startWorkflow", () => {
     // It stops at the first failed seat rather than writing the rest around
     // the gap — a request half-populated with seats is the deadlock.
     expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(1);
+  });
+
+  /**
+   * A failed start used to leave its PENDING request row behind. The entity
+   * guard then handed that husk back to every retry as "already started", and
+   * the ECO route refuses direct status changes while a request is pending —
+   * so the entity could neither be approved nor moved.
+   */
+  it("removes the half-created request when a seat cannot be created", async () => {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Review",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Reviewers" },
+        },
+      ],
+      error: null,
+    };
+    insertError.table = "approval_decisions";
+    insertError.current = { message: "deadlock detected" };
+
+    expect((await startWorkflow(baseParams)).success).toBe(false);
+
+    expect(deleteCalls).toEqual([
+      { table: "approval_decisions", filters: { requestId: "mock-uuid" } },
+      { table: "approval_requests", filters: { id: "mock-uuid" } },
+    ]);
+  });
+
+  it("writes nothing when a later step's group is empty", async () => {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Design",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Design" },
+        },
+        {
+          id: "step-2",
+          groupId: "group-2",
+          stepOrder: 2,
+          approvalMode: "ALL",
+          signatureLabel: "QA",
+          deadlineHours: null,
+          group: { id: "group-2", name: "QA" },
+        },
+      ],
+      error: null,
+    };
+    tableResults["approval_group_members"] = { data: [], error: null };
+
+    const result = await startWorkflow(baseParams);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no members");
+    // Not the request, and not step 1's seat.
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("fails instead of seating a request whose insert was rejected", async () => {
+    tableResults["approval_workflow_steps"] = {
+      data: [
+        {
+          id: "step-1",
+          groupId: "group-1",
+          stepOrder: 1,
+          approvalMode: "ANY",
+          signatureLabel: "Review",
+          deadlineHours: null,
+          group: { id: "group-1", name: "Reviewers" },
+        },
+      ],
+      error: null,
+    };
+    insertError.current = { code: "42501", message: "permission denied" };
+
+    const result = await startWorkflow(baseParams);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/permission denied/);
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(0);
   });
 
   it("notifies step 1 approval group members", async () => {
@@ -785,6 +910,11 @@ interface DecisionScenario {
   member?: boolean;
   /** True means this actor already voted on this step. */
   alreadyDecided?: boolean;
+  /**
+   * Order of the step the seat sits on. Defaults to the request's current
+   * step; null means the step was deleted from the workflow.
+   */
+  seatStepOrder?: number | null;
 }
 
 function givenDecision(scenario: DecisionScenario = {}) {
@@ -796,6 +926,7 @@ function givenDecision(scenario: DecisionScenario = {}) {
     transitionId: null,
     requestedById: "user-9",
     title: "Release bracket.sldprt",
+    status: "PENDING",
     currentStepOrder: 1,
     ...scenario.request,
   };
@@ -807,6 +938,10 @@ function givenDecision(scenario: DecisionScenario = {}) {
     status: scenario.status ?? "PENDING",
     approvalMode: scenario.approvalMode ?? "ANY",
     signatureLabel: "Engineering Approval",
+    step:
+      scenario.seatStepOrder === null
+        ? null
+        : { stepOrder: scenario.seatStepOrder ?? (request.currentStepOrder as number) },
     request,
   };
 
@@ -1261,7 +1396,15 @@ describe("processDecision — file transition side effects", () => {
       error: null,
     };
     tableResults["files"] = {
-      data: { name: "bracket.sldprt", revision: "A", createdById: "user-9", ...file },
+      data: {
+        name: "bracket.sldprt",
+        revision: "A",
+        createdById: "user-9",
+        lifecycleState: from,
+        isCheckedOut: false,
+        deletedAt: null,
+        ...file,
+      },
       error: null,
     };
     tableResults["tenant_users"] = { data: { fullName: "Alice" }, error: null };
@@ -1406,8 +1549,16 @@ describe("processDecision — file transition side effects", () => {
 describe("processDecision — ECO side effects", () => {
   beforeEach(resetMockState);
 
-  it("approves the ECO when the request completes", async () => {
+  function givenEco(status: string, extra: Record<string, unknown> = {}) {
     givenDecision({ request: { entityType: "eco", entityId: "eco-1", transitionId: null } });
+    tableResults["ecos"] = {
+      data: { ecoNumber: "ECO-0042", status, deletedAt: null, ...extra },
+      error: null,
+    };
+  }
+
+  it("approves the ECO when the request completes", async () => {
+    givenEco("SUBMITTED");
     await processDecision(approve);
     expect(lastUpdate("ecos")).toMatchObject({
       data: { status: "APPROVED" },
@@ -1416,9 +1567,414 @@ describe("processDecision — ECO side effects", () => {
   });
 
   it("rejects the ECO when the request is rejected", async () => {
-    givenDecision({ request: { entityType: "eco", entityId: "eco-1", transitionId: null } });
+    givenEco("IN_REVIEW");
     await processDecision({ ...approve, status: "REJECTED" });
     expect(lastUpdate("ecos")!.data).toMatchObject({ status: "REJECTED" });
+  });
+});
+
+// ── Leftover seats ─────────────────────────────────────────────────────────
+//
+// A MAJORITY step resolves before every seat has voted. Those seats used to
+// stay PENDING, and `processDecision` only checked the seat — never the
+// request or which step the seat was on. So a leftover seat approved after
+// step 2 had started was evaluated as the last step and completed the
+// request with step 2 undecided; rejected after completion, it rejected the
+// request and wrote REJECTED onto an ECO that might already be implemented.
+
+describe("processDecision — seats a resolved step left behind", () => {
+  beforeEach(resetMockState);
+
+  it("refuses a seat on a step the request has already moved past", async () => {
+    givenDecision({
+      approvalMode: "MAJORITY",
+      request: { currentStepOrder: 2 },
+      seatStepOrder: 1,
+    });
+
+    const result = await processDecision(approve);
+
+    expect(result.error).toMatch(/belongs to step 1, but the request is at step 2/);
+    // Refused before the claim, so nothing at all was written.
+    expect(updateCalls).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("refuses a late rejection on a request that is already approved", async () => {
+    givenDecision({
+      request: { status: "APPROVED", entityType: "eco", entityId: "eco-1" },
+    });
+    tableResults["ecos"] = {
+      data: { ecoNumber: "ECO-0042", status: "IMPLEMENTED", deletedAt: null },
+      error: null,
+    };
+
+    const result = await processDecision({ ...approve, status: "REJECTED" });
+
+    expect(result.error).toMatch(/already approved/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("refuses a decision on a recalled request", async () => {
+    givenDecision({ request: { status: "RECALLED" } });
+    expect((await processDecision(approve)).error).toMatch(/already recalled/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("refuses a seat whose step was deleted from the workflow", async () => {
+    givenDecision({ seatStepOrder: null });
+    expect((await processDecision(approve)).error).toMatch(/step has been removed/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  /**
+   * Rework on a leftover seat is the same hole by another door: the request
+   * goes to REWORK, the requester resubmits, and an approved request is
+   * reopened and applied a second time.
+   */
+  it("refuses rework from a seat on a finished request", async () => {
+    givenDecision({ request: { status: "APPROVED" } });
+    const result = await rejectForRework({
+      decisionId: "dec-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userFullName: "Alice",
+      comment: "one more thing",
+    });
+    expect(result.error).toMatch(/already approved/);
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
+describe("processDecision — closing the seats a resolved step no longer needs", () => {
+  beforeEach(resetMockState);
+
+  const closures = () =>
+    updateCalls.filter(
+      (c) =>
+        c.table === "approval_decisions" &&
+        (c.data as Record<string, unknown>).status === "NOT_NEEDED"
+    );
+
+  it("closes the unvoted MAJORITY seat when the step completes the request", async () => {
+    givenDecision({
+      approvalMode: "MAJORITY",
+      stepDecisions: [
+        { status: "APPROVED", deciderId: "user-1" },
+        { status: "APPROVED", deciderId: "user-2" },
+        { status: "PENDING", deciderId: null },
+      ],
+    });
+
+    await processDecision(approve);
+
+    expect(closures()).toHaveLength(1);
+    expect(closures()[0].filters).toEqual({
+      requestId: "req-1",
+      status: ["PENDING", "WAITING"],
+    });
+  });
+
+  it("closes only the resolved step's open seats when the request advances", async () => {
+    givenDecision({
+      approvalMode: "MAJORITY",
+      stepDecisions: [
+        { status: "APPROVED", deciderId: "user-1" },
+        { status: "APPROVED", deciderId: "user-2" },
+        { status: "PENDING", deciderId: null },
+      ],
+      allDecisions: [
+        { id: "dec-1", stepId: "step-1", step: { stepOrder: 1 } },
+        { id: "dec-2", stepId: "step-2", step: { stepOrder: 2 } },
+      ],
+    });
+    tableResults["approval_workflow_steps"] = {
+      data: { id: "step-2", groupId: "group-2", signatureLabel: "QA", deadlineHours: null },
+      error: null,
+    };
+
+    await processDecision(approve);
+
+    // Step 1's leftovers only — step 2's seats are the ones being activated.
+    expect(closures()).toHaveLength(1);
+    expect(closures()[0].filters).toEqual({
+      requestId: "req-1",
+      stepId: "step-1",
+      status: ["PENDING"],
+    });
+    const activation = updateCalls.find(
+      (c) => c.table === "approval_decisions" && c.filters.id === "dec-2"
+    );
+    expect(activation!.data).toMatchObject({ status: "PENDING" });
+  });
+
+  it("closes open and waiting seats when the request is rejected", async () => {
+    givenDecision({
+      approvalMode: "ALL",
+      stepDecisions: [
+        { status: "REJECTED", deciderId: "user-1" },
+        { status: "PENDING", deciderId: null },
+      ],
+    });
+
+    await processDecision({ ...approve, status: "REJECTED" });
+
+    expect(closures()).toHaveLength(1);
+    expect(closures()[0].filters).toEqual({
+      requestId: "req-1",
+      status: ["PENDING", "WAITING"],
+    });
+  });
+
+  it("closes nothing while the step is still collecting votes", async () => {
+    givenDecision({
+      approvalMode: "ALL",
+      stepDecisions: [
+        { status: "APPROVED", deciderId: "user-1" },
+        { status: "PENDING", deciderId: null },
+      ],
+    });
+    await processDecision(approve);
+    expect(closures()).toHaveLength(0);
+  });
+});
+
+/**
+ * Resolving a step is a compare-and-swap on the request still being PENDING at
+ * that step. Two deciding votes can land together, and a recall can land
+ * between a seat's claim and the step's resolution; only one writer may run
+ * the side effects.
+ */
+describe("processDecision — resolving the request is a compare-and-swap", () => {
+  beforeEach(resetMockState);
+
+  /** Every conditional write lands except the one against approval_requests. */
+  function requestAlreadySettled() {
+    claimResult.current = (table) =>
+      table === "approval_requests"
+        ? { data: null, error: null }
+        : { data: { id: "row-1" }, error: null };
+  }
+
+  it("completes a request only while it is still pending at this step", async () => {
+    givenDecision();
+    await processDecision(approve);
+    expect(lastUpdate("approval_requests")!.filters).toMatchObject({
+      id: "req-1",
+      status: "PENDING",
+      currentStepOrder: 1,
+    });
+  });
+
+  it("applies nothing when another decision already completed the request", async () => {
+    givenDecision({ request: { entityType: "eco", entityId: "eco-1" } });
+    tableResults["ecos"] = {
+      data: { ecoNumber: "ECO-0042", status: "IN_REVIEW", deletedAt: null },
+      error: null,
+    };
+    requestAlreadySettled();
+
+    const result = await processDecision(approve);
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.warning).toMatch(/already been settled/);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
+    expect(logAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "approval.completed" })
+    );
+  });
+
+  it("does not reject an ECO when the request was settled first", async () => {
+    givenDecision({ request: { entityType: "eco", entityId: "eco-1" } });
+    tableResults["ecos"] = {
+      data: { ecoNumber: "ECO-0042", status: "IN_REVIEW", deletedAt: null },
+      error: null,
+    };
+    requestAlreadySettled();
+
+    await processDecision({ ...approve, status: "REJECTED" });
+
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not activate the next step twice when two deciding votes land together", async () => {
+    givenDecision({
+      allDecisions: [
+        { id: "dec-1", stepId: "step-1", step: { stepOrder: 1 } },
+        { id: "dec-2", stepId: "step-2", step: { stepOrder: 2 } },
+      ],
+    });
+    requestAlreadySettled();
+
+    await processDecision(approve);
+
+    expect(
+      updateCalls.find((c) => c.table === "approval_decisions" && c.filters.id === "dec-2")
+    ).toBeUndefined();
+    expect(notifyApprovalGroupMembers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Approval can take days and nothing holds the file still meanwhile. The
+ * transition route refuses a checked-out file and one not in the transition's
+ * from-state; the approval path applied the move regardless, so a release
+ * approved while someone had the file checked out froze it with the lock still
+ * held. The approval stands; the move is skipped and the approver is told why.
+ */
+describe("processDecision — the file must still be where the approval found it", () => {
+  beforeEach(resetMockState);
+
+  function givenFile(from: string, to: string, file: Record<string, unknown>) {
+    givenDecision({ request: { entityType: "file", transitionId: "trans-1" } });
+    tableResults["lifecycle_transitions"] = {
+      data: { id: "trans-1", name: "Release", toState: { name: to }, fromState: { name: from } },
+      error: null,
+    };
+    tableResults["files"] = {
+      data: {
+        name: "bracket.sldprt",
+        revision: "A",
+        createdById: "user-9",
+        lifecycleState: from,
+        isCheckedOut: false,
+        deletedAt: null,
+        checkedOutBy: null,
+        ...file,
+      },
+      error: null,
+    };
+    tableResults["tenant_users"] = { data: { fullName: "Alice" }, error: null };
+  }
+
+  function expectFileUntouched() {
+    expect(updateCalls.filter((c) => c.table === "files")).toHaveLength(0);
+    expect(notifyFileTransition).not.toHaveBeenCalled();
+    expect(logAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "file.transition.approved" })
+    );
+  }
+
+  it("does not release a file that is checked out", async () => {
+    givenFile("In Review", "Released", {
+      isCheckedOut: true,
+      checkedOutBy: { fullName: "Bob" },
+    });
+
+    const result = await processDecision(approve);
+
+    expectFileUntouched();
+    expect(result).toMatchObject({ success: true, requestStatus: "APPROVED" });
+    expect(result.warning).toMatch(/not moved to Released/);
+    expect(result.warning).toMatch(/checked out by Bob/);
+  });
+
+  it("does not move a file whose state changed while awaiting approval", async () => {
+    givenFile("In Review", "Released", { lifecycleState: "WIP" });
+
+    const result = await processDecision(approve);
+
+    expectFileUntouched();
+    expect(result.warning).toMatch(/changed state to WIP while awaiting approval/);
+  });
+
+  it("does not move a file that was deleted while awaiting approval", async () => {
+    givenFile("In Review", "Released", { deletedAt: "2026-09-01T00:00:00.000Z" });
+    const result = await processDecision(approve);
+    expectFileUntouched();
+    expect(result.warning).toMatch(/was deleted/);
+  });
+
+  it("says so when the file no longer exists", async () => {
+    givenFile("In Review", "Released", {});
+    tableResults["files"] = { data: null, error: null };
+    const result = await processDecision(approve);
+    expectFileUntouched();
+    expect(result.warning).toMatch(/no longer exists/);
+  });
+
+  it("makes the write conditional on the state it just checked", async () => {
+    givenFile("In Review", "Released", {});
+    await processDecision(approve);
+    expect(lastUpdate("files")!.filters).toMatchObject({
+      id: "file-1",
+      tenantId: "tenant-1",
+      lifecycleState: "In Review",
+      isCheckedOut: false,
+      deletedAt: null,
+    });
+  });
+
+  it("does not announce a move that a concurrent check-out beat", async () => {
+    givenFile("In Review", "Released", {});
+    claimResult.current = (table) =>
+      table === "files" ? { data: null, error: null } : { data: { id: "row-1" }, error: null };
+
+    const result = await processDecision(approve);
+
+    expect(result.warning).toMatch(/changed while the approval was being applied/);
+    expect(notifyFileTransition).not.toHaveBeenCalled();
+  });
+
+  it("records the skipped move on the completion audit row", async () => {
+    givenFile("In Review", "Released", { isCheckedOut: true });
+    await processDecision(approve);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "approval.completed",
+        details: expect.objectContaining({
+          effectNotApplied: expect.stringMatching(/checked out/),
+        }),
+      })
+    );
+  });
+});
+
+describe("processDecision — the ECO must still be awaiting the approval", () => {
+  beforeEach(resetMockState);
+
+  function givenEco(status: string, extra: Record<string, unknown> = {}) {
+    givenDecision({ request: { entityType: "eco", entityId: "eco-1", transitionId: null } });
+    tableResults["ecos"] = {
+      data: { ecoNumber: "ECO-0042", status, deletedAt: null, ...extra },
+      error: null,
+    };
+  }
+
+  it("does not turn an implemented ECO back into REJECTED", async () => {
+    givenEco("IMPLEMENTED");
+
+    const result = await processDecision({ ...approve, status: "REJECTED" });
+
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(result).toMatchObject({ success: true, requestStatus: "REJECTED" });
+    expect(result.warning).toMatch(/ECO-0042 is now Implemented/);
+  });
+
+  it("does not approve an ECO that has gone back to draft", async () => {
+    givenEco("DRAFT");
+    const result = await processDecision(approve);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(result.warning).toMatch(/is now Draft/);
+  });
+
+  it("does not write onto a deleted ECO", async () => {
+    givenEco("IN_REVIEW", { deletedAt: "2026-09-01T00:00:00.000Z" });
+    const result = await processDecision(approve);
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+    expect(result.warning).toMatch(/no longer exists/);
+  });
+
+  it("makes the status write conditional on the ECO still awaiting approval", async () => {
+    givenEco("SUBMITTED");
+    await processDecision(approve);
+    expect(lastUpdate("ecos")!.filters).toMatchObject({
+      id: "eco-1",
+      tenantId: "tenant-1",
+      status: ["SUBMITTED", "IN_REVIEW"],
+    });
   });
 });
 

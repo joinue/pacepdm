@@ -102,6 +102,21 @@ export function ecoCanTransition(from: string, to: string): boolean {
  */
 export const ECO_STATES_LOCKING_CARRIED_BOMS = ["SUBMITTED", "IN_REVIEW", "APPROVED"] as const;
 
+/**
+ * The ECO statuses an approval workflow can be assigned to, and so the only
+ * statuses an ECO can be in while its approval request is out.
+ *
+ * `PUT /api/ecos/[ecoId]` starts a workflow when an ECO enters one of these,
+ * and the approval engine only writes a request's outcome onto an ECO that is
+ * still in one. An ECO anywhere else has moved on without the approval, and
+ * overwriting it is how a late rejection used to reach an implemented ECO.
+ */
+export const ECO_STATUSES_AWAITING_APPROVAL = ["SUBMITTED", "IN_REVIEW"] as const;
+
+export function ecoAwaitsApproval(status: string): boolean {
+  return (ECO_STATUSES_AWAITING_APPROVAL as readonly string[]).includes(status);
+}
+
 // ─── Approval ─────────────────────────────────────────────────────────────
 export const APPROVAL_STATUS_LABELS: Record<string, string> = {
   PENDING: "Pending",

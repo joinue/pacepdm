@@ -9,6 +9,11 @@ import {
 import { v4 as uuid } from "uuid";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
 import { nextRevision } from "@/lib/revision";
+import {
+  ECO_STATUS_LABELS,
+  ECO_STATUSES_AWAITING_APPROVAL,
+  ecoAwaitsApproval,
+} from "@/lib/status-flows";
 
 /**
  * Core approval workflow engine.
@@ -112,6 +117,58 @@ export async function startWorkflow(params: StartWorkflowParams) {
     return { success: false, error: "Workflow has no steps" };
   }
 
+  // Work out every step's seats before writing anything.
+  //
+  // **How many rows a step gets is what makes ALL and MAJORITY work.**
+  // A decision row can only ever record one decider — `processDecision`
+  // claims it with a compare-and-swap on `status = 'PENDING'` and stamps a
+  // single `deciderId`. So a step needing several approvers needs several
+  // rows, one per member of its group.
+  //
+  // With a single row per step regardless of mode (the previous shape),
+  // ALL deadlocked with two or more members and MAJORITY with three or
+  // more: the one row was claimed by the first approver, the step's
+  // "everyone has approved" test could never see a second decider, and no
+  // one else could act because the row was no longer PENDING. The request
+  // sat PENDING forever with no way out but a recall. Both modes are
+  // offered in Admin → Workflows, so the configuration was reachable.
+  //
+  // The approver set is frozen here rather than re-read when each decision
+  // lands. Someone added to the group mid-flight does not gain a vote on a
+  // request that was already out, and — more to the point — someone
+  // *removed* cannot leave an ALL step permanently one approval short.
+  //
+  // This used to run after the request row was inserted, so an empty group
+  // returned an error *and* left a PENDING request behind with no seats.
+  // The entity guard above then handed that husk back to every later
+  // attempt as "already started", and the ECO route refuses direct status
+  // changes while a request is pending — so the entity was locked.
+  const seatsByStep = new Map<string, number>();
+  for (const step of steps as WorkflowStep[]) {
+    let seats = 1;
+    if (step.approvalMode === "ALL" || step.approvalMode === "MAJORITY") {
+      const { data: members } = await db
+        .from("approval_group_members")
+        .select("userId")
+        .eq("groupId", step.groupId);
+      seats = (members ?? []).length;
+
+      // An empty group cannot satisfy either mode. Failing here beats
+      // creating a request that can never complete — and the file or ECO
+      // stays in its current state instead of being stranded mid-flow.
+      if (seats === 0) {
+        return {
+          success: false,
+          error:
+            `Approval step ${step.stepOrder} ("${step.signatureLabel || "Approved"}") uses ` +
+            `${step.approvalMode} mode but its group has no members. Add members in ` +
+            `Admin → Approval Groups, or change the step to "Any one member".`,
+        };
+      }
+    }
+    seatsByStep.set(step.id, seats);
+  }
+
   // Create the approval request. The unique partial index on
   // (tenantId, clientRequestKey) is the second line of defense against
   // a race between the pre-check above and this insert: if another
@@ -135,70 +192,39 @@ export async function startWorkflow(params: StartWorkflowParams) {
     updatedAt: now,
   });
 
-  if (insertErr && insertErr.code === "23505" && params.clientRequestKey) {
-    const { data: existing } = await db
-      .from("approval_requests")
-      .select("id")
-      .eq("tenantId", params.tenantId)
-      .eq("clientRequestKey", params.clientRequestKey)
-      .maybeSingle();
-    if (existing) {
-      return {
-        success: true,
-        requestId: existing.id,
-        pendingApproval: true,
-        message: "Approval workflow already started",
-      };
+  if (insertErr) {
+    if (insertErr.code === "23505" && params.clientRequestKey) {
+      const { data: existing } = await db
+        .from("approval_requests")
+        .select("id")
+        .eq("tenantId", params.tenantId)
+        .eq("clientRequestKey", params.clientRequestKey)
+        .maybeSingle();
+      if (existing) {
+        return {
+          success: true,
+          requestId: existing.id,
+          pendingApproval: true,
+          message: "Approval workflow already started",
+        };
+      }
     }
+    // Any other rejection used to fall through to inserting seats for a
+    // request row that did not exist.
+    return {
+      success: false,
+      error: `Could not create the approval request: ${insertErr.message}`,
+    };
   }
 
-  // Create decisions for every step (only step 1 starts active).
-  //
-  // **How many rows a step gets is what makes ALL and MAJORITY work.**
-  // A decision row can only ever record one decider — `processDecision`
-  // claims it with a compare-and-swap on `status = 'PENDING'` and stamps a
-  // single `deciderId`. So a step needing several approvers needs several
-  // rows, one per member of its group.
-  //
-  // With a single row per step regardless of mode (the previous shape),
-  // ALL deadlocked with two or more members and MAJORITY with three or
-  // more: the one row was claimed by the first approver, the step's
-  // "everyone has approved" test could never see a second decider, and no
-  // one else could act because the row was no longer PENDING. The request
-  // sat PENDING forever with no way out but a recall. Both modes are
-  // offered in Admin → Workflows, so the configuration was reachable.
-  //
-  // The approver set is frozen here rather than re-read when each decision
-  // lands. Someone added to the group mid-flight does not gain a vote on a
-  // request that was already out, and — more to the point — someone
-  // *removed* cannot leave an ALL step permanently one approval short.
+  // Create decisions for every step (only step 1 starts active), using the
+  // seat counts worked out above.
   for (const step of steps as WorkflowStep[]) {
     const deadlineAt = step.deadlineHours
       ? new Date(Date.now() + step.deadlineHours * 3600000).toISOString()
       : null;
     const isFirst = step.stepOrder === 1;
-
-    let seats = 1;
-    if (step.approvalMode === "ALL" || step.approvalMode === "MAJORITY") {
-      const { data: members } = await db
-        .from("approval_group_members")
-        .select("userId")
-        .eq("groupId", step.groupId);
-      seats = (members ?? []).length;
-
-      // An empty group cannot satisfy either mode. Failing here beats
-      // creating a request that can never complete — and the file or ECO
-      // stays in its current state instead of being stranded mid-flow.
-      if (seats === 0) {
-        return {
-          success: false,
-          error:
-            `Approval step ${step.stepOrder} ("${step.signatureLabel || "Approved"}") uses ` +
-            `${step.approvalMode} mode but its group has no members. Add members in ` +
-            `Admin → Approval Groups, or change the step to "Any one member".`,
-        };
-      }
-    }
+    const seats = seatsByStep.get(step.id) ?? 1;
 
     for (let seat = 0; seat < seats; seat++) {
       const { error } = await db.from("approval_decisions").insert({
@@ -219,12 +245,21 @@ export async function startWorkflow(params: StartWorkflowParams) {
       // a recall, and the entity would be stranded pre-transition — which is
       // finding 4 in docs/plans/functional-audit.md, arrived at by a
       // different route.
+      //
+      // The request row already exists by now, so it is removed on the way
+      // out. Left in place it is a PENDING request the entity guard above
+      // hands back to every retry as "already started".
       if (error) {
+        const leftBehind = await discardRequest(requestId);
         return {
           success: false,
           error:
             `Could not create approval seat ${seat + 1} of ${seats} for step ` +
-            `${step.stepOrder}: ${error.message}`,
+            `${step.stepOrder}: ${error.message}` +
+            (leftBehind
+              ? `. The half-created request could not be removed (${leftBehind}) — ` +
+                `recall it from the Approvals page before trying again.`
+              : ""),
         };
       }
     }
@@ -281,10 +316,12 @@ export async function processDecision({
   const db = getServiceClient();
   const now = new Date().toISOString();
 
-  // Get the decision with its request
+  // Get the decision with its request, and the order of the step it sits on
   const { data: decision } = await db
     .from("approval_decisions")
-    .select("*, request:approval_requests!approval_decisions_requestId_fkey(*)")
+    .select(
+      "*, request:approval_requests!approval_decisions_requestId_fkey(*), step:approval_workflow_steps!approval_decisions_stepId_fkey(stepOrder)"
+    )
     .eq("id", decisionId)
     .single();
 
@@ -296,6 +333,8 @@ export async function processDecision({
   // Return the same "not found" message so we don't leak existence.
   if (decision.request?.tenantId !== tenantId) return { error: "Decision not found" };
   if (decision.status !== "PENDING") return { error: "This step has already been decided" };
+  const stale = staleSeatRefusal(decision);
+  if (stale) return { error: stale };
 
   // Verify user is in the approval group
   const { data: membership } = await db
@@ -433,20 +472,22 @@ export async function processDecision({
     return { success: true, requestComplete: false, requestStatus: "PENDING", stepResolved: false };
   }
 
+  const currentStepOrder = request.currentStepOrder || 1;
+
   if (!stepApproved) {
-    // Step rejected — reject the entire request
-    const rejectFailed = await applied(
-      db
-        .from("approval_requests")
-        .update({
-          status: "REJECTED",
-          updatedAt: now,
-          completedAt: now,
-        })
-        .eq("id", requestId),
+    // Step rejected — reject the entire request, if it is still at this step.
+    const rejected = await settleStep(
+      requestId,
+      currentStepOrder,
+      { status: "REJECTED", updatedAt: now, completedAt: now },
       "Your rejection was recorded, but the request could not be closed"
     );
-    if (rejectFailed) return { error: rejectFailed };
+    if ("error" in rejected) return { error: rejected.error };
+    if (!rejected.won) return settledElsewhere(requestId);
+
+    // Nothing on a rejected request is waiting any more — neither this step's
+    // other seats nor the steps that will now never start.
+    await closeOpenSeats({ requestId }, ["PENDING", "WAITING"]);
 
     await addHistory(
       requestId,
@@ -476,7 +517,11 @@ export async function processDecision({
       action: `approval.rejected`,
       entityType: request.entityType,
       entityId: request.entityId,
-      details: { title: request.title, comment: comment || null },
+      details: {
+        title: request.title,
+        comment: comment || null,
+        effectNotApplied: rejectionEffect,
+      },
     });
 
     return {
@@ -494,7 +539,6 @@ export async function processDecision({
     .eq("requestId", requestId)
     .order("createdAt");
 
-  const currentStepOrder = request.currentStepOrder || 1;
   const nextStepDecisions = (allDecisions || []).filter((d) => {
     const step = d.step as unknown as { stepOrder: number } | null;
     return step && step.stepOrder === currentStepOrder + 1;
@@ -504,6 +548,23 @@ export async function processDecision({
     // Advance to next step
     const nextStep = nextStepDecisions[0];
     const nextStepData = nextStep.step as unknown as { stepOrder: number };
+
+    // Claim the advance before acting on it. Two approvers landing the
+    // deciding votes at the same moment both see the step as resolved; only
+    // the one whose compare-and-swap moves the cursor activates the next step
+    // and notifies its group.
+    const advanced = await settleStep(
+      requestId,
+      currentStepOrder,
+      { currentStepOrder: nextStepData.stepOrder, updatedAt: now },
+      "Your approval was recorded, but the request could not be moved to the next step"
+    );
+    if ("error" in advanced) return { error: advanced.error };
+    if (!advanced.won) return settledElsewhere(requestId);
+
+    // This step is done. Its remaining seats would otherwise sit PENDING in
+    // someone's inbox, and approving one used to complete the whole request.
+    await closeOpenSeats({ requestId, stepId }, ["PENDING"]);
 
     // Activate next step's decisions. The deadline is already set on the
     // decision row when the workflow was started, so we only need to flip
@@ -540,18 +601,6 @@ export async function processDecision({
         if (deadlineFailed) return { error: deadlineFailed };
       }
     }
-
-    const advanceFailed = await applied(
-      db
-        .from("approval_requests")
-        .update({
-          currentStepOrder: nextStepData.stepOrder,
-          updatedAt: now,
-        })
-        .eq("id", requestId),
-      "The next step was activated, but the request still points at the previous one"
-    );
-    if (advanceFailed) return { error: advanceFailed };
 
     await addHistory(
       requestId,
@@ -596,22 +645,22 @@ export async function processDecision({
   }
 
   // No more steps — workflow complete, request approved
-  const completeFailed = await applied(
-    db
-      .from("approval_requests")
-      .update({
-        status: "APPROVED",
-        updatedAt: now,
-        completedAt: now,
-      })
-      .eq("id", requestId),
+  const completed = await settleStep(
+    requestId,
+    currentStepOrder,
+    { status: "APPROVED", updatedAt: now, completedAt: now },
     "Your approval was recorded, but the request could not be completed"
   );
   // Returned before the side effects below, deliberately. Releasing the file
   // or the ECO while the request that authorises it is still PENDING is the
   // worse of the two half-states — it is the one that changes what people
-  // build from.
-  if (completeFailed) return { error: completeFailed };
+  // build from. And when the compare-and-swap matched nothing, somebody else
+  // already completed (or recalled) the request: applying the effects again
+  // is exactly what it exists to stop.
+  if ("error" in completed) return { error: completed.error };
+  if (!completed.won) return settledElsewhere(requestId);
+
+  await closeOpenSeats({ requestId }, ["PENDING", "WAITING"]);
 
   await addHistory(requestId, "COMPLETED", userId, "All approval steps completed — approved");
 
@@ -636,7 +685,11 @@ export async function processDecision({
     action: `approval.completed`,
     entityType: request.entityType,
     entityId: request.entityId,
-    details: { title: request.title, signatureLabel: decision.signatureLabel },
+    details: {
+      title: request.title,
+      signatureLabel: decision.signatureLabel,
+      effectNotApplied: approvalEffect,
+    },
   });
 
   return {
@@ -718,7 +771,9 @@ export async function rejectForRework({
 
   const { data: decision } = await db
     .from("approval_decisions")
-    .select("*, request:approval_requests!approval_decisions_requestId_fkey(*)")
+    .select(
+      "*, request:approval_requests!approval_decisions_requestId_fkey(*), step:approval_workflow_steps!approval_decisions_stepId_fkey(stepOrder)"
+    )
     .eq("id", decisionId)
     .single();
 
@@ -726,6 +781,10 @@ export async function rejectForRework({
   // Defense in depth — see processDecision for the rationale.
   if (decision.request?.tenantId !== tenantId) return { error: "Decision not found" };
   if (decision.status !== "PENDING") return { error: "Step already decided" };
+  // A leftover seat must not send a finished request back for rework either:
+  // resubmitting it would reopen an approved request and apply it again.
+  const stale = staleSeatRefusal(decision);
+  if (stale) return { error: stale };
 
   // Verify membership
   const { data: membership } = await db
@@ -930,13 +989,27 @@ async function handleRequestCompletion(
       };
 
       // Pull the file up-front so we have name + createdById for the
-      // transition notification below, and revision for the optional
-      // revision bump on Released→WIP.
+      // transition notification below, revision for the optional revision
+      // bump on Released→WIP — and the state it is in *now*, which is not
+      // necessarily the state it was in when approval was requested.
       const { data: file } = await db
         .from("files")
-        .select("name, revision, createdById")
+        .select(
+          "name, revision, createdById, lifecycleState, isCheckedOut, deletedAt, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)"
+        )
         .eq("id", request.entityId)
-        .single();
+        .eq("tenantId", tenantId)
+        .maybeSingle();
+
+      // Approval can take days, and nothing stops the file moving meanwhile.
+      // The transition route refuses a checked-out file and a file not in the
+      // transition's from-state; this path applied it regardless. Releasing a
+      // checked-out file froze it with the lock still held, which nobody could
+      // then check in. The approval stands; the move does not.
+      const blocked = fileTransitionBlocker(file, transition.fromState.name);
+      if (!file || blocked) {
+        return `The request was approved, but the file was not moved to ${transition.toState.name}: ${blocked}`;
+      }
 
       if (transition.toState.name === "Released") updateData.isFrozen = true;
       if (transition.fromState.name === "Released" && transition.toState.name === "WIP") {
@@ -965,11 +1038,29 @@ async function handleRequestCompletion(
       }
       if (transition.toState.name === "Obsolete") updateData.isFrozen = true;
 
-      const transitionFailed = await applied(
-        db.from("files").update(updateData).eq("id", request.entityId),
-        `The request was approved, but the file did not move to ${transition.toState.name}`
-      );
-      if (transitionFailed) return transitionFailed;
+      // Conditional on the same three facts just checked, so a check-out or
+      // a direct transition landing between the read and this write is not
+      // overwritten.
+      const { data: moved, error: moveError } = await db
+        .from("files")
+        .update(updateData)
+        .eq("id", request.entityId)
+        .eq("tenantId", tenantId)
+        .eq("lifecycleState", transition.fromState.name)
+        .eq("isCheckedOut", false)
+        .is("deletedAt", null)
+        .select("id")
+        .maybeSingle();
+      if (moveError) {
+        return `The request was approved, but the file did not move to ${transition.toState.name}: ${moveError.message}`;
+      }
+      if (!moved) {
+        return (
+          `The request was approved, but ${file.name} changed while the approval was being ` +
+          `applied, so it was not moved to ${transition.toState.name}. Check the file, then ` +
+          `request the transition again.`
+        );
+      }
 
       if (file) {
         // Use the actor's display name from the completion context — the
@@ -1002,20 +1093,225 @@ async function handleRequestCompletion(
   }
 
   if (request.entityType === "eco") {
-    const ecoFailed = await applied(
-      db
-        .from("ecos")
-        .update({
-          status: status === "APPROVED" ? "APPROVED" : "REJECTED",
-          updatedAt: now,
-        })
-        .eq("id", request.entityId),
-      `The request was ${status.toLowerCase()}, but the ECO's status did not change`
-    );
-    if (ecoFailed) return ecoFailed;
+    const outcome = status.toLowerCase();
+    const { data: eco, error: readError } = await db
+      .from("ecos")
+      .select("ecoNumber, status, deletedAt")
+      .eq("id", request.entityId)
+      .eq("tenantId", tenantId)
+      .maybeSingle();
+    if (readError) {
+      return `The request was ${outcome}, but the ECO could not be read to apply it: ${readError.message}`;
+    }
+    if (!eco || eco.deletedAt) {
+      return `The request was ${outcome}, but the ECO no longer exists, so no status was changed.`;
+    }
+
+    // Only an ECO still waiting on this approval takes its outcome. Anything
+    // else means the ECO moved on without it, and writing the outcome anyway
+    // is how a late rejection turned an implemented ECO back into REJECTED.
+    if (!ecoAwaitsApproval(eco.status)) {
+      return (
+        `The request was ${outcome}, but ${eco.ecoNumber} is now ` +
+        `${ECO_STATUS_LABELS[eco.status] ?? eco.status}, so its status was left as it is.`
+      );
+    }
+
+    const { data: updated, error: ecoError } = await db
+      .from("ecos")
+      .update({ status: status === "APPROVED" ? "APPROVED" : "REJECTED", updatedAt: now })
+      .eq("id", request.entityId)
+      .eq("tenantId", tenantId)
+      .in("status", [...ECO_STATUSES_AWAITING_APPROVAL])
+      .select("id")
+      .maybeSingle();
+    if (ecoError) {
+      return `The request was ${outcome}, but the ECO's status did not change: ${ecoError.message}`;
+    }
+    if (!updated) {
+      return (
+        `The request was ${outcome}, but ${eco.ecoNumber} changed status while the approval ` +
+        `was being applied, so its status was left as it is.`
+      );
+    }
   }
 
   return revisionNote;
+}
+
+/**
+ * Why an approved file transition cannot be applied to the file as it stands,
+ * or null when it can. Mirrors the refusals in `files/[fileId]/transition`.
+ */
+function fileTransitionBlocker(
+  file: {
+    name: string;
+    lifecycleState: string;
+    isCheckedOut: boolean;
+    deletedAt: string | null;
+    checkedOutBy?: { fullName: string | null } | { fullName: string | null }[] | null;
+  } | null,
+  fromStateName: string
+): string | null {
+  if (!file) return "the file no longer exists.";
+  if (file.deletedAt) return `${file.name} was deleted while awaiting approval.`;
+  if (file.isCheckedOut) {
+    const holder = Array.isArray(file.checkedOutBy) ? file.checkedOutBy[0] : file.checkedOutBy;
+    return (
+      `${file.name} is checked out${holder?.fullName ? ` by ${holder.fullName}` : ""}. ` +
+      `Once it is checked in, request the transition again.`
+    );
+  }
+  if (file.lifecycleState !== fromStateName) {
+    return (
+      `${file.name} changed state to ${file.lifecycleState} while awaiting approval, ` +
+      `and this transition starts from ${fromStateName}.`
+    );
+  }
+  return null;
+}
+
+/**
+ * Why a PENDING seat can no longer be decided, or null when it can.
+ *
+ * A seat's own status is not enough. A MAJORITY step resolves before every
+ * seat has voted, and those seats used to stay PENDING: approving one after
+ * step 2 had started was evaluated as the last step and completed the request
+ * with step 2 never decided, and rejecting one after completion — even after
+ * the ECO was implemented — rejected the request and wrote REJECTED onto the
+ * ECO. Resolved steps now close their seats (`closeOpenSeats`), but rows left
+ * open before that change still exist, and a race can still produce one.
+ */
+function staleSeatRefusal(decision: {
+  step?: { stepOrder: number } | null;
+  request: { status: string; currentStepOrder: number | null };
+}): string | null {
+  const { request } = decision;
+  if (request.status !== "PENDING") {
+    return request.status === "REWORK"
+      ? "This request has been sent back for rework. It can be decided again once it is resubmitted."
+      : `This request is already ${request.status.toLowerCase()} and no longer needs a decision.`;
+  }
+  const currentStep = request.currentStepOrder || 1;
+  const seatStep = decision.step?.stepOrder;
+  if (seatStep === undefined) {
+    return (
+      "This approval's workflow step has been removed, so it cannot be decided. " +
+      "Ask the requester to recall the request and submit it again."
+    );
+  }
+  if (seatStep !== currentStep) {
+    return (
+      `This approval belongs to step ${seatStep}, but the request is at step ` +
+      `${currentStep}, so it no longer needs a decision.`
+    );
+  }
+  return null;
+}
+
+/**
+ * Resolve the step a request is at: approve, reject, or advance it.
+ *
+ * A compare-and-swap on the request still being PENDING at that step. Two
+ * deciding votes landing together both see the step as resolved, and a recall
+ * can land between a claim and its resolution; whichever write matches the
+ * row wins, and `won: false` tells the loser to stop before any side effect.
+ */
+async function settleStep(
+  requestId: string,
+  stepOrder: number,
+  changes: Record<string, unknown>,
+  what: string
+): Promise<{ error: string } | { won: boolean }> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from("approval_requests")
+    .update(changes)
+    .eq("id", requestId)
+    .eq("status", "PENDING")
+    .eq("currentStepOrder", stepOrder)
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: `${what}: ${error.message}` };
+  return { won: !!data };
+}
+
+/**
+ * The answer for a decision whose vote landed but whose step had already been
+ * resolved by the time it tried to resolve it. The vote stands on its seat; it
+ * simply changed nothing.
+ */
+async function settledElsewhere(requestId: string): Promise<{
+  success: true;
+  requestComplete: boolean;
+  requestStatus: string;
+  stepResolved: boolean;
+  warning: string;
+  error?: undefined;
+}> {
+  const db = getServiceClient();
+  const { data } = await db
+    .from("approval_requests")
+    .select("status")
+    .eq("id", requestId)
+    .maybeSingle();
+  const requestStatus: string = data?.status ?? "PENDING";
+  return {
+    success: true,
+    requestComplete: requestStatus !== "PENDING",
+    requestStatus,
+    stepResolved: true,
+    warning:
+      "Your decision was recorded, but this step had already been settled by another " +
+      "decision, so it changed nothing.",
+  };
+}
+
+/**
+ * Close the seats a resolved step, or a finished request, no longer needs.
+ *
+ * Without this a MAJORITY step that resolved at two of three left the third
+ * seat PENDING — in that approver's inbox, in the badge count, in the overdue
+ * reminder sweep (all of which read `status = 'PENDING'`) and, worst, still
+ * decidable. See `staleSeatRefusal` for what deciding one did.
+ *
+ * `NOT_NEEDED` rather than recall's `RECALLED`: nobody withdrew anything, the
+ * step just stopped waiting for this vote. The column is TEXT with no CHECK.
+ *
+ * Logged rather than returned. By the time this runs the request has already
+ * moved, and failing here would skip activating the next step or applying the
+ * outcome, which is the worse half-state; a seat left open is refused by
+ * `staleSeatRefusal` regardless.
+ */
+async function closeOpenSeats(scope: { requestId: string; stepId?: string }, statuses: string[]) {
+  const db = getServiceClient();
+  let seats = db
+    .from("approval_decisions")
+    .update({ status: "NOT_NEEDED" })
+    .eq("requestId", scope.requestId);
+  if (scope.stepId) seats = seats.eq("stepId", scope.stepId);
+  const { error } = await seats.in("status", statuses);
+  if (error) {
+    console.error(
+      `[approvals] failed to close open seats on request ${scope.requestId}:`,
+      error.message
+    );
+  }
+}
+
+/**
+ * Remove a request that failed partway through creation, seats first.
+ * Returns null when it is gone, or the reason it is not.
+ */
+async function discardRequest(requestId: string): Promise<string | null> {
+  const db = getServiceClient();
+  const { error: seatsError } = await db
+    .from("approval_decisions")
+    .delete()
+    .eq("requestId", requestId);
+  if (seatsError) return seatsError.message;
+  const { error: requestError } = await db.from("approval_requests").delete().eq("id", requestId);
+  return requestError ? requestError.message : null;
 }
 
 /**

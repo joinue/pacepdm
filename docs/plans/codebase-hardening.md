@@ -10,7 +10,7 @@ raw-fetch: 44
 generic-error-toast: 8
 swallowed-error: 6
 token-violations: 6
-component-tests: 11-->
+component-tests: 13-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -275,6 +275,11 @@ and `renderHook` needs jsdom. Both pin rollback behaviour that is invisible
 until it is wrong: an optimistic edit restores only its own row (so a
 concurrent edit or a realtime refresh that landed in between survives), and a
 `removeFile` rollback does not re-insert a row a refresh already brought back.
+
+`approvals/page.test.tsx` and `eco-approval-tab.test.tsx` (2026-09-14) pin two
+things the approval engine now returns that the UI used to drop: a decision's
+`warning` — an approved request whose file did not move must say so — and the
+`NOT_NEEDED` seat status, which the ECO tab rendered as "Pending".
 
 ### 5. Split the oversized files
 

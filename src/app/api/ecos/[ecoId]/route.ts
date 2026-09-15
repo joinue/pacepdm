@@ -1,9 +1,9 @@
-import { withTenant, badRequest, notFound, forbidden } from "@/lib/api-route";
+import { withTenant, badRequest, notFound, forbidden, conflict } from "@/lib/api-route";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
-import { ECO_STATUS_FLOW as VALID_TRANSITIONS } from "@/lib/status-flows";
+import { ECO_STATUS_FLOW as VALID_TRANSITIONS, ecoAwaitsApproval } from "@/lib/status-flows";
 import { z, optionalString, uuid } from "@/lib/validation";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
 
@@ -97,6 +97,56 @@ export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) =
  */
 const DECISION_STATUSES = new Set(["APPROVED", "REJECTED"]);
 
+type EffectivityFields = {
+  effectivityType?: string | null;
+  effectiveFrom?: string | null;
+  effectiveSerial?: string | null;
+};
+
+/**
+ * The typed effectivity columns as they should be after this update.
+ *
+ * Resolved against the stored row because the update can be partial: a body
+ * that only changes the type must not leave a DATE ECO without a date, and a
+ * switch away from DATE or SERIAL clears the value that no longer applies so
+ * the row cannot contradict itself. A value sent for a type that does not use
+ * it is refused rather than dropped — silently dropping what the user entered
+ * is the bug this replaced.
+ */
+function resolveEffectivity(stored: EffectivityFields, change: EffectivityFields) {
+  const type =
+    change.effectivityType !== undefined
+      ? change.effectivityType
+      : (stored.effectivityType ?? null);
+
+  if (change.effectiveFrom && type !== "DATE") {
+    throw badRequest("A start date only applies to date effectivity");
+  }
+  if (change.effectiveSerial && type !== "SERIAL") {
+    throw badRequest("A starting serial number only applies to serial effectivity");
+  }
+
+  const effectiveFrom =
+    type === "DATE"
+      ? change.effectiveFrom !== undefined
+        ? change.effectiveFrom
+        : (stored.effectiveFrom ?? null)
+      : null;
+  const effectiveSerial =
+    type === "SERIAL"
+      ? change.effectiveSerial !== undefined
+        ? change.effectiveSerial
+        : (stored.effectiveSerial ?? null)
+      : null;
+
+  if (type === "DATE" && !effectiveFrom) throw badRequest("Date effectivity needs a date");
+  if (type === "SERIAL" && !effectiveSerial) {
+    throw badRequest("Serial effectivity needs a starting serial number");
+  }
+
+  return { effectivityType: type, effectiveFrom, effectiveSerial };
+}
+
 export const PUT = withTenant(
   { permission: PERMISSIONS.ECO_EDIT, body: UpdateEcoSchema, params: ParamsSchema },
   async ({ db, tenantUser, params, body, permissions }) => {
@@ -111,6 +161,9 @@ export const PUT = withTenant(
       costImpact,
       disposition,
       effectivity,
+      effectivityType,
+      effectiveFrom,
+      effectiveSerial,
     } = body;
 
     const { data: eco } = await db
@@ -151,6 +204,9 @@ export const PUT = withTenant(
       costImpact,
       disposition,
       effectivity,
+      effectivityType,
+      effectiveFrom,
+      effectiveSerial,
     ].some((v) => v !== undefined);
 
     if (hasFieldUpdate) {
@@ -167,6 +223,18 @@ export const PUT = withTenant(
       if (costImpact !== undefined) updates.costImpact = costImpact;
       if (disposition !== undefined) updates.disposition = disposition;
       if (effectivity !== undefined) updates.effectivity = effectivity;
+      // The schema accepted these three and nothing wrote them, so choosing
+      // "From a date" reported "ECO updated" and was gone on the next load.
+      if (
+        effectivityType !== undefined ||
+        effectiveFrom !== undefined ||
+        effectiveSerial !== undefined
+      ) {
+        Object.assign(
+          updates,
+          resolveEffectivity(eco, { effectivityType, effectiveFrom, effectiveSerial })
+        );
+      }
 
       if (!status) {
         const { data: updated, error } = await db
@@ -185,6 +253,33 @@ export const PUT = withTenant(
       if (!validNext.includes(status)) {
         throw badRequest(
           `Cannot transition from ${eco.status} to ${status}. Valid: ${validNext.join(", ") || "none"}`
+        );
+      }
+
+      // While a workflow's approval request is out, that request is the
+      // decision. Moving the ECO around it let a Manager approve or reject
+      // directly (or anyone move SUBMITTED → IN_REVIEW) with the request still
+      // pending — whose outcome would later land on top — and a resubmitted
+      // ECO was handed its stale request by startWorkflow's one-pending-
+      // request-per-entity guard. `.limit(1)` rather than maybeSingle, which
+      // errors when there are two and would read as "none".
+      const { data: openRequests, error: openRequestError } = await db
+        .from("approval_requests")
+        .select("id")
+        .eq("entityType", "eco")
+        .eq("entityId", ecoId)
+        .eq("status", "PENDING")
+        .limit(1);
+      if (openRequestError) {
+        throw new Error(
+          `Could not check for an open approval request: ${openRequestError.message}`
+        );
+      }
+      if (openRequests && openRequests.length > 0) {
+        throw conflict(
+          `${eco.ecoNumber} has an approval request in progress, so its status cannot be ` +
+            `changed directly. Its approvers decide it on the Approvals page, where the ` +
+            `requester can also recall it.`
         );
       }
 
@@ -220,7 +315,7 @@ export const PUT = withTenant(
       }
 
       // Check for an approval workflow on SUBMITTED / IN_REVIEW transitions.
-      if (status === "SUBMITTED" || status === "IN_REVIEW") {
+      if (ecoAwaitsApproval(status)) {
         const workflow = await findWorkflowForTrigger({
           tenantId: tenantUser.tenantId,
           ecoTrigger: status,
@@ -251,6 +346,28 @@ export const PUT = withTenant(
             description: `ECO ${eco.ecoNumber} submitted for approval`,
           });
 
+          // A failed start (no steps, an empty ALL/MAJORITY group, a seat
+          // that would not write) used to return 200 with the ECO left in the
+          // new status and no request behind it — waiting on an approval that
+          // did not exist. Put it back and say why.
+          if (!result.success) {
+            const { error: revertError } = await db
+              .from("ecos")
+              .update({ status: eco.status, updatedAt: now })
+              .eq("id", ecoId)
+              .eq("status", status);
+            if (revertError) {
+              throw new Error(
+                `The approval workflow could not start (${result.error}), and ${eco.ecoNumber} ` +
+                  `could not be moved back to ${eco.status}: ${revertError.message}`
+              );
+            }
+            throw badRequest(
+              `${eco.ecoNumber} stays in ${eco.status} because its approval workflow could not ` +
+                `start: ${result.error}`
+            );
+          }
+
           await logAudit({
             tenantId: tenantUser.tenantId,
             userId: tenantUser.id,
@@ -275,8 +392,8 @@ export const PUT = withTenant(
 
           return {
             ...updated,
-            pendingApproval: result.success,
-            message: result.success ? "ECO submitted for approval" : undefined,
+            pendingApproval: true,
+            message: "ECO submitted for approval",
           };
         }
       }

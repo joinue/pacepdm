@@ -122,6 +122,8 @@ const statusConfig: Record<
   RECALLED: { label: "Recalled", variant: "muted" },
   REWORK: { label: "Rework Needed", variant: "purple" },
   WAITING: { label: "Waiting", variant: "muted" },
+  // A seat its step resolved without — see closeOpenSeats in approval-engine.
+  NOT_NEEDED: { label: "Not needed", variant: "muted" },
 };
 
 const modeLabels: Record<string, string> = {
@@ -233,9 +235,9 @@ export default function ApprovalsPage() {
       ? { rework: true, comment: comment.trim() }
       : { status: actionTarget.action, comment: comment.trim() || undefined };
 
-    let result: { requestComplete?: boolean };
+    let result: { requestComplete?: boolean; warning?: string };
     try {
-      result = await fetchJson<{ requestComplete?: boolean }>(
+      result = await fetchJson<{ requestComplete?: boolean; warning?: string }>(
         `/api/approvals/${actionTarget.decision.id}`,
         { method: "PUT", body }
       );
@@ -254,6 +256,10 @@ export default function ApprovalsPage() {
             : "Approved — next step activated"
           : "Rejected"
     );
+    // The decision landed but its effect did not — a file that was checked out
+    // or had changed state, an ECO that had moved on. Saying nothing here made
+    // an approved request whose file never moved look like one that did.
+    if (result.warning) toast.warning(result.warning);
 
     setActionTarget(null);
     setComment("");
