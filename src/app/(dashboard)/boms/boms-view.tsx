@@ -164,14 +164,26 @@ export function BomsView({ selectedBomId }: { selectedBomId: string | null }) {
       try {
         const result = await fetchJson<{
           repaired: { bomName: string }[];
+          skipped: { bomName: string }[];
           orphanedParts: string[];
         }>(`/api/boms/${bom.id}/relink`, { method: "POST" });
 
         const parents = [...new Set(result.repaired.map((r) => r.bomName))];
-        toast.success(`Linked ${bom.name} into ${parents.join(", ")}`, {
-          description: result.orphanedParts.length
+        // Lines on a locked BOM (issued, or on an in-flight ECO) are left
+        // alone by the server; say so, or a partial repair reads as complete.
+        const skippedParents = [...new Set(result.skipped.map((s) => s.bomName))];
+        const description = [
+          skippedParents.length
+            ? `Not changed in ${skippedParents.join(", ")}: locked by its status or an ECO under way.`
+            : null,
+          result.orphanedParts.length
             ? `"${result.orphanedParts.join('", "')}" is no longer referenced by any BOM — you may want to delete it from Parts.`
-            : undefined,
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        toast.success(`Linked ${bom.name} into ${parents.join(", ")}`, {
+          description: description || undefined,
         });
         await loadBoms();
       } catch (err) {

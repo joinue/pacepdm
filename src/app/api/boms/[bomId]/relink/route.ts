@@ -3,6 +3,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { looseKey } from "@/lib/bom-import";
 import { wouldCreateCycle, type RollupBom } from "@/lib/bom-rollup";
+import { findBomContentLocks } from "@/lib/bom-lock";
 import { z, uuid } from "@/lib/validation";
 
 /**
@@ -29,10 +30,16 @@ import { z, uuid } from "@/lib/validation";
  *   - its part number matches this BOM's name ignoring punctuation and case
  *     only — the same `looseKey` the importer uses, so `N1S-P-005` is never
  *     confused with `N1S-P-006`;
- *   - the resulting link does not close a cycle.
+ *   - the resulting link does not close a cycle;
+ *   - the BOM the line sits on is not locked (lib/bom-lock.ts). A released
+ *     or obsolete BOM is issued, and one carried by an in-flight ECO has to
+ *     reach implementation exactly as it was reviewed. A repair is still a
+ *     change to that BOM's lines, so those lines are skipped and reported
+ *     rather than rewritten.
  *
- * Returns what it changed, and names the now-unreferenced phantom parts
- * without deleting them: removing a part is a decision for a person.
+ * Returns what it changed, what it skipped and why, and names the
+ * now-unreferenced phantom parts without deleting them: removing a part is a
+ * decision for a person.
  */
 
 const ParamsSchema = z.object({ bomId: uuid });
@@ -44,6 +51,15 @@ interface RepairedLine {
   itemNumber: string;
   /** The misspelt part number that was on the line. */
   wasPartNumber: string;
+}
+
+interface SkippedLine {
+  bomId: string;
+  bomName: string;
+  itemId: string;
+  itemNumber: string;
+  /** Why the BOM the line sits on could not be changed. */
+  reason: string;
 }
 
 export const POST = withTenant(
@@ -64,12 +80,13 @@ export const POST = withTenant(
     // check has the graph it needs.
     const { data: bomRows } = await db
       .from("boms")
-      .select("id, name, revision")
+      .select("id, name, revision, status")
       .is("deletedAt", null);
     const boms = (bomRows ?? []) as unknown as Array<{
       id: string;
       name: string;
       revision: string;
+      status: string;
     }>;
     const bomIds = boms.map((b) => b.id);
     if (bomIds.length === 0) throw notFound("BOM not found");
@@ -111,6 +128,38 @@ export const POST = withTenant(
       );
     }
 
+    // Lines on a locked BOM are left alone. If that is every candidate, there
+    // is nothing this call may do, and saying so beats a 200 that changed
+    // nothing.
+    const parentIds = new Set(candidates.map((c) => c.bomId));
+    const locks = await findBomContentLocks(
+      db,
+      tenantUser.tenantId,
+      boms.filter((b) => parentIds.has(b.id))
+    );
+    const skipped: SkippedLine[] = [];
+    const repairable = candidates.filter((c) => {
+      const lock = locks.get(c.bomId);
+      if (!lock) return true;
+      skipped.push({
+        bomId: c.bomId,
+        bomName: boms.find((b) => b.id === c.bomId)?.name ?? c.bomId,
+        itemId: c.id,
+        itemNumber: c.itemNumber ?? "",
+        reason: lock.message,
+      });
+      return false;
+    });
+
+    if (repairable.length === 0) {
+      throw conflict(
+        `Nothing was relinked. Every line referencing a near-miss of "${targetName}" ` +
+          `is on a BOM that cannot be changed: ` +
+          skipped.map((s) => `${s.bomName} — ${s.reason}`).join(" "),
+        { skipped }
+      );
+    }
+
     // Cycle guard, run against the graph as it stands. Linking a parent into
     // its own descendant would make the rollup non-terminating.
     const bomsById = new Map<string, RollupBom>();
@@ -135,7 +184,7 @@ export const POST = withTenant(
       });
     }
 
-    for (const candidate of candidates) {
+    for (const candidate of repairable) {
       const cycle = wouldCreateCycle(candidate.bomId, params.bomId, bomsById);
       if (cycle) {
         throw conflict(
@@ -157,7 +206,7 @@ export const POST = withTenant(
     const repaired: RepairedLine[] = [];
     const now = new Date().toISOString();
 
-    for (const candidate of candidates) {
+    for (const candidate of repairable) {
       const patch: Record<string, unknown> = {
         linkedBomId: params.bomId,
         partNumber: targetName,
@@ -182,10 +231,11 @@ export const POST = withTenant(
     // The misspelt part numbers the lines used to carry. If nothing else
     // references them they are phantoms left by the import, but that is for
     // a person to confirm — a part may legitimately exist under that name.
+    // A skipped line still carries its misspelling, so it still counts as a use.
     const freed = [...new Set(repaired.map((r) => r.wasPartNumber))];
     const stillUsed = new Set(
       items
-        .filter((i) => !candidates.some((c) => c.id === i.id))
+        .filter((i) => !repaired.some((r) => r.itemId === i.id))
         .map((i) => i.partNumber)
         .filter((p): p is string => p !== null)
     );
@@ -201,12 +251,15 @@ export const POST = withTenant(
         name: targetName,
         linesRepaired: repaired.length,
         parents: repaired.map((r) => r.bomName).join(", "),
+        linesSkipped: skipped.length,
       },
     });
 
     return {
       bomName: targetName,
       repaired,
+      /** Lines left alone because their BOM is locked, with the reason. */
+      skipped,
       /** Part numbers no BOM line references any more. Not deleted. */
       orphanedParts,
     };

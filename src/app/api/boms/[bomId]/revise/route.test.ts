@@ -17,16 +17,21 @@ const { tables, inserts, updates, mockFrom } = vi.hoisted(() => {
 
   function makeChain(table: string) {
     const filters: Record<string, unknown> = {};
+    const isFilters: Record<string, unknown> = {};
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
 
     const rows = () => {
       let out = tables[table] ?? [];
       for (const [k, v] of Object.entries(filters)) out = out.filter((r) => r[k] === v);
+      for (const [k, v] of Object.entries(isFilters)) out = out.filter((r) => (r[k] ?? null) === v);
       return out;
     };
 
-    for (const m of ["select", "is", "not", "order", "limit", "in"] as const)
-      chain[m] = () => chain;
+    for (const m of ["select", "not", "order", "limit", "in"] as const) chain[m] = () => chain;
+    chain.is = (...a: unknown[]) => {
+      isFilters[a[0] as string] = a[1];
+      return chain;
+    };
     chain.eq = (...a: unknown[]) => {
       filters[a[0] as string] = a[1];
       return chain;
@@ -75,6 +80,25 @@ import { logAudit } from "@/lib/audit";
 const BOM_A = "11111111-1111-4111-8111-111111111111";
 const engineer = { id: "user-1", tenantId: "tenant-1", role: { permissions: ["file.edit"] } };
 const viewer = { id: "user-2", tenantId: "tenant-1", role: { permissions: ["file.view"] } };
+const ecoEditor = {
+  id: "user-3",
+  tenantId: "tenant-1",
+  role: { permissions: ["file.edit", "eco.edit"] },
+};
+const ECO_ID = "22222222-2222-4222-8222-222222222222";
+
+function eco(overrides: Record<string, unknown> = {}) {
+  tables["ecos"] = [
+    {
+      id: ECO_ID,
+      tenantId: "tenant-1",
+      ecoNumber: "ECO-0007",
+      status: "DRAFT",
+      deletedAt: null,
+      ...overrides,
+    },
+  ];
+}
 
 function req(body: unknown = {}) {
   return new NextRequest(`http://localhost/api/boms/${BOM_A}/revise`, {
@@ -237,17 +261,81 @@ describe("POST /api/boms/[bomId]/revise", () => {
   });
 
   it("links the new revision to an ECO when one is given", async () => {
+    mockTenantUser.current = ecoEditor;
     state();
-    const ecoId = "22222222-2222-4222-8222-222222222222";
-    await POST(req({ ecoId }), { params });
+    eco();
+    const res = await POST(req({ ecoId: ECO_ID }), { params });
+    expect(res.status).toBe(200);
+    expect((await res.json()).warning).toBeUndefined();
 
     expect(inserts["eco_items"]).toHaveLength(1);
     expect(inserts["eco_items"][0]).toMatchObject({
-      ecoId,
+      ecoId: ECO_ID,
       bomId: inserts["boms"][0].id,
       fromRevision: "A",
       toRevision: "B",
     });
+  });
+
+  /**
+   * Linking to an ECO is adding an item to it, so the checks the ECO items
+   * route makes apply — and a refusal must leave nothing behind, not a
+   * revision with a warning attached. Before this, any FILE_EDIT holder could
+   * attach a revision to an already-approved ECO (which implementing then
+   * released unreviewed) or to another tenant's ECO.
+   */
+  describe("linking to an ECO", () => {
+    function nothingCreated() {
+      expect(inserts["boms"]).toBeUndefined();
+      expect(inserts["bom_items"]).toBeUndefined();
+      expect(inserts["eco_items"]).toBeUndefined();
+    }
+
+    it("requires eco.edit, creating nothing without it", async () => {
+      state();
+      eco();
+      const res = await POST(req({ ecoId: ECO_ID }), { params });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toContain("Edit ECOs");
+      nothingCreated();
+    });
+
+    it("still revises without eco.edit when no ECO is named", async () => {
+      state();
+      expect((await POST(req(), { params })).status).toBe(200);
+    });
+
+    it("refuses another tenant's ECO as not found, creating nothing", async () => {
+      mockTenantUser.current = ecoEditor;
+      state();
+      eco({ tenantId: "tenant-OTHER" });
+      const res = await POST(req({ ecoId: ECO_ID }), { params });
+      expect(res.status).toBe(404);
+      nothingCreated();
+    });
+
+    it("refuses a deleted ECO as not found", async () => {
+      mockTenantUser.current = ecoEditor;
+      state();
+      eco({ deletedAt: "2026-09-01T00:00:00Z" });
+      expect((await POST(req({ ecoId: ECO_ID }), { params })).status).toBe(404);
+      nothingCreated();
+    });
+
+    it.each(["SUBMITTED", "IN_REVIEW", "APPROVED", "REJECTED", "IMPLEMENTED", "CLOSED"])(
+      "refuses a %s ECO, creating nothing",
+      async (status) => {
+        mockTenantUser.current = ecoEditor;
+        state();
+        eco({ status });
+        const res = await POST(req({ ecoId: ECO_ID }), { params });
+        expect(res.status).toBe(400);
+        const { error } = await res.json();
+        expect(error).toContain("ECO-0007");
+        expect(error).toMatch(/draft/i);
+        nothingCreated();
+      }
+    );
   });
 
   it("logs the revision against the new BOM, recording where it came from", async () => {

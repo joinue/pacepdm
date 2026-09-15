@@ -295,3 +295,68 @@ describe("revision has to stay sequenceable", () => {
     expect(res.status).not.toBe(400);
   });
 });
+
+/**
+ * Name and revision identify what a release puts into effect, so they lock
+ * with the lines. A BOM carried by an in-flight ECO is released by
+ * `implement_eco` as it stands at implementation — renaming or re-lettering
+ * it after approval would ship something nobody reviewed.
+ */
+describe("name and revision are locked with the BOM's content", () => {
+  const draftBom = { ...approvedBom, status: "DRAFT", revision: "B" };
+
+  function carriedByEco(status: string) {
+    tableResults.eco_items = { data: [{ ecoId: "eco-1", bomId: BOM_ID }], error: null };
+    tableResults.ecos = {
+      data: [{ id: "eco-1", ecoNumber: "ECO-0042", status }],
+      error: null,
+    };
+  }
+
+  beforeEach(() => {
+    mockTenantUser.current = manager;
+    tableResults.boms = { data: draftBom, error: null };
+    tableResults.bom_items = { data: [], error: null };
+  });
+
+  it.each(["SUBMITTED", "IN_REVIEW", "APPROVED"])(
+    "refuses a rename while a %s ECO carries the BOM, naming the ECO",
+    async (status) => {
+      carriedByEco(status);
+      const res = await PUT(req({ name: "NANO-1000S v2" }), { params });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("ECO-0042");
+    }
+  );
+
+  it("refuses a revision change while an ECO carries the BOM", async () => {
+    carriedByEco("APPROVED");
+    const res = await PUT(req({ revision: "C" }), { params });
+    expect(res.status).toBe(409);
+  });
+
+  // The manual correction change-control.md keeps on purpose: fixing a typo
+  // on an issued BOM is not what the ECO lock is for.
+  it.each(["RELEASED", "OBSOLETE"])(
+    "still allows correcting the name of a %s BOM",
+    async (status) => {
+      tableResults.boms = { data: { ...draftBom, status }, error: null };
+      const res = await PUT(req({ name: "Renamed" }), { params });
+      expect(res.status).not.toBe(409);
+    }
+  );
+
+  it("still allows a status transition on a carried BOM", async () => {
+    carriedByEco("APPROVED");
+    const res = await PUT(req({ status: "IN_REVIEW" }), { params });
+    expect(res.status).toBe(200);
+  });
+
+  it("does not treat repeating the current name and revision as an edit", async () => {
+    carriedByEco("APPROVED");
+    const res = await PUT(req({ name: "NANO-1000S", revision: " B ", status: "IN_REVIEW" }), {
+      params,
+    });
+    expect(res.status).toBe(200);
+  });
+});

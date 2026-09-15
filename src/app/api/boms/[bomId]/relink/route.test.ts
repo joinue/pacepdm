@@ -14,13 +14,13 @@ const { tables, updates, mockFrom } = vi.hoisted(() => {
 
   function makeChain(table: string) {
     const filters: Record<string, unknown> = {};
-    let inSet: unknown[] | null = null;
+    const inFilters: Record<string, unknown[]> = {};
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
 
     const rows = () => {
       let out = (tables[table] ?? []) as Record<string, unknown>[];
       for (const [k, v] of Object.entries(filters)) out = out.filter((r) => r[k] === v);
-      if (inSet) out = out.filter((r) => inSet!.includes(r.bomId));
+      for (const [k, vs] of Object.entries(inFilters)) out = out.filter((r) => vs.includes(r[k]));
       return out;
     };
 
@@ -30,7 +30,7 @@ const { tables, updates, mockFrom } = vi.hoisted(() => {
       return chain;
     };
     chain.in = (...a: unknown[]) => {
-      inSet = a[1] as unknown[];
+      inFilters[a[0] as string] = a[1] as unknown[];
       return chain;
     };
     chain.maybeSingle = () => ({ data: rows()[0] ?? null, error: null });
@@ -227,6 +227,97 @@ describe("POST /api/boms/[bomId]/relink", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/cycle/i);
     expect(updates).toHaveLength(0);
+  });
+
+  /**
+   * A repair is still an edit to the parent's lines. A released or obsolete
+   * parent is issued, and one on an in-flight ECO has to reach
+   * implementation exactly as reviewed — so those lines are left alone.
+   */
+  describe("locked parent BOMs", () => {
+    const OTHER_PARENT = "33333333-3333-4333-8333-333333333333";
+
+    /** A second, editable parent with the same typo, so one line can land. */
+    function withEditableSecondParent() {
+      (tables["boms"] as Record<string, unknown>[]).push({
+        id: OTHER_PARENT,
+        tenantId: "tenant-1",
+        name: "NANO-2000S",
+        revision: "A",
+        status: "DRAFT",
+        deletedAt: null,
+      });
+      (tables["bom_items"] as Record<string, unknown>[]).push({
+        id: "item-3",
+        bomId: OTHER_PARENT,
+        linkedBomId: null,
+        itemNumber: "4",
+        partNumber: "NANO1000S Casting-Components",
+        name: "NANO1000S Casting-Components",
+        quantity: 1,
+        unit: "ea",
+        unitCost: null,
+      });
+    }
+
+    function topBom() {
+      return (tables["boms"] as Record<string, unknown>[]).find((b) => b.id === TOP)!;
+    }
+
+    it.each(["RELEASED", "OBSOLETE"])(
+      "skips the line on a %s parent and reports it, repairing the rest",
+      async (status) => {
+        nanoState();
+        topBom().status = status;
+        withEditableSecondParent();
+
+        const res = await POST(req(), { params });
+        expect(res.status).toBe(200);
+
+        expect(updates.map((u) => u.id)).toEqual(["item-3"]);
+        const body = await res.json();
+        expect(body.repaired.map((r: { itemId: string }) => r.itemId)).toEqual(["item-3"]);
+        expect(body.skipped).toEqual([
+          expect.objectContaining({ bomId: TOP, bomName: "NANO-1000S", itemId: "item-1" }),
+        ]);
+        expect(body.skipped[0].reason).toMatch(new RegExp(status, "i"));
+        // The skipped line still carries the misspelling, so it is not orphaned.
+        expect(body.orphanedParts).toEqual([]);
+      }
+    );
+
+    it("skips a parent carried by an approved ECO, naming the ECO", async () => {
+      nanoState();
+      topBom().status = "DRAFT";
+      withEditableSecondParent();
+      tables["eco_items"] = [{ ecoId: "eco-1", bomId: TOP }];
+      tables["ecos"] = [
+        {
+          id: "eco-1",
+          tenantId: "tenant-1",
+          ecoNumber: "ECO-0042",
+          status: "APPROVED",
+          deletedAt: null,
+        },
+      ];
+
+      const body = await (await POST(req(), { params })).json();
+      expect(updates.map((u) => u.id)).toEqual(["item-3"]);
+      expect(body.skipped[0].reason).toContain("ECO-0042");
+    });
+
+    it("refuses with 409 and writes nothing when every candidate is locked", async () => {
+      nanoState();
+      topBom().status = "RELEASED";
+
+      const res = await POST(req(), { params });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error).toMatch(/nothing was relinked/i);
+      expect(body.details.skipped).toHaveLength(1);
+      expect(updates).toHaveLength(0);
+      expect(logAudit).not.toHaveBeenCalled();
+    });
   });
 
   it("logs the repair against the BOM that was relinked", async () => {

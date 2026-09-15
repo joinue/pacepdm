@@ -127,7 +127,15 @@ Two smaller things came with it:
   unioned by id with the direct `eco_items.bomId` set.
 - **Releasing from DRAFT crosses `BOM_STATUS_FLOW`**, which allows only
   `APPROVED → RELEASED`. Deliberate: the ECO's approval is the review, and a
-  second independent approval cycle is ceremony. Recorded as
+  second independent approval cycle is ceremony. **That only became true
+  2026-09-14.** Until then a carried BOM stayed editable after the ECO was
+  approved, so implementing released lines nobody reviewed, and
+  `POST /api/boms/[bomId]/revise` would attach a revision to any `ecoId` —
+  approved, or another tenant's. A BOM's lines, and its name and revision, now
+  lock while a SUBMITTED, IN_REVIEW or APPROVED ECO carries it
+  ([`bom-lock.ts`](../../src/lib/bom-lock.ts)); REJECTED deliberately does not
+  lock, because re-approval re-locks it. Revise checks the ECO's tenant, DRAFT
+  status and `ECO_EDIT` before creating anything. Recorded as
   `BOM_STATES_RELEASABLE_BY_ECO` in
   [`status-flows.ts`](../../src/lib/status-flows.ts) and pinned against the
   migration text by `status-flows.test.ts`, so the two copies cannot drift.

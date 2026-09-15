@@ -6,13 +6,18 @@ import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString, optionalUuid } from "@/lib/validation";
 import { wouldCreateCycle, type RollupBom } from "@/lib/bom-rollup";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
+import { getBomContentLock } from "@/lib/bom-lock";
 
 // ─── Mutation guard ───────────────────────────────────────────────────────
 //
 // A BOM item is mutable iff:
 //   1. The BOM exists in the caller's tenant
-//   2. The BOM itself is not RELEASED or OBSOLETE
+//   2. The BOM's content is not locked — it is not RELEASED or OBSOLETE, and
+//      no submitted, in-review or approved ECO carries it (lib/bom-lock.ts)
 //   3. The parent file (if any) is not frozen
+//
+// Rule 2's ECO half closes a gap where a BOM on an approved ECO could still
+// be edited, and implementing the ECO then released the unreviewed lines.
 //
 // Rule 3 closes a gap where a BOM in WIP could be edited even though
 // its parent file had been independently released — the audit trail of
@@ -37,8 +42,11 @@ async function requireBomMutable(
   if (!bom) {
     return { ok: false, status: 404, error: "BOM not found" };
   }
-  if (bom.status === "RELEASED" || bom.status === "OBSOLETE") {
-    return { ok: false, status: 400, error: `Cannot modify items on a ${bom.status} BOM` };
+  const lock = await getBomContentLock(db, tenantId, bom);
+  if (lock) {
+    // 400 for an issued BOM is what this route has always returned; a lock
+    // held by a change order is a conflict with another record's state.
+    return { ok: false, status: lock.reason === "status" ? 400 : 409, error: lock.message };
   }
   // Supabase returns the joined relation as either a single row or an
   // array depending on the join cardinality — handle both shapes.
@@ -284,7 +292,7 @@ async function fetchPartSnapshots(
   const ids = Array.from(new Set(inputs.map((i) => i.partId).filter((v): v is string => !!v)));
   if (ids.length === 0) return new Map();
 
-  const [{ data: parts }, { data: primaryLinks }] = await Promise.all([
+  const [{ data: parts, error: partsError }, { data: primaryLinks }] = await Promise.all([
     db
       .from("parts")
       .select("id, partNumber, name, description, material, unitCost, unit")
@@ -297,6 +305,9 @@ async function fetchPartSnapshots(
       .in("partId", ids)
       .eq("isPrimary", true),
   ]);
+  // Thrown rather than read as "no parts": an empty map now means "not in
+  // this tenant", and a failed query must not be reported as that.
+  if (partsError) throw partsError;
 
   // primaryLinks is keyed by partId — each part has at most one primary
   // vendor (enforced by the UI which clears others on insert).
@@ -337,6 +348,48 @@ async function fetchPartSnapshots(
     });
   }
   return map;
+}
+
+// Every partId and fileId on a line must name a row in the caller's tenant.
+//
+// `fetchPartSnapshots` and the file lookup below are tenant-filtered, but
+// `buildItemRow` and the PUT field copy used to save the id the client sent
+// whether or not that lookup found anything. So a line could point at another
+// tenant's part or file: GET then joined it and returned that part's number,
+// name, cost and a signed thumbnail URL, and the owning tenant could no longer
+// delete its own part because a line (in a BOM it cannot see) referenced it.
+//
+// A soft-deleted part or file is refused too — linking a new line to a row
+// already in the trash is never what was meant.
+async function checkLineReferences(
+  // The same client the helpers above take, named without adding another
+  // reference to it while this route is still unwrapped.
+  db: Parameters<typeof fetchPartSnapshots>[0],
+  tenantId: string,
+  inputs: BomItemInput[],
+  partSnaps: Map<string, PartSnapshot>
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const missingPart = inputs.find((i) => i.partId && !partSnaps.has(i.partId));
+  if (missingPart) {
+    return { ok: false, error: `Part not found: ${missingPart.partId}` };
+  }
+
+  const fileIds = Array.from(new Set(inputs.map((i) => i.fileId).filter((v): v is string => !!v)));
+  if (fileIds.length === 0) return { ok: true };
+
+  const { data: files, error } = await db
+    .from("files")
+    .select("id")
+    .eq("tenantId", tenantId)
+    .is("deletedAt", null)
+    .in("id", fileIds);
+  if (error) throw error;
+  const found = new Set(((files ?? []) as Array<{ id: string }>).map((f) => f.id));
+  const missingFile = fileIds.find((id) => !found.has(id));
+  if (missingFile) {
+    return { ok: false, error: `File not found: ${missingFile}` };
+  }
+  return { ok: true };
 }
 
 // Fill missing fields on the input from the snapshot. "Missing" means
@@ -434,6 +487,10 @@ export async function POST(
       }
 
       const partSnaps = await fetchPartSnapshots(db, tenantUser.tenantId, inputs);
+      const refs = await checkLineReferences(db, tenantUser.tenantId, inputs, partSnaps);
+      if (!refs.ok) {
+        return NextResponse.json({ error: refs.error }, { status: 404 });
+      }
       const rows = inputs.map((it) =>
         buildItemRow(bomId, applyPartSnapshot(it, partSnaps.get(it.partId || "")), now)
       );
@@ -461,6 +518,10 @@ export async function POST(
       }
     }
     const partSnaps = await fetchPartSnapshots(db, tenantUser.tenantId, [single]);
+    const refs = await checkLineReferences(db, tenantUser.tenantId, [single], partSnaps);
+    if (!refs.ok) {
+      return NextResponse.json({ error: refs.error }, { status: 404 });
+    }
     const filled = applyPartSnapshot(single, partSnaps.get(single.partId || ""));
     const { data: item, error } = await db
       .from("bom_items")
@@ -581,9 +642,16 @@ export async function PUT(
     // If this update is linking the row to a part, snapshot the part's
     // copyable fields into the update — same rule as POST: only fill fields
     // the client did not explicitly set, so a manual override still wins.
+    //
+    // Same tenant rule as POST, too: a partId or fileId has to resolve in the
+    // caller's tenant before it is written. Clearing either (null) is fine.
     let effectiveBody: BomItemInput = rest;
+    const snaps = await fetchPartSnapshots(db, tenantUser.tenantId, [rest]);
+    const refs = await checkLineReferences(db, tenantUser.tenantId, [rest], snaps);
+    if (!refs.ok) {
+      return NextResponse.json({ error: refs.error }, { status: 404 });
+    }
     if (rest.partId) {
-      const snaps = await fetchPartSnapshots(db, tenantUser.tenantId, [rest]);
       effectiveBody = applyPartSnapshot(rest, snaps.get(rest.partId));
     }
 

@@ -1,9 +1,10 @@
-import { withTenant, badRequest, notFound, forbidden } from "@/lib/api-route";
+import { withTenant, badRequest, notFound, forbidden, conflict } from "@/lib/api-route";
 import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { BOM_STATUS_FLOW, BOM_STATUS_LABELS } from "@/lib/status-flows";
 import { captureBomSnapshot } from "@/lib/bom-snapshot";
+import { getBomContentLock } from "@/lib/bom-lock";
 import { z, uuid } from "@/lib/validation";
 import { attachThumbnailUrl } from "@/lib/thumbnails";
 import { nextRevision, usesReservedLetter } from "@/lib/revision";
@@ -82,12 +83,31 @@ export const PUT = withTenant(
 
     const { data: existing } = await db
       .from("boms")
-      .select("status, name, createdById, previousRevisionId")
+      .select("status, name, revision, createdById, previousRevisionId")
       .eq("id", bomId)
       .is("deletedAt", null)
       .maybeSingle();
 
     if (!existing) throw notFound("BOM not found");
+
+    // Name and revision identify what a release puts into effect, so they
+    // lock with the lines while an in-flight ECO carries the BOM
+    // (lib/bom-lock.ts): `implement_eco` releases it exactly as it stands.
+    //
+    // Only the ECO lock applies here. An issued BOM keeps the manual
+    // correction this route has always allowed — a typo, or matching what the
+    // ERP calls the revision — which change-control.md records as deliberate.
+    // Only an actual change is refused; a body repeating the current values
+    // alongside a status change is not an edit.
+    const renaming = body.name !== undefined && body.name !== existing.name;
+    const reLettering = body.revision !== undefined && body.revision.trim() !== existing.revision;
+    if (renaming || reLettering) {
+      const lock = await getBomContentLock(db, tenantUser.tenantId, {
+        id: bomId,
+        status: existing.status,
+      });
+      if (lock?.reason === "eco") throw conflict(lock.message);
+    }
 
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     const changes: Record<string, string | null> = {};

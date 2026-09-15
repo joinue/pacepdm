@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
-import { withTenant, notFound, conflict, badRequest } from "@/lib/api-route";
-import { PERMISSIONS } from "@/lib/permissions";
+import { withTenant, notFound, conflict, badRequest, forbidden } from "@/lib/api-route";
+import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { nextRevision } from "@/lib/revision";
 import { z, uuid as uuidSchema, optionalString } from "@/lib/validation";
@@ -45,7 +45,7 @@ const BodySchema = z.object({
 
 export const POST = withTenant(
   { permission: PERMISSIONS.FILE_EDIT, params: ParamsSchema, body: BodySchema },
-  async ({ db, tenantUser, params, body }) => {
+  async ({ db, tenantUser, params, body, permissions }) => {
     const { data: source } = await db
       .from("boms")
       .select("*")
@@ -53,6 +53,43 @@ export const POST = withTenant(
       .is("deletedAt", null)
       .maybeSingle();
     if (!source) throw notFound("BOM not found");
+
+    // Linking the revision to an ECO is adding an item to that ECO, so it
+    // gets the same checks `POST /api/ecos/[ecoId]/items` makes, and all of
+    // them before anything is created.
+    //
+    // Before this the ecoId went straight into `eco_items`. Any FILE_EDIT
+    // holder could attach a revision to an ECO that was already APPROVED —
+    // which implementing then released, unreviewed — or to another tenant's
+    // ECO, whose implement then refuses on the foreign BOM. The foreign-key
+    // constraint was cited as the tenant check; it only proves the ECO exists.
+    //
+    // ECO_EDIT is checked here rather than declared in the route options
+    // because it applies only when `ecoId` is sent — the same documented
+    // exception as DECISION_STATUSES in PUT /api/ecos/[ecoId].
+    let eco: { id: string; ecoNumber: string | null; status: string } | null = null;
+    if (body.ecoId) {
+      if (!hasPermission(permissions, PERMISSIONS.ECO_EDIT)) {
+        throw forbidden(
+          `Adding a revision to an ECO requires the "Edit ECOs" permission. ` +
+            `Revise without an ECO, or ask someone who can edit ECOs.`
+        );
+      }
+      const { data: found } = await db
+        .from("ecos")
+        .select("id, ecoNumber, status")
+        .eq("id", body.ecoId)
+        .is("deletedAt", null)
+        .maybeSingle();
+      if (!found) throw notFound("ECO not found");
+      eco = found as { id: string; ecoNumber: string | null; status: string };
+      if (eco.status !== "DRAFT") {
+        throw badRequest(
+          `${eco.ecoNumber ?? "That ECO"} is ${eco.status}, and items can only be added ` +
+            `to a DRAFT ECO. Nothing was created.`
+        );
+      }
+    }
 
     // Revising is what you do to something that has been issued. A DRAFT is
     // still editable in place, so a second revision of it would be two live
@@ -143,13 +180,15 @@ export const POST = withTenant(
       if (error) throw new Error(error.message);
     }
 
-    if (body.ecoId) {
+    if (eco) {
       // lint-conventions-allow: child-table-direct-query — `eco_items` is
-      // reached through its ECO; the id is validated as a UUID and the FK
-      // rejects one from another tenant.
+      // reached through its ECO, which was loaded through the scoped client
+      // at the top of this handler and confirmed to be a DRAFT in the
+      // caller's tenant. (The FK alone would not prove that: it checks that
+      // the ECO exists, not whose it is.)
       const { error } = await db.from("eco_items").insert({
         id: uuid(),
-        ecoId: body.ecoId,
+        ecoId: eco.id,
         bomId: newBomId,
         // NOT NULL, and omitting it failed every call with 23502. A revision
         // of an existing BOM is a MODIFY; the row is created by revising, so
@@ -161,8 +200,9 @@ export const POST = withTenant(
         // failed every call with PGRST204 before the NOT NULL above was
         // even reached. Both were masked by the soft-warning path below.
       });
-      // A bad ECO id should not cost the caller the revision they just
-      // created, so this is reported rather than thrown.
+      // The ECO was checked above, so a failure here is a database fault
+      // rather than a bad id from the caller. It still should not cost them
+      // the revision they just created, so it is reported rather than thrown.
       //
       // But log it as an error too. This branch was written for "the user
       // typed a bad ECO id" and instead absorbed two schema faults that made
@@ -173,7 +213,7 @@ export const POST = withTenant(
       if (error) {
         console.error(
           `[boms/${params.bomId}/revise] could not link revision ${newBomId} ` +
-            `to ECO ${body.ecoId}: ${error.code ?? "?"} ${error.message}`
+            `to ECO ${eco.id}: ${error.code ?? "?"} ${error.message}`
         );
         return {
           id: newBomId,

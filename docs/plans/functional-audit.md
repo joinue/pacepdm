@@ -516,6 +516,27 @@ contents and then failed to delete, leaving a release manifest pointing at
 nothing. Purge now refuses a file an ECO lists or released, and deletes the row
 before the blobs.
 
+### ~~D. An approved ECO's BOM could still change before it shipped~~ Fixed 2026-09-14
+
+The items route blocked edits only on RELEASED and OBSOLETE, implementing needs
+only `ECO_EDIT`, and `implement_eco` releases a carried BOM straight from DRAFT.
+So an Engineer could edit a BOM after its ECO was approved and implement the
+edits into release. Revise linked a new revision to any `ecoId` with no tenant
+or status check — the comment cited the FK, which proves existence, not
+ownership. And the relink repair rewrote lines on released and superseded BOMs.
+
+Now one helper, [`src/lib/bom-lock.ts`](../../src/lib/bom-lock.ts), answers
+"is this BOM's content locked" for the items, relink and header routes; see
+[`change-control.md`](change-control.md) item 1 for the ECO states it uses. The
+header route applies only the ECO lock, keeping the manual correction on issued
+BOMs that item 5 there records as deliberate.
+
+Same pass, same route: **a BOM line could name another tenant's part or file.**
+The tenant-filtered lookup came back empty and the id was saved anyway, after
+which `GET` returned that part's number, name, cost and a signed thumbnail URL.
+Lines now refuse a `partId` or `fileId` that does not resolve in the caller's
+tenant. Rows written before this need a one-off read-only query to find.
+
 ---
 
 ## Related

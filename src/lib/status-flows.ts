@@ -78,6 +78,30 @@ export function ecoCanTransition(from: string, to: string): boolean {
   return (ECO_STATUS_FLOW[from] || []).includes(to);
 }
 
+/**
+ * ECO statuses during which a BOM the ECO carries (`eco_items.bomId`) is
+ * locked against edits to its lines, name and revision.
+ *
+ * `implement_eco` releases whatever the carried BOM holds at the moment of
+ * implementation, and `BOM_STATES_RELEASABLE_BY_ECO` lets it do so straight
+ * from DRAFT on the grounds that the ECO's approval is the review. That only
+ * holds if the content cannot move between being reviewed and being
+ * released, so the lock runs from submission to implementation.
+ *
+ * Not included, and not oversights:
+ *   - DRAFT — the change is still being authored.
+ *   - REJECTED — the ECO is back with its author for rework (or deletion,
+ *     which the ECO route allows here). It cannot be implemented without
+ *     passing SUBMITTED → IN_REVIEW → APPROVED again, each of which re-locks,
+ *     so anything changed now is reviewed before it can ship. Locking it
+ *     would strand the BOM on an ECO nobody intends to pursue.
+ *   - IMPLEMENTED / CLOSED — implementation released the BOM, and RELEASED
+ *     is locked on its own account.
+ *
+ * See src/lib/bom-lock.ts.
+ */
+export const ECO_STATES_LOCKING_CARRIED_BOMS = ["SUBMITTED", "IN_REVIEW", "APPROVED"] as const;
+
 // ─── Approval ─────────────────────────────────────────────────────────────
 export const APPROVAL_STATUS_LABELS: Record<string, string> = {
   PENDING: "Pending",
