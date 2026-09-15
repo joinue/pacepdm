@@ -36,8 +36,11 @@ describe("folder-access predicates", () => {
       expect(canEditFolder(s, "any-id")).toBe(true);
     });
 
-    it("allows admin on any folder", () => {
-      expect(canAdminFolder(s, "any-id")).toBe(true);
+    // Viewing and editing are open here, but managing access is not: the first
+    // rule anyone writes restricts the folder for everybody else, so writing
+    // it is for FOLDER_MANAGE_ACCESS holders only.
+    it("grants folder-level admin on no folder", () => {
+      expect(canAdminFolder(s, "any-id")).toBe(false);
     });
 
     it("marks no folder as restricted", () => {
@@ -79,6 +82,31 @@ describe("folder-access predicates", () => {
 
     it("admin requires membership in admin set", () => {
       expect(canAdminFolder(s, "f1")).toBe(false);
+    });
+  });
+
+  describe("restricted tenant — unrestricted folder", () => {
+    // The resolver lists every unrestricted folder in `admin`, the same way it
+    // lists them in `allowed`. That is right for viewing and wrong for managing
+    // access: it made every member an admin of every folder nobody had locked.
+    const s = scope({
+      allowed: new Set(["open", "locked"]),
+      editable: new Set(["open", "locked"]),
+      admin: new Set(["open", "locked"]),
+      restricted: new Set(["locked"]),
+    });
+
+    it("still allows viewing and editing it", () => {
+      expect(canViewFolder(s, "open")).toBe(true);
+      expect(canEditFolder(s, "open")).toBe(true);
+    });
+
+    it("does not grant folder-level admin on it", () => {
+      expect(canAdminFolder(s, "open")).toBe(false);
+    });
+
+    it("grants folder-level admin where an ADMIN rule applies", () => {
+      expect(canAdminFolder(s, "locked")).toBe(true);
     });
   });
 

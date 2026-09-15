@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-08-07 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature
+**Started:** 2026-08-05 · **Last updated:** 2026-09-14 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass fixes landing
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -451,6 +451,31 @@ workflow, so `findWorkflowForTrigger` falls through and almost every ECO is
 decided without the engine ever running. Gating only the engine would have left
 the setting looking enforced and doing nothing, which is this plan's finding 2
 happening a second time.
+
+---
+
+## Second pass — first week of production use (2026-09-14)
+
+A workflow-by-workflow read of vault, ECOs and approvals, BOMs, parts and
+imports, and users and roles, done as the tenant started entering real data.
+`npm run check` and `next build` were green on main throughout; none of the
+findings below were visible to either.
+
+Fixed so far, in the order they landed:
+
+### ~~A. Any member could write the first folder ACL~~ Fixed 2026-09-14
+
+`canAdminFolder` returned true whenever the tenant had no ACL rows, and the
+scope resolver lists every _unrestricted_ folder in `admin` just as it does in
+`allowed`. The access route accepts folder-level admin in place of
+`FOLDER_MANAGE_ACCESS`, so in a fresh tenant — every tenant, until someone
+configures access — a Viewer could add rows to any folder. One ALLOW on the
+root restricts the whole vault to whoever it names.
+
+Folder-level admin now requires an explicit ADMIN grant on a restricted folder.
+Managing access on an unrestricted folder is `FOLDER_MANAGE_ACCESS` only. The
+predicate is the only thing that changed, so it holds for the access route
+whether or not it has been moved onto `withTenant` yet.
 
 ---
 

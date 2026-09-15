@@ -123,11 +123,23 @@ export function canEditFolder(scope: FolderAccessScope, folderId: string): boole
   return scope.editable.has(folderId);
 }
 
+/**
+ * Folder-level ADMIN: may manage this folder's own ACL rows without holding
+ * FOLDER_MANAGE_ACCESS. Only an explicit ADMIN grant confers it.
+ *
+ * Unlike view and edit, "unrestricted" does not mean "allowed" here. The
+ * resolver puts every unrestricted folder in `admin` (and the no-ACL fast
+ * path returns open for everything), and this predicate used to pass both
+ * through — so in a tenant with no rules yet, every member, Viewers included,
+ * could write the first rule. One ALLOW on the root restricts the whole vault
+ * to whoever it names, which locked everyone else out of it. Managing access
+ * on an unrestricted folder is the tenant permission's job, not this one's.
+ */
 export function canAdminFolder(scope: FolderAccessScope, folderId: string): boolean {
   if (scope.bypass) return true;
-  if (!scope.restrictedAny) return true;
+  if (!scope.restrictedAny) return false;
   if (scope.denied.has(folderId)) return false;
-  return scope.admin.has(folderId);
+  return scope.restricted.has(folderId) && scope.admin.has(folderId);
 }
 
 /**
