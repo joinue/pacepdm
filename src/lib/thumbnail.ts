@@ -130,6 +130,7 @@ async function generatePdfThumbnail(buffer: ArrayBuffer): Promise<ThumbnailResul
     // browsers. The legacy build is Node-friendly and works without a
     // worker setup.
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    await providePdfWorker();
     const { createCanvas } = await import("@napi-rs/canvas");
 
     // pdf.js creates canvases internally for each render pass. The
@@ -242,6 +243,28 @@ async function generatePdfThumbnail(buffer: ArrayBuffer): Promise<ThumbnailResul
     console.error("PDF thumbnail generation failed:", err);
     return null;
   }
+}
+
+/**
+ * Hand pdf.js its worker module, rather than letting it import one by path.
+ *
+ * Node has no Worker, so pdf.js runs its worker in-process ("fake worker")
+ * and loads it with `import(GlobalWorkerOptions.workerSrc)` — a path computed
+ * at runtime, defaulting to "./pdf.worker.mjs". The build's file tracer cannot
+ * follow a computed import, so `pdf.worker.mjs` was never copied into the
+ * Vercel function, and every PDF thumbnail failed there with "Setting up fake
+ * worker failed: Cannot find module …/pdf.worker.mjs" — while working locally,
+ * where node_modules is whole.
+ *
+ * pdf.js looks for `globalThis.pdfjsWorker` before importing anything, and a
+ * literal import specifier is one the tracer can see, so this fixes both the
+ * missing file and the lookup. Idempotent: the module is cached after the
+ * first call.
+ */
+async function providePdfWorker(): Promise<void> {
+  const g = globalThis as { pdfjsWorker?: unknown };
+  if (g.pdfjsWorker) return;
+  g.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
 }
 
 /**

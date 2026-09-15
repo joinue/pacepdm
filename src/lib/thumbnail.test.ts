@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { isSolidWorksFile, extractThumbnail } from "./thumbnail";
 
 describe("isSolidWorksFile", () => {
@@ -103,6 +103,18 @@ function isPng(data: Uint8Array): boolean {
 }
 
 describe("extractThumbnail — PDF", () => {
+  // Run the way the deployed function does: with pdf.js unable to load its
+  // worker from a path. The build's file tracer never copied
+  // pdf.worker.mjs into the Vercel function, because pdf.js imports it by a
+  // path computed at runtime, so every PDF thumbnail failed in production
+  // while passing here, where node_modules is whole. Pointing workerSrc at
+  // nothing reproduces that. It has to happen before the first render in
+  // this file: pdf.js caches the worker it loads.
+  beforeAll(async () => {
+    const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    GlobalWorkerOptions.workerSrc = "./not-deployed/pdf.worker.mjs";
+  });
+
   // Exercises the actual pdfjs-dist + @napi-rs/canvas pipeline. Slower
   // than the rest of the suite (~1s cold) but worth the coverage — this
   // path has a lot of dynamic-import + native-binding surface area that
