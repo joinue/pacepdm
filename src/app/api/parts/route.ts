@@ -4,7 +4,15 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, nonEmptyString, optionalString, ilikeContains } from "@/lib/validation";
-import { nextPartNumberSequence, formatPartNumber, readPartNumberSettings } from "@/lib/parts";
+import {
+  nextPartNumberSequence,
+  formatPartNumber,
+  readPartNumberSettings,
+  advancePartNumberSequence,
+  advanceSequencePastNumbers,
+  highestTakenSequence,
+} from "@/lib/parts";
+import { sideEffect } from "@/lib/notifications";
 import { signThumbnailUrls, withThumbnailUrl } from "@/lib/thumbnails";
 import { getCostSource, unitCostWouldChange, UNIT_COST_LOCKED_MESSAGE } from "@/lib/cost-source";
 
@@ -92,9 +100,9 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
 
     // Resolve part number based on tenant settings. AUTO mode allocates from
-    // the per-tenant sequence and retries past collisions (e.g. if a user has
-    // previously typed a number that happens to collide with the next slot).
-    // MANUAL mode requires the client to provide one.
+    // the per-tenant sequence and recovers from collisions (a number imported
+    // or typed by hand that the counter had not passed yet). MANUAL mode
+    // requires the client to provide one.
     const { data: tenantRow } = await db
       .from("tenants")
       .select("settings")
@@ -145,7 +153,10 @@ export async function POST(request: NextRequest) {
     type PartRow = { id: string; partNumber: string; name: string; category: string };
     let part: PartRow | null = null;
     let lastError: { code?: string; message?: string } | null = null;
-    const maxAttempts = partNumber ? 1 : 10;
+    // After the first collision the counter is moved past every taken number,
+    // so a further collision means another create won a race for the same
+    // slot — a handful of attempts is plenty.
+    const maxAttempts = partNumber ? 1 : 5;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (!partNumber) {
         const seq = await nextPartNumberSequence(db, tenantUser.tenantId);
@@ -159,20 +170,42 @@ export async function POST(request: NextRequest) {
       lastError = error;
       if (error.code !== "23505") throw error;
       // Collision: a part already exists with this number. If the client
-      // supplied it, surface as 409. Otherwise loop and allocate the next
-      // sequence value.
+      // supplied it, surface as 409.
       if (body.partNumber) {
         return NextResponse.json(
           { error: "A part with this number already exists" },
           { status: 409 }
         );
       }
+      // The counter is behind numbers that arrived some other way — an
+      // imported item master, or numbers typed by hand. This used to retry
+      // one slot at a time, so a tenant that had imported PRT-00001..00500
+      // burned ten numbers per create and got a 409 every time. Jump past the
+      // highest number the format could collide with, then allocate again. If
+      // the jump itself fails, the next attempt still moves on by one.
+      await sideEffect(
+        highestTakenSequence(db, tenantUser.tenantId, numberSettings).then((highest) =>
+          advancePartNumberSequence(db, tenantUser.tenantId, highest)
+        ),
+        `advance part number sequence past taken numbers after ${partNumber} collided`
+      );
       partNumber = null;
     }
     if (!part) {
       return NextResponse.json(
         { error: lastError?.message || "Could not allocate a unique part number" },
         { status: 409 }
+      );
+    }
+
+    // A number typed by hand that the counter could also have minted moves
+    // the counter past it, so the next automatic number does not collide.
+    // Not worth failing a create that has already landed: the collision path
+    // above recovers if this is missed.
+    if (body.partNumber) {
+      await sideEffect(
+        advanceSequencePastNumbers(db, tenantUser.tenantId, numberSettings, [part.partNumber]),
+        `advance part number sequence past ${part.partNumber}`
       );
     }
 

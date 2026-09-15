@@ -5,6 +5,8 @@ import type { ScopedDb } from "@/lib/tenant-db";
 import { getApiTenantUser, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getCostSource, unitCostNotImportedNote } from "@/lib/cost-source";
+import { advanceSequencePastNumbers, readPartNumberSettings } from "@/lib/parts";
+import { sideEffect } from "@/lib/notifications";
 import { parseCsvRecords } from "@/lib/csv";
 import { usesReservedLetter } from "@/lib/revision";
 import { createVendorResolver, normalizeVendorName } from "@/lib/vendors";
@@ -658,6 +660,7 @@ export const POST = withTenant(
     // each row that carried a value says so.
     const costLocked = (await getCostSource(db, tenantUser.tenantId)) === "LOCKED";
     let costsNotImported = 0;
+    const insertedNumbers: string[] = [];
 
     const now = new Date().toISOString();
     const results: RowResult[] = [];
@@ -746,6 +749,7 @@ export const POST = withTenant(
           // The same part number further down the file is now an update to
           // this row, not a second insert that fails on the unique index.
           existingById.set(parsed.partNumber, { id });
+          insertedNumbers.push(parsed.partNumber);
           results.push({
             row: rowNumber,
             partNumber: parsed.partNumber,
@@ -765,6 +769,29 @@ export const POST = withTenant(
         });
         failed++;
       }
+    }
+
+    // An imported item master usually carries numbers in the tenant's own
+    // format. The counter did not know about them, so every automatic number
+    // after an import collided until it had walked past them one at a time.
+    if (insertedNumbers.length > 0) {
+      await sideEffect(
+        (async () => {
+          const { data: tenantRow, error } = await db
+            .from("tenants")
+            .select("settings")
+            .eq("id", tenantUser.tenantId)
+            .maybeSingle();
+          if (error) throw new Error(error.message);
+          await advanceSequencePastNumbers(
+            db,
+            tenantUser.tenantId,
+            readPartNumberSettings(tenantRow?.settings),
+            insertedNumbers
+          );
+        })(),
+        "advance part number sequence past imported numbers"
+      );
     }
 
     await logAudit({

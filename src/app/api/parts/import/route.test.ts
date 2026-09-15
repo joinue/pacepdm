@@ -154,6 +154,10 @@ const { tableResults, inserts, updates, mockFrom, resetMockDb } = vi.hoisted(() 
         return u;
       };
       u.neq = () => u;
+      // The part-number counter's compare-and-swap reads back the row it moved.
+      u.select = () => ({
+        then: (r: (v: unknown) => void) => r({ data: [entry], error: null }),
+      });
       u.then = ((r: (v: unknown) => void) => r({ data: null, error: null })) as never;
       return u;
     };
@@ -474,6 +478,43 @@ describe("POST /api/parts/import — inserting a new part", () => {
     expect(body).toMatchObject({ inserted: 1, failed: 0, warned: 1 });
     expect(body.results[0].warning).toContain(`Unit Cost "TBD"`);
     expect(body.results[0].warning).toMatch(/left blank/);
+  });
+});
+
+/**
+ * An imported item master carries numbers in the tenant's own format, and the
+ * automatic counter did not know about them: every create afterwards collided
+ * until it had walked past them one slot at a time, and gave up with a 409
+ * after ten.
+ */
+describe("POST /api/parts/import — automatic numbering", () => {
+  const counterMoves = () => updates.filter((u) => u.__table === "tenants");
+
+  it("moves the counter past the highest imported number the format could mint", async () => {
+    tableResults.tenants = {
+      data: { settings: { partNumberPrefix: "PRT-", partNumberPadding: 5 }, partNumberSequence: 3 },
+      error: null,
+    };
+    await POST(csv("Part Number,Name\nPRT-00007,A\nPRT-00042,B\nPRT-42,C\nOTHER-99999,D"));
+    expect(counterMoves()).toEqual([expect.objectContaining({ partNumberSequence: 42 })]);
+  });
+
+  it("leaves the counter alone when nothing imported matches the format", async () => {
+    tableResults.tenants = {
+      data: { settings: { partNumberPrefix: "PRT-", partNumberPadding: 5 }, partNumberSequence: 3 },
+      error: null,
+    };
+    await POST(csv("Part Number,Name\nN1S-002,A"));
+    expect(counterMoves()).toEqual([]);
+  });
+
+  it("never moves the counter backwards", async () => {
+    tableResults.tenants = {
+      data: { settings: {}, partNumberSequence: 500 },
+      error: null,
+    };
+    await POST(csv("Part Number,Name\nPRT-00042,A"));
+    expect(counterMoves()).toEqual([]);
   });
 });
 
