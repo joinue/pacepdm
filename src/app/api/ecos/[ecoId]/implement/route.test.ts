@@ -83,8 +83,8 @@ beforeEach(() => {
       },
     ],
     eco_items: [
-      { id: "i-1", ecoId: ECO_ID, fileId: "bracket", partId: null },
-      { id: "i-2", ecoId: ECO_ID, fileId: "released-already", partId: null },
+      { id: "i-1", ecoId: ECO_ID, fileId: "bracket", partId: null, toRevision: null },
+      { id: "i-2", ecoId: ECO_ID, fileId: "released-already", partId: null, toRevision: null },
     ],
     files: [file("bracket"), file("released-already", { lifecycleState: "Released" })],
   });
@@ -144,13 +144,54 @@ describe("POST /api/ecos/[ecoId]/implement", () => {
     expect(state.fake.rpcCalls).toHaveLength(0);
   });
 
+  it("writes the revision a part becomes before implementing, for an ECO submitted without one", async () => {
+    state.fake.tables.eco_items.push({
+      id: "i-3",
+      ecoId: ECO_ID,
+      fileId: null,
+      partId: "part-1",
+      toRevision: null,
+    });
+    state.fake.tables.parts = [
+      { id: "part-1", tenantId: TENANT, partNumber: "PN-1042", revision: "R3", deletedAt: null },
+    ];
+
+    const res = await implement();
+
+    expect(res.status).toBe(200);
+    // R3 made the old bump raise, leaving the ECO stuck (AUD-003 CHG-3).
+    expect(state.fake.tables.eco_items.find((i) => i.id === "i-3")?.toRevision).toBe("R4");
+    expect(state.fake.rpcCalls).toHaveLength(1);
+  });
+
+  it("refuses a part whose revision cannot be followed on from, pointing at the way back", async () => {
+    state.fake.tables.eco_items.push({
+      id: "i-3",
+      ecoId: ECO_ID,
+      fileId: null,
+      partId: "part-1",
+      toRevision: null,
+    });
+    state.fake.tables.parts = [
+      { id: "part-1", tenantId: TENANT, partNumber: "PN-1042", revision: "Z", deletedAt: null },
+    ];
+
+    const res = await implement();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Have an approver reject the ECO/);
+    expect(state.fake.rpcCalls).toHaveLength(0);
+  });
+
   it("surfaces the database function's own refusal", async () => {
     state.fake.rpcResults.implement_eco = {
       data: null,
-      error: { message: 'Cannot auto-bump revision for part PN-1 (current rev: "R3")' },
+      error: {
+        message: "ECO ECO-0042 would release part PN-1 as revision C, which it is already at.",
+      },
     };
     const res = await implement();
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/Cannot auto-bump revision/);
+    expect((await res.json()).error).toMatch(/which it is already at/);
   });
 });

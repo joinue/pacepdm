@@ -45,7 +45,8 @@ export function bomCanTransition(from: string, to: string): boolean {
  *   - OBSOLETE — implement raises. Shipping a change whose structure is
  *     obsolete is a mistake worth failing on.
  *
- * See supabase/migrations/migration-049-implement-eco-boms.sql.
+ * See supabase/migrations/migration-049-implement-eco-boms.sql, and 056 for the
+ * function's current definition.
  */
 export const BOM_STATES_RELEASABLE_BY_ECO = ["DRAFT", "IN_REVIEW", "APPROVED"] as const;
 
@@ -58,7 +59,12 @@ export const ECO_STATUS_FLOW: Record<string, string[]> = {
   DRAFT: ["SUBMITTED"],
   SUBMITTED: ["IN_REVIEW", "REJECTED"],
   IN_REVIEW: ["APPROVED", "REJECTED"],
-  APPROVED: ["IMPLEMENTED"],
+  // Rejecting an approved ECO is its way back. Implementing was the only move,
+  // items cannot change outside DRAFT and an approved ECO cannot be deleted, so
+  // one that implement refused was stuck for good — with its files locked
+  // (AUD-003 CHG-3). REJECTED → DRAFT reopens it. Nothing has been released
+  // yet at APPROVED, so rejecting undoes nothing but the approval.
+  APPROVED: ["IMPLEMENTED", "REJECTED"],
   REJECTED: ["DRAFT"],
   IMPLEMENTED: ["CLOSED"],
   CLOSED: [],

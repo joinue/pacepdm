@@ -4,7 +4,7 @@
 
 <!-- plan-metrics
 bom-revise-route: 1
-eco-implements-boms: 1-->
+eco-implements-boms: 2-->
 
 A review of the four core PDM workflows — file lifecycle, change orders,
 BOM lifecycle, and impact analysis — walked end to end against the code on
@@ -101,6 +101,10 @@ is a **release**, not a revise:
 That is small enough to live in PL/pgSQL without duplicating the revise
 rules, so the dilemma dissolves. Done in
 [`migration-049`](../../supabase/migrations/migration-049-implement-eco-boms.sql).
+The function's current definition is
+[`migration-056`](../../supabase/migrations/migration-056-implement-eco-revisions.sql),
+which keeps this BOM branch as it is and takes part revisions from the ECO
+item instead of bumping them itself (AUD-003 CHG-3, in `functional-audit.md`).
 
 **`eco_items.bomId` never worked at all.** Migration 046 added the column,
 the FK, the index, the unique key, the picker and the revise-route link — and

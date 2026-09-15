@@ -107,9 +107,15 @@ export async function lockingEcoForFile(
 
 export function ecoLockMessage(eco: LockingEco, subject: string, action: string): string {
   const status = ECO_STATUS_LABELS[eco.status] ?? eco.status;
+  // What ends the lock depends on where the ECO is: a request still out can be
+  // recalled or sent back, while an approved ECO can only be rejected.
+  const until =
+    eco.status === "APPROVED"
+      ? "the ECO is implemented, or an approver rejects it"
+      : "the ECO is implemented, or it is recalled, sent back for rework or rejected";
   return (
     `${subject} is on ${eco.ecoNumber}, which is ${status} and will release it as it stands, ` +
-    `so it cannot be ${action} until the ECO is implemented, or recalled or sent back for rework.`
+    `so it cannot be ${action} until ${until}.`
   );
 }
 

@@ -9,10 +9,13 @@ import {
   ecoCanTransition,
 } from "./status-flows";
 
-const MIGRATION = readFileSync(
-  join(__dirname, "..", "..", "supabase", "migrations", "migration-049-implement-eco-boms.sql"),
-  "utf8"
-);
+const migration = (name: string) =>
+  readFileSync(join(__dirname, "..", "..", "supabase", "migrations", name), "utf8");
+
+/** Where the eco_items target constraint was last defined. */
+const CONSTRAINT_MIGRATION = migration("migration-049-implement-eco-boms.sql");
+/** The live definition of implement_eco: the latest migration that replaces it. */
+const MIGRATION = migration("migration-056-implement-eco-revisions.sql");
 
 describe("BOM status flow", () => {
   it("allows the normal review path", () => {
@@ -33,6 +36,16 @@ describe("ECO status flow", () => {
   it("only reaches IMPLEMENTED from APPROVED", () => {
     expect(ecoCanTransition("APPROVED", "IMPLEMENTED")).toBe(true);
     expect(ecoCanTransition("SUBMITTED", "IMPLEMENTED")).toBe(false);
+  });
+
+  it("lets an approved ECO be rejected, which is its only way back to draft", () => {
+    expect(ecoCanTransition("APPROVED", "REJECTED")).toBe(true);
+    expect(ecoCanTransition("APPROVED", "DRAFT")).toBe(false);
+    expect(ecoCanTransition("REJECTED", "DRAFT")).toBe(true);
+  });
+
+  it("cannot take an implemented ECO back", () => {
+    expect(ecoCanTransition("IMPLEMENTED", "REJECTED")).toBe(false);
   });
 });
 
@@ -66,7 +79,7 @@ describe("BOM release by ECO implementation", () => {
     expect(widerThanFlow).toBe(true);
   });
 
-  it("matches how migration 049 branches", () => {
+  it("matches how implement_eco branches", () => {
     // RELEASED is counted, not released again.
     expect(MIGRATION).toMatch(/v_bom\."status" = 'RELEASED'/);
     expect(MIGRATION).toMatch(/v_boms_already := v_boms_already \+ 1/);
@@ -81,7 +94,29 @@ describe("BOM release by ECO implementation", () => {
   it("keeps the eco_items target constraint covering all three columns", () => {
     // The bug migration 049 fixes: 046 added bomId but left migration 017's
     // two-column XOR in place, so a BOM-only row failed the CHECK.
-    expect(MIGRATION).toMatch(/DROP CONSTRAINT IF EXISTS "eco_items_target_xor"/);
-    expect(MIGRATION).toMatch(/"bomId"\s+IS NOT NULL THEN 1 ELSE 0 END/);
+    expect(CONSTRAINT_MIGRATION).toMatch(/DROP CONSTRAINT IF EXISTS "eco_items_target_xor"/);
+    expect(CONSTRAINT_MIGRATION).toMatch(/"bomId"\s+IS NOT NULL THEN 1 ELSE 0 END/);
+  });
+});
+
+/**
+ * The revision a part becomes is worked out in the app (lib/revision.ts) and
+ * written onto the ECO item. implement_eco used to bump it with
+ * chr(ascii + 1), which raised on R3 or Z after approval and used reserved
+ * letters otherwise (AUD-003 CHG-3). A second copy of the rule in PL/pgSQL is
+ * how the two would drift, so the function must not have one.
+ */
+describe("part revisions in implement_eco", () => {
+  const body = MIGRATION.slice(MIGRATION.indexOf("CREATE OR REPLACE FUNCTION implement_eco"));
+
+  it("takes the revision from the item and never computes one", () => {
+    expect(body).not.toMatch(/chr\(/);
+    expect(body).toMatch(/v_next_rev := NULLIF\(trim\(COALESCE\(v_item\."toRevision"/);
+    expect(body).toMatch(/RAISE EXCEPTION\s+'ECO % lists part % without the revision it becomes/);
+  });
+
+  it("writes a file audit row for files released through a part, as for listed files", () => {
+    expect(body.match(/'file\.eco_implemented'/g)).toHaveLength(2);
+    expect(body).toMatch(/'partNumber', v_part\."partNumber"\s*\)/);
   });
 });

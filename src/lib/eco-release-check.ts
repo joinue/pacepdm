@@ -8,6 +8,14 @@
 // that said it had transitioned. It also released files and parts sitting in
 // the trash. The ECO went to IMPLEMENTED regardless (AUD-003 CHG-2).
 //
+// It also bumped each listed part's revision itself when the item named none,
+// with `chr(ascii + 1)`: R3, 01 and Z made it raise, and the letters it landed
+// on included the reserved I, O, Q, S and X. An explicit revision was never
+// checked. Once approved, an ECO that failed there could not be implemented,
+// edited or deleted (AUD-003 CHG-3). The revision a part becomes is now worked
+// out here, with the rules in `revision.ts`, and written onto the item at
+// submission so the approvers see it; the function only applies it.
+//
 // This runs the same selection in advance and names every file or part the
 // function would mishandle. It is checked when an ECO is submitted — the
 // cheapest moment to fix any of it, and from then on the content lock in
@@ -17,22 +25,31 @@
 
 import { getServiceClient } from "@/lib/db";
 import { selectAll, selectAllIn } from "@/lib/paged-query";
+import { nextRevision, revisionTargetProblem } from "@/lib/revision";
 
 export interface EcoReleasePlan {
   /** Files implement will move from WIP to Released. */
   filesToRelease: { id: string; name: string; createdById: string | null }[];
   /** Each thing that would stop implement doing what was approved, as a sentence. */
   blockers: string[];
+  /**
+   * Part items with no "To revision", and the revision each will become. The
+   * caller writes these onto the items (`fillPartRevisions`) before the ECO
+   * moves on, so what is approved and what is released are the same letter.
+   */
+  revisionsToFill: { itemId: string; partNumber: string; toRevision: string }[];
 }
 
 interface ItemRow {
   id: string;
   fileId: string | null;
   partId: string | null;
+  toRevision: string | null;
 }
 interface PartRow {
   id: string;
   partNumber: string;
+  revision: string | null;
   deletedAt: string | null;
 }
 interface LinkRow {
@@ -68,7 +85,12 @@ export async function checkEcoRelease(
   // an ECO the caller loaded through the scoped client; parts, files and
   // requests are additionally filtered by tenant.
   const items = await selectAll<ItemRow>((from, to) =>
-    db.from("eco_items").select("id, fileId, partId").eq("ecoId", ecoId).order("id").range(from, to)
+    db
+      .from("eco_items")
+      .select("id, fileId, partId, toRevision")
+      .eq("ecoId", ecoId)
+      .order("id")
+      .range(from, to)
   );
 
   const partIds = [...new Set(items.map((i) => i.partId).filter((x): x is string => !!x))];
@@ -78,7 +100,7 @@ export async function checkEcoRelease(
     selectAllIn<PartRow>(partIds, (chunk, from, to) =>
       db
         .from("parts")
-        .select("id, partNumber, deletedAt")
+        .select("id, partNumber, revision, deletedAt")
         .eq("tenantId", tenantId)
         .in("id", chunk)
         .order("id")
@@ -95,11 +117,52 @@ export async function checkEcoRelease(
   ]);
 
   const partNumberById = new Map(parts.map((p) => [p.id, p.partNumber]));
+  const partById = new Map(parts.map((p) => [p.id, p]));
+  const revisionsToFill: EcoReleasePlan["revisionsToFill"] = [];
+  // Once submitted, an item can only be changed by taking the ECO back to draft.
+  const reopen =
+    moment === "submit"
+      ? "Remove the part from the ECO and add it again"
+      : "Have an approver reject the ECO, reopen it as a draft, and add the part again";
+
   for (const part of parts) {
     if (part.deletedAt) {
       blockers.push(
         `Part ${part.partNumber} is in the trash. Restore it, or remove it from the ECO.`
       );
+    }
+  }
+
+  for (const item of items) {
+    const part = item.partId ? partById.get(item.partId) : undefined;
+    if (!part || part.deletedAt) continue;
+
+    const current = (part.revision ?? "").trim();
+    const explicit = (item.toRevision ?? "").trim();
+    const target = explicit || nextRevision(current)?.next;
+
+    if (!target) {
+      blockers.push(
+        (current
+          ? `Part ${part.partNumber} is at revision ${current}, which cannot be followed on from automatically. `
+          : `Part ${part.partNumber} has no revision to follow on from. `) +
+          `${reopen} with the revision it should become.`
+      );
+      continue;
+    }
+
+    const problem = revisionTargetProblem(current, target);
+    if (problem) {
+      blockers.push(
+        `Part ${part.partNumber} is at revision ${current}, so it cannot be released as ` +
+          `${problem === "same" ? "the same revision" : `revision ${target}, which comes before it`}. ` +
+          `${reopen} with a later revision.`
+      );
+      continue;
+    }
+
+    if (!explicit) {
+      revisionsToFill.push({ itemId: item.id, partNumber: part.partNumber, toRevision: target });
     }
   }
 
@@ -153,7 +216,7 @@ export async function checkEcoRelease(
       blockers.push(
         moment === "submit"
           ? `${label} is checked out by ${who}. Check it in first — once the ECO is submitted, its files are locked.`
-          : `${label} is checked out by ${who}. Undo the checkout, or send the ECO back for rework if it holds changes the ECO needs.`
+          : `${label} is checked out by ${who}. Undo the checkout, or, if it holds changes the ECO needs, have an approver reject the ECO so it can be reopened.`
       );
     } else if (awaitingApproval.has(file.id)) {
       blockers.push(
@@ -169,12 +232,39 @@ export async function checkEcoRelease(
           `any other state as it is, so ` +
           (moment === "submit"
             ? `move it back to WIP, or ${detach}.`
-            : `send the ECO back for rework, then move it back to WIP or ${detach}.`)
+            : `have an approver reject the ECO so it can be reopened, then move it back to WIP or ${detach}.`)
       );
     }
   }
 
-  return { filesToRelease, blockers };
+  return { filesToRelease, blockers, revisionsToFill };
+}
+
+/**
+ * Record the revisions `checkEcoRelease` worked out on the items that named
+ * none. Keyed by the ECO as well as the item, so a stray item id cannot reach
+ * another ECO's rows.
+ *
+ * Throws on a failed write: the database function refuses a part item with no
+ * revision, so carrying on would only fail later with a vaguer message.
+ */
+export async function fillPartRevisions(
+  ecoId: string,
+  fills: EcoReleasePlan["revisionsToFill"]
+): Promise<void> {
+  const db = getServiceClient();
+  for (const fill of fills) {
+    const { error } = await db
+      .from("eco_items")
+      .update({ toRevision: fill.toRevision })
+      .eq("id", fill.itemId)
+      .eq("ecoId", ecoId);
+    if (error) {
+      throw new Error(
+        `Could not record revision ${fill.toRevision} for part ${fill.partNumber}: ${error.message}`
+      );
+    }
+  }
 }
 
 /** One message naming the first few blockers, for an error the user reads. */

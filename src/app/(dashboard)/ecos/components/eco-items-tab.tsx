@@ -125,7 +125,7 @@ export function EcoItemsTab({
                               </>
                             )}
                             {!item.toRevision && (
-                              <span className="italic">(auto-bump on implement)</span>
+                              <span className="italic">(next revision, set on submit)</span>
                             )}
                           </span>
                         </>

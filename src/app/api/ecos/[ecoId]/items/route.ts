@@ -1,16 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
+import { v4 as newId } from "uuid";
+import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { v4 as uuid } from "uuid";
-import { z, parseBody, nonEmptyString, optionalString } from "@/lib/validation";
+import { nextRevision, revisionTargetProblem } from "@/lib/revision";
+import type { ScopedDb } from "@/lib/tenant-db";
+import { z, nonEmptyString, optionalString, uuid } from "@/lib/validation";
 
-// An ECO item targets either a part (preferred — the part is the PDM's
-// central object, and changing a part cascades to its linked files on
-// implement) or a single file (for loose documents not attached to any
-// part). Exactly one of partId/fileId must be supplied — the DB CHECK
-// in migration 017 enforces this too, we just surface a clearer error
-// at the API boundary.
+// An ECO item targets a part (preferred — the part is the PDM's central
+// object, and changing a part cascades to its linked files on implement), a
+// single file (for loose documents not attached to any part), or a BOM.
+// Exactly one — the database CHECK from migration 049 enforces it too; this
+// surfaces a clearer error at the API boundary.
 const AddEcoItemSchema = z
   .object({
     partId: z.string().trim().min(1).optional(),
@@ -23,9 +23,11 @@ const AddEcoItemSchema = z
     bomId: z.string().trim().min(1).optional(),
     changeType: z.enum(["ADD", "MODIFY", "REMOVE"]),
     reason: optionalString,
-    // Only meaningful for part items. Server auto-bumps (A→B) when
-    // omitted, so these fields are both optional.
     fromRevision: optionalString,
+    /**
+     * For a part, the revision it becomes. Optional: left blank, submitting
+     * the ECO works it out by the rules in lib/revision.ts and writes it here.
+     */
     toRevision: optionalString,
   })
   .refine((v) => (v.partId ? 1 : 0) + (v.fileId ? 1 : 0) + (v.bomId ? 1 : 0) === 1, {
@@ -33,9 +35,12 @@ const AddEcoItemSchema = z
     path: ["partId"],
   });
 
-const RemoveEcoItemSchema = z.object({
-  itemId: nonEmptyString,
-});
+const RemoveEcoItemSchema = z.object({ itemId: nonEmptyString });
+
+const ParamsSchema = z.object({ ecoId: uuid });
+
+const ITEM_COLUMNS =
+  "id, ecoId, partId, fileId, bomId, changeType, reason, fromRevision, toRevision";
 
 // We deliberately do NOT use PostgREST embed hints like
 // `part:parts!eco_items_partId_fkey(...)` here. Those were silently
@@ -43,7 +48,7 @@ const RemoveEcoItemSchema = z.object({
 // manifested as "Affected Items is empty even though eco_items has
 // rows in the DB". Rather than chase the schema-cache / constraint
 // name the resolver was unhappy about, just fetch the raw item rows
-// and hydrate the part/file sides with two cheap batched selects.
+// and hydrate the part/file sides with batched selects.
 //
 // Note: `eco_items` has no `createdAt` column (see migration-001 /
 // migration-017 — the schema was never backfilled with one). Ordering
@@ -87,13 +92,14 @@ type HydratedItem = RawItem & {
   } | null;
 };
 
-async function hydrateItems(
-  db: ReturnType<typeof getServiceClient>,
-  rows: RawItem[]
-): Promise<HydratedItem[]> {
-  const partIds = Array.from(new Set(rows.map((r) => r.partId).filter((v): v is string => !!v)));
-  const fileIds = Array.from(new Set(rows.map((r) => r.fileId).filter((v): v is string => !!v)));
-  const bomIds = Array.from(new Set(rows.map((r) => r.bomId).filter((v): v is string => !!v)));
+/** Parts, files and BOMs are tenant tables, so the scoped client filters each read. */
+async function hydrateItems(db: ScopedDb, rows: RawItem[]): Promise<HydratedItem[]> {
+  const ids = (key: "partId" | "fileId" | "bomId") =>
+    Array.from(new Set(rows.map((r) => r[key]).filter((v): v is string => !!v)));
+  const partIds = ids("partId");
+  const fileIds = ids("fileId");
+  const bomIds = ids("bomId");
+  const none = Promise.resolve({ data: [], error: null });
 
   const [partsRes, filesRes, bomsRes] = await Promise.all([
     partIds.length
@@ -101,25 +107,25 @@ async function hydrateItems(
           .from("parts")
           .select("id, partNumber, name, revision, lifecycleState, category")
           .in("id", partIds)
-      : Promise.resolve({ data: [] as HydratedItem["part"][], error: null }),
+      : none,
     fileIds.length
       ? db
           .from("files")
           .select("id, name, partNumber, lifecycleState, currentVersion")
           .in("id", fileIds)
-      : Promise.resolve({ data: [] as HydratedItem["file"][], error: null }),
-    bomIds.length
-      ? db.from("boms").select("id, name, revision, status").in("id", bomIds)
-      : Promise.resolve({ data: [] as HydratedItem["bom"][], error: null }),
+      : none,
+    bomIds.length ? db.from("boms").select("id, name, revision, status").in("id", bomIds) : none,
   ]);
 
-  if (partsRes.error) throw partsRes.error;
-  if (filesRes.error) throw filesRes.error;
-  if (bomsRes.error) throw bomsRes.error;
+  if (partsRes.error) throw new Error(`Could not load the ECO's parts: ${partsRes.error.message}`);
+  if (filesRes.error) throw new Error(`Could not load the ECO's files: ${filesRes.error.message}`);
+  if (bomsRes.error) throw new Error(`Could not load the ECO's BOMs: ${bomsRes.error.message}`);
 
-  const partById = new Map((partsRes.data ?? []).map((p) => [p!.id, p!] as const));
-  const fileById = new Map((filesRes.data ?? []).map((f) => [f!.id, f!] as const));
-  const bomById = new Map((bomsRes.data ?? []).map((b) => [b!.id, b!] as const));
+  const byId = <T extends { id: string }>(list: T[] | null) =>
+    new Map((list ?? []).map((row) => [row.id, row] as const));
+  const partById = byId<NonNullable<HydratedItem["part"]>>(partsRes.data);
+  const fileById = byId<NonNullable<HydratedItem["file"]>>(filesRes.data);
+  const bomById = byId<NonNullable<HydratedItem["bom"]>>(bomsRes.data);
 
   return rows.map((r) => ({
     ...r,
@@ -129,151 +135,135 @@ async function hydrateItems(
   }));
 }
 
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const { ecoId } = await params;
-    const db = getServiceClient();
-
-    // Verify ECO belongs to tenant
-    const { data: eco } = await db
-      .from("ecos")
-      .select("id")
-      .eq("id", ecoId)
-      .eq("tenantId", tenantUser.tenantId)
-      .is("deletedAt", null)
-      .maybeSingle();
-    if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-
-    const { data: rawItems, error } = await db
-      .from("eco_items")
-      .select("id, ecoId, partId, fileId, bomId, changeType, reason, fromRevision, toRevision")
-      .eq("ecoId", ecoId)
-      .order("id", { ascending: true });
-
-    if (error) {
-      console.error(`[ecos/${ecoId}/items] GET failed:`, error);
-      return NextResponse.json({ error: `Query failed: ${error.message}` }, { status: 500 });
-    }
-
-    const hydrated = await hydrateItems(db, (rawItems ?? []) as RawItem[]);
-    return NextResponse.json(hydrated);
-  } catch (err) {
-    console.error("Failed to fetch ECO items:", err);
-    const message = err instanceof Error ? err.message : "Failed to fetch ECO items";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+/** The ECO, through the scoped client, so every item query below is keyed by an ECO in this tenant. */
+async function loadEco(db: ScopedDb, ecoId: string) {
+  const { data: eco, error } = await db
+    .from("ecos")
+    .select("id, status, ecoNumber")
+    .eq("id", ecoId)
+    .is("deletedAt", null)
+    .maybeSingle();
+  if (error) throw new Error(`Could not load the ECO: ${error.message}`);
+  if (!eco) throw notFound("ECO not found");
+  return eco as { id: string; status: string; ecoNumber: string };
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.ECO_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+/**
+ * Why a part item cannot name this revision, or null.
+ *
+ * An explicit "To revision" was never checked, so a part at C could be put on
+ * an ECO to become C, or B; and a blank one was left for `implement_eco` to
+ * bump with `chr(ascii + 1)`, which raised on revisions like R3-1 or Z and
+ * stranded the approved ECO (AUD-003 CHG-3). Saying so while the item is
+ * being added is the cheapest place to fix it.
+ */
+function partRevisionRefusal(
+  part: { partNumber: string; revision: string | null },
+  toRevision: string | null | undefined
+): string | null {
+  const current = (part.revision ?? "").trim();
+  if (toRevision) {
+    const problem = revisionTargetProblem(current, toRevision);
+    if (problem === "same") {
+      return `${part.partNumber} is already at revision ${current}. Enter the revision it will become.`;
+    }
+    if (problem === "earlier") {
+      return `${part.partNumber} is at revision ${current}, and ${toRevision} comes before it. Enter a later revision.`;
+    }
+    return null;
+  }
+  if (nextRevision(current)) return null;
+  return current
+    ? `${part.partNumber} is at revision ${current}, which cannot be followed on from automatically. Enter the revision it will become.`
+    : `${part.partNumber} has no revision yet. Enter the revision it will become.`;
+}
+
+export const GET = withTenant({ params: ParamsSchema }, async ({ db, params }) => {
+  const eco = await loadEco(db, params.ecoId);
+
+  // lint-conventions-allow: child-table-direct-query — keyed by an ECO just
+  // loaded through the scoped client.
+  const { data: rawItems, error } = await db
+    .from("eco_items")
+    .select(ITEM_COLUMNS)
+    .eq("ecoId", eco.id)
+    .order("id", { ascending: true });
+  if (error) throw new Error(`Query failed: ${error.message}`);
+
+  return hydrateItems(db, (rawItems ?? []) as RawItem[]);
+});
+
+export const POST = withTenant(
+  { permission: PERMISSIONS.ECO_EDIT, body: AddEcoItemSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body }) => {
+    const { partId, fileId, bomId, changeType, reason, fromRevision, toRevision } = body;
+
+    const eco = await loadEco(db, params.ecoId);
+    if (eco.status !== "DRAFT") throw badRequest("Can only add items to DRAFT ECOs");
+
+    /** An item already on this ECO for the same target. */
+    async function alreadyOnEco(column: "partId" | "fileId" | "bomId", id: string) {
+      // lint-conventions-allow: child-table-direct-query — keyed by the ECO
+      // loaded above.
+      const { data, error } = await db
+        .from("eco_items")
+        .select("id")
+        .eq("ecoId", eco.id)
+        .eq(column, id)
+        .limit(1);
+      if (error) throw new Error(`Could not check the ECO's items: ${error.message}`);
+      return (data ?? []).length > 0;
     }
 
-    const parsed = await parseBody(request, AddEcoItemSchema);
-    if (!parsed.ok) return parsed.response;
-    const { partId, fileId, bomId, changeType, reason, fromRevision, toRevision } = parsed.data;
-
-    const { ecoId } = await params;
-    const db = getServiceClient();
-
-    // Verify ECO is in DRAFT and belongs to tenant
-    const { data: eco } = await db
-      .from("ecos")
-      .select("id, status, ecoNumber")
-      .eq("id", ecoId)
-      .eq("tenantId", tenantUser.tenantId)
-      .is("deletedAt", null)
-      .single();
-    if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-    if (eco.status !== "DRAFT") {
-      return NextResponse.json({ error: "Can only add items to DRAFT ECOs" }, { status: 400 });
-    }
-
-    // Cross-tenant guard: the target part/file must belong to the caller's
-    // tenant. The DB RLS story is still service-role-based, so we enforce
-    // here. Also capture the part's current revision to seed fromRevision
-    // when the caller didn't supply it — makes the history self-explaining.
+    // The target must be in the caller's tenant, which the scoped client
+    // guarantees, and not in the trash. Parts and BOMs seed fromRevision when
+    // the caller did not, so the history explains itself.
     let seededFromRevision: string | null = fromRevision ?? null;
     if (partId) {
       const { data: part } = await db
         .from("parts")
-        .select("id, tenantId, revision, deletedAt")
+        .select("id, partNumber, revision, deletedAt")
         .eq("id", partId)
-        .single();
-      if (!part || part.tenantId !== tenantUser.tenantId || part.deletedAt) {
-        return NextResponse.json({ error: "Part not found" }, { status: 404 });
-      }
-      if (!seededFromRevision) seededFromRevision = part.revision;
-
-      const { data: existing } = await db
-        .from("eco_items")
-        .select("id")
-        .eq("ecoId", ecoId)
-        .eq("partId", partId)
         .maybeSingle();
-      if (existing) {
-        return NextResponse.json({ error: "This part is already in this ECO" }, { status: 409 });
+      if (!part || part.deletedAt) throw notFound("Part not found");
+
+      const refusal = partRevisionRefusal(part, toRevision);
+      if (refusal) throw badRequest(refusal);
+
+      if (!seededFromRevision) seededFromRevision = part.revision;
+      if (await alreadyOnEco("partId", partId)) {
+        throw conflict("This part is already in this ECO");
       }
     } else if (fileId) {
       const { data: file } = await db
         .from("files")
-        .select("id, tenantId, deletedAt")
+        .select("id, deletedAt")
         .eq("id", fileId)
-        .single();
-      if (!file || file.tenantId !== tenantUser.tenantId || file.deletedAt) {
-        return NextResponse.json({ error: "File not found" }, { status: 404 });
-      }
-
-      const { data: existing } = await db
-        .from("eco_items")
-        .select("id")
-        .eq("ecoId", ecoId)
-        .eq("fileId", fileId)
         .maybeSingle();
-      if (existing) {
-        return NextResponse.json({ error: "This file is already in this ECO" }, { status: 409 });
+      if (!file || file.deletedAt) throw notFound("File not found");
+      if (await alreadyOnEco("fileId", fileId)) {
+        throw conflict("This file is already in this ECO");
       }
     } else if (bomId) {
       const { data: bom } = await db
         .from("boms")
-        .select("id, tenantId, deletedAt, revision")
+        .select("id, revision, deletedAt")
         .eq("id", bomId)
-        .single();
-      if (!bom || bom.tenantId !== tenantUser.tenantId || bom.deletedAt) {
-        return NextResponse.json({ error: "BOM not found" }, { status: 404 });
-      }
-      // Seed the from-revision the same way parts do, so the ECO records
-      // what the structure looked like before the change.
-      if (!seededFromRevision) seededFromRevision = bom.revision;
-
-      const { data: existing } = await db
-        .from("eco_items")
-        .select("id")
-        .eq("ecoId", ecoId)
-        .eq("bomId", bomId)
         .maybeSingle();
-      if (existing) {
-        return NextResponse.json({ error: "This BOM is already in this ECO" }, { status: 409 });
+      if (!bom || bom.deletedAt) throw notFound("BOM not found");
+      if (!seededFromRevision) seededFromRevision = bom.revision;
+      if (await alreadyOnEco("bomId", bomId)) {
+        throw conflict("This BOM is already in this ECO");
       }
     }
 
+    // lint-conventions-allow: child-table-direct-query — the row's ecoId is the
+    // ECO loaded above, and every target was checked against the tenant.
     const { data: rawItem, error } = await db
       .from("eco_items")
       .insert({
-        id: uuid(),
-        ecoId,
+        id: newId(),
+        ecoId: eco.id,
         partId: partId ?? null,
         fileId: fileId ?? null,
         bomId: bomId ?? null,
@@ -282,10 +272,9 @@ export async function POST(
         fromRevision: seededFromRevision,
         toRevision: toRevision ?? null,
       })
-      .select("id, ecoId, partId, fileId, bomId, changeType, reason, fromRevision, toRevision")
+      .select(ITEM_COLUMNS)
       .single();
-
-    if (error) throw error;
+    if (error) throw new Error(`Could not add the item: ${error.message}`);
 
     const [item] = await hydrateItems(db, [rawItem as RawItem]);
 
@@ -294,80 +283,43 @@ export async function POST(
       userId: tenantUser.id,
       action: "eco.item.added",
       entityType: "eco",
-      entityId: ecoId,
+      entityId: eco.id,
       details: {
         ecoNumber: eco.ecoNumber,
-        target: partId ? "part" : "file",
+        target: partId ? "part" : fileId ? "file" : "bom",
         partId: partId ?? null,
         fileId: fileId ?? null,
+        bomId: bomId ?? null,
         changeType,
+        toRevision: toRevision ?? null,
       },
     });
 
-    return NextResponse.json(item);
-  } catch (err) {
-    console.error("Failed to add ECO item:", err);
-    const message = err instanceof Error ? err.message : "Failed to add ECO item";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return item;
   }
-}
+);
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ ecoId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-    if (!hasPermission(permissions, PERMISSIONS.ECO_EDIT)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+export const DELETE = withTenant(
+  { permission: PERMISSIONS.ECO_EDIT, body: RemoveEcoItemSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body }) => {
+    const eco = await loadEco(db, params.ecoId);
+    if (eco.status !== "DRAFT") throw badRequest("Can only remove items from DRAFT ECOs");
 
-    const parsed = await parseBody(request, RemoveEcoItemSchema);
-    if (!parsed.ok) return parsed.response;
-    const { itemId } = parsed.data;
-
-    const { ecoId } = await params;
-    const db = getServiceClient();
-
-    const { data: eco } = await db
-      .from("ecos")
-      .select("id, status, ecoNumber")
-      .eq("id", ecoId)
-      .eq("tenantId", tenantUser.tenantId)
-      .is("deletedAt", null)
-      .single();
-    if (!eco) return NextResponse.json({ error: "ECO not found" }, { status: 404 });
-    if (eco.status !== "DRAFT") {
-      return NextResponse.json({ error: "Can only remove items from DRAFT ECOs" }, { status: 400 });
-    }
-
-    const { error: deleteError } = await db
-      .from("eco_items")
-      .delete()
-      .eq("id", itemId)
-      .eq("ecoId", ecoId);
-    if (deleteError) {
-      return NextResponse.json(
-        { error: `Could not remove item: ${deleteError.message}` },
-        { status: 409 }
-      );
-    }
+    // lint-conventions-allow: child-table-direct-query — keyed by the ECO
+    // loaded above as well as the item, so an item id from another ECO
+    // matches nothing.
+    const { error } = await db.from("eco_items").delete().eq("id", body.itemId).eq("ecoId", eco.id);
+    if (error) throw conflict(`Could not remove item: ${error.message}`);
 
     await logAudit({
       tenantId: tenantUser.tenantId,
       userId: tenantUser.id,
       action: "eco.item.removed",
       entityType: "eco",
-      entityId: ecoId,
-      details: { ecoNumber: eco.ecoNumber, itemId },
+      entityId: eco.id,
+      details: { ecoNumber: eco.ecoNumber, itemId: body.itemId },
     });
 
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("Failed to remove ECO item:", err);
-    const message = err instanceof Error ? err.message : "Failed to remove ECO item";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { success: true };
   }
-}
+);

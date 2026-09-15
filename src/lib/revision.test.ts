@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextRevision, usesReservedLetter } from "./revision";
+import { nextRevision, revisionTargetProblem, usesReservedLetter } from "./revision";
 
 /**
  * These are the cases the old `charCodeAt(0) + 1` got wrong, plus the ones
@@ -97,5 +97,42 @@ describe("usesReservedLetter", () => {
     // R2 is a fact about the source system, not a violation to report.
     expect(usesReservedLetter("R2")).toBe(false);
     expect(usesReservedLetter("1")).toBe(false);
+  });
+});
+
+/**
+ * An ECO item's explicit "To revision" was never checked, so a part at C could
+ * be released as C again, or as B (AUD-003 CHG-3).
+ */
+describe("revisionTargetProblem", () => {
+  it("accepts the next revision, and a jump within the scheme", () => {
+    expect(revisionTargetProblem("C", "D")).toBeNull();
+    expect(revisionTargetProblem("C", "F")).toBeNull();
+    expect(revisionTargetProblem("Y", "AA")).toBeNull();
+    expect(revisionTargetProblem("R2", "R3")).toBeNull();
+    expect(revisionTargetProblem("09", "10")).toBeNull();
+  });
+
+  it("refuses the revision the part is already at, whatever the case", () => {
+    expect(revisionTargetProblem("C", "C")).toBe("same");
+    expect(revisionTargetProblem("R2", "r2")).toBe("same");
+    expect(revisionTargetProblem(" B ", "B")).toBe("same");
+  });
+
+  it("refuses going backwards within a scheme", () => {
+    expect(revisionTargetProblem("C", "B")).toBe("earlier");
+    expect(revisionTargetProblem("AA", "Y")).toBe("earlier");
+    expect(revisionTargetProblem("R10", "R9")).toBe("earlier");
+    expect(revisionTargetProblem("10", "9")).toBe("earlier");
+  });
+
+  it("allows a move to another scheme, which it cannot order", () => {
+    expect(revisionTargetProblem("R4", "A")).toBeNull();
+    expect(revisionTargetProblem("P3", "R1")).toBeNull();
+  });
+
+  it("allows anything for a part with no revision yet", () => {
+    expect(revisionTargetProblem("", "A")).toBeNull();
+    expect(revisionTargetProblem(null, "A")).toBeNull();
   });
 });

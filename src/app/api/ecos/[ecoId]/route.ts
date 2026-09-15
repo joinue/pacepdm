@@ -10,7 +10,7 @@ import {
 import { ECO_STATUS_FLOW as VALID_TRANSITIONS, ecoAwaitsApproval } from "@/lib/status-flows";
 import { z, optionalString, uuid } from "@/lib/validation";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
-import { checkEcoRelease, describeBlockers } from "@/lib/eco-release-check";
+import { checkEcoRelease, describeBlockers, fillPartRevisions } from "@/lib/eco-release-check";
 
 // Update body: status transitions and field updates can be combined.
 // Field updates are only allowed in DRAFT (enforced after parse). The
@@ -344,12 +344,28 @@ export const PUT = withTenant(
       // so anything that would stop implement releasing them has to be fixed
       // now: a file checked out at this point could never be checked in, and
       // one in the trash or outside WIP would be skipped at implementation.
+      //
+      // It is also the last moment an item can change, so a part item with no
+      // "To revision" gets the one it will become written onto it here, where
+      // the approvers can see it. Implement used to invent it (AUD-003 CHG-3).
+      const auditDetails: Record<string, unknown> = { ecoNumber: eco.ecoNumber, from: eco.status };
       if (status === "SUBMITTED") {
-        const { blockers } = await checkEcoRelease(tenantUser.tenantId, ecoId, "submit");
+        const { blockers, revisionsToFill } = await checkEcoRelease(
+          tenantUser.tenantId,
+          ecoId,
+          "submit"
+        );
         if (blockers.length > 0) {
           throw conflict(describeBlockers(`${eco.ecoNumber} cannot be submitted yet`, blockers), {
             blockers,
           });
+        }
+        await fillPartRevisions(ecoId, revisionsToFill);
+        if (revisionsToFill.length > 0) {
+          auditDetails.revisionsSet = revisionsToFill.map(({ partNumber, toRevision }) => ({
+            partNumber,
+            toRevision,
+          }));
         }
       }
 
@@ -413,12 +429,7 @@ export const PUT = withTenant(
             action: "eco.status_change",
             entityType: "eco",
             entityId: ecoId,
-            details: {
-              ecoNumber: eco.ecoNumber,
-              from: eco.status,
-              to: status,
-              workflowTriggered: true,
-            },
+            details: { ...auditDetails, to: status, workflowTriggered: true },
           });
 
           await notifyCreator(status);
@@ -453,7 +464,7 @@ export const PUT = withTenant(
         action: "eco.status_change",
         entityType: "eco",
         entityId: ecoId,
-        details: { ecoNumber: eco.ecoNumber, from: eco.status, to: status },
+        details: { ...auditDetails, to: status },
       });
 
       await notifyCreator(status);

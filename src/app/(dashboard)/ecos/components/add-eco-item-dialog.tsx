@@ -24,6 +24,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Search, Loader2, X, FileText, Package, Layers } from "lucide-react";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { nextRevision } from "@/lib/revision";
 import type { SearchFile, SearchPart } from "../types";
 
 /** What the ECO item can point at. Mirrors the route's exactly-one rule. */
@@ -58,8 +59,9 @@ interface AddEcoItemDialogProps {
  *
  * Each picker debounces search (2-char min). After selection the user
  * picks a change type (ADD/MODIFY/REMOVE) and an optional reason. Part
- * items also accept an optional toRevision override — leave blank and
- * the server auto-bumps A→B on implement.
+ * items also accept an optional toRevision — leave blank and submitting the
+ * ECO writes the next one onto the item (lib/revision.ts), so approvers see
+ * the revision they are approving.
  */
 export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoItemDialogProps) {
   const [target, setTarget] = useState<EcoItemTarget>("part");
@@ -333,14 +335,17 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                     value={toRevision}
                     onChange={(e) => setToRevision(e.target.value)}
                     placeholder={
-                      selectedPart
-                        ? `Leave blank to auto-bump from ${selectedPart.revision}`
-                        : "Leave blank to auto-bump"
+                      !selectedPart
+                        ? "Leave blank for the next revision"
+                        : nextRevision(selectedPart.revision)
+                          ? `Leave blank for ${nextRevision(selectedPart.revision)?.next}`
+                          : `Rev ${selectedPart.revision || "—"} needs one entered`
                     }
                     maxLength={8}
                   />
                   <p className="text-2xs text-muted-foreground">
-                    If blank, the server bumps a single-letter revision on implement (e.g. A → B).
+                    If blank, the next revision is set when the ECO is submitted — A → B, skipping
+                    I, O, Q, S, X and Z, or R2 → R3.
                   </p>
                 </div>
               </TabsContent>

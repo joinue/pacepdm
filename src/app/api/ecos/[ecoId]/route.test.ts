@@ -89,7 +89,10 @@ vi.mock("@/lib/eco-release-check", async () => {
     await vi.importActual<typeof import("@/lib/eco-release-check")>("@/lib/eco-release-check");
   return {
     ...actual,
-    checkEcoRelease: vi.fn().mockResolvedValue({ blockers: [], filesToRelease: [] }),
+    checkEcoRelease: vi
+      .fn()
+      .mockResolvedValue({ blockers: [], filesToRelease: [], revisionsToFill: [] }),
+    fillPartRevisions: vi.fn().mockResolvedValue(undefined),
   };
 });
 // No workflow assigned — the fall-through path that made this reachable.
@@ -107,7 +110,7 @@ import {
 } from "@/lib/approval-engine";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import { checkEcoRelease } from "@/lib/eco-release-check";
+import { checkEcoRelease, fillPartRevisions } from "@/lib/eco-release-check";
 import { fromDateInputValue } from "@/app/(dashboard)/ecos/effectivity";
 
 const ECO_ID = "33333333-3333-4333-8333-333333333333";
@@ -365,6 +368,7 @@ describe("submitting an ECO whose files implement could not release", () => {
     vi.mocked(checkEcoRelease).mockResolvedValueOnce({
       blockers: ["bracket.SLDDRW is checked out by Bob. Check it in first."],
       filesToRelease: [],
+      revisionsToFill: [],
     });
 
     const res = await PUT(req({ status: "SUBMITTED" }), { params });
@@ -375,6 +379,7 @@ describe("submitting an ECO whose files implement could not release", () => {
     expect(body.details.blockers).toHaveLength(1);
     expect(checkEcoRelease).toHaveBeenCalledWith("tenant-1", ECO_ID, "submit");
     expect(findWorkflowForTrigger).not.toHaveBeenCalled();
+    expect(fillPartRevisions).not.toHaveBeenCalled();
     expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
   });
 
@@ -383,6 +388,88 @@ describe("submitting an ECO whose files implement could not release", () => {
     tableResults.ecos = { data: { ...inReviewEco, status: "DRAFT" }, error: null };
     const res = await PUT(req({ status: "SUBMITTED" }), { params });
     expect(res.status).toBe(200);
+  });
+
+  it("writes the revision each part will become onto its item, for the approvers to see", async () => {
+    // Implement used to invent it with chr(ascii + 1) (AUD-003 CHG-3).
+    mockTenantUser.current = engineer;
+    tableResults.ecos = { data: { ...inReviewEco, status: "DRAFT" }, error: null };
+    const fills = [{ itemId: "item-1", partNumber: "PN-1042", toRevision: "J" }];
+    vi.mocked(checkEcoRelease).mockResolvedValueOnce({
+      blockers: [],
+      filesToRelease: [],
+      revisionsToFill: fills,
+    });
+
+    const res = await PUT(req({ status: "SUBMITTED" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(fillPartRevisions).toHaveBeenCalledWith(ECO_ID, fills);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "eco.status_change",
+        details: expect.objectContaining({
+          to: "SUBMITTED",
+          revisionsSet: [{ partNumber: "PN-1042", toRevision: "J" }],
+        }),
+      })
+    );
+  });
+});
+
+/**
+ * An approved ECO could only be implemented. When implement refused it — a
+ * revision it could not bump, a BOM gone obsolete, and since CHG-2 a file it
+ * cannot release — the ECO could not be edited or deleted either, and its
+ * files stayed locked. Rejecting it is the way back (AUD-003 CHG-3).
+ */
+describe("rejecting an approved ECO", () => {
+  const approvedEco = { ...inReviewEco, status: "APPROVED" };
+
+  it("lets an approver reject it", async () => {
+    mockTenantUser.current = manager;
+    tableResults.ecos = { data: approvedEco, error: null };
+
+    const res = await PUT(req({ status: "REJECTED" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        table: "ecos",
+        data: expect.objectContaining({ status: "REJECTED" }),
+      })
+    );
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({ from: "APPROVED", to: "REJECTED" }),
+      })
+    );
+  });
+
+  it("does not let someone who can only edit ECOs undo an approval", async () => {
+    mockTenantUser.current = engineer;
+    tableResults.ecos = { data: approvedEco, error: null };
+    const res = await PUT(req({ status: "REJECTED" }), { params });
+    expect(res.status).toBe(403);
+  });
+
+  it("is allowed while a workflow governs approvals, since it releases nothing", async () => {
+    vi.mocked(findEcoApprovalWorkflow).mockResolvedValue({ id: "wf-1", name: "ECO Board" });
+    try {
+      mockTenantUser.current = manager;
+      tableResults.ecos = { data: approvedEco, error: null };
+      const res = await PUT(req({ status: "REJECTED" }), { params });
+      expect(res.status).toBe(200);
+    } finally {
+      vi.mocked(findEcoApprovalWorkflow).mockResolvedValue(null);
+    }
+  });
+
+  it("still cannot take it straight back to draft", async () => {
+    mockTenantUser.current = manager;
+    tableResults.ecos = { data: approvedEco, error: null };
+    const res = await PUT(req({ status: "DRAFT" }), { params });
+    expect(res.status).toBe(400);
   });
 });
 

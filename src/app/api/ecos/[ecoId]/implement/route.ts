@@ -2,7 +2,7 @@ import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { notify, notifyFileTransition, sideEffect } from "@/lib/notifications";
 import { createReleaseFromEco } from "@/lib/releases";
-import { checkEcoRelease, describeBlockers } from "@/lib/eco-release-check";
+import { checkEcoRelease, describeBlockers, fillPartRevisions } from "@/lib/eco-release-check";
 import { z, uuid } from "@/lib/validation";
 
 /**
@@ -18,7 +18,12 @@ import { z, uuid } from "@/lib/validation";
  * mishandle: it skipped, without saying so, a file checked out or in any state
  * but WIP, and released files and parts from the trash — while the ECO still
  * went to IMPLEMENTED and the toast counted what it did (AUD-003 CHG-2). Those
- * now refuse here with the reason, and the ECO stays APPROVED.
+ * now refuse here with the reason, and the ECO stays APPROVED — from where an
+ * approver can reject it to reopen it (AUD-003 CHG-3).
+ *
+ * The function no longer works out a part's next revision (migration 056); the
+ * item carries it, written at submission. An ECO submitted before that has it
+ * written here instead, by the same rules.
  */
 export const POST = withTenant(
   { permission: PERMISSIONS.ECO_EDIT, params: z.object({ ecoId: uuid }) },
@@ -45,6 +50,8 @@ export const POST = withTenant(
         }
       );
     }
+
+    await fillPartRevisions(ecoId, plan.revisionsToFill);
 
     const { data: result, error: rpcError } = await db.rpc("implement_eco", {
       p_eco_id: ecoId,

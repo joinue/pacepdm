@@ -101,6 +101,47 @@ export function nextRevision(current: string | null | undefined): RevisionInfo |
 }
 
 /**
+ * Order two revisions written in the same scheme: negative when `a` comes
+ * first. Null when they are not comparable — different schemes, or prefixes
+ * that differ — because guessing an order is how a wrong answer gets in.
+ */
+function compareRevisions(a: string, b: string): number | null {
+  if (ALPHA.test(a) && ALPHA.test(b)) {
+    // Length first, so Y < AA; within a length, alphabetical.
+    return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+  }
+  if (NUMERIC.test(a) && NUMERIC.test(b)) return Number(a) - Number(b);
+  const pa = a.match(PREFIXED);
+  const pb = b.match(PREFIXED);
+  if (pa && pb && pa[1].toLowerCase() === pb[1].toLowerCase()) {
+    return Number(pa[2]) - Number(pb[2]);
+  }
+  return null;
+}
+
+/**
+ * Why a part at revision `current` cannot become `target`, or null if it can.
+ *
+ *   "same"    — `target` is the revision the part is already at, so releasing
+ *               it would publish a change under the revision it replaces.
+ *   "earlier" — `target` comes before `current` in the same scheme.
+ *
+ * A target in a different scheme is allowed: moving from `R4` to `A` at a
+ * production release is a real practice, not an error this can see.
+ */
+export function revisionTargetProblem(
+  current: string | null | undefined,
+  target: string
+): "same" | "earlier" | null {
+  const from = (current ?? "").trim();
+  const to = target.trim();
+  if (!from) return null;
+  if (from.toLowerCase() === to.toLowerCase()) return "same";
+  const order = compareRevisions(to, from);
+  return order !== null && order < 0 ? "earlier" : null;
+}
+
+/**
  * True when `revision` uses only letters the standard permits. Used to warn
  * on data coming in from elsewhere rather than to reject it — an imported
  * part at revision `S` is a fact about the source system, not an error we

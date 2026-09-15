@@ -4,8 +4,8 @@
 
 <!-- plan-metrics
 routes-total: 115
-routes-wrapped: 57
-unwrapped-route: 282
+routes-wrapped: 58
+unwrapped-route: 273
 raw-fetch: 34
 generic-error-toast: 4
 swallowed-error: 6
@@ -94,7 +94,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **57 / 115**                          | 115                                                   |
+| Routes on `withTenant`                | 0                | **58 / 115**                          | 115                                                   |
 | `raw-fetch` in client components      | 112              | **34**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **4**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
@@ -148,7 +148,7 @@ console task.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 58 routes
+### 1. Finish the route wrapper — 57 routes
 
 > 70 → 66 → 68 of 110. The count went _up_ because the supplier-access work
 > added three new routes (`GET /api/releases`, `/api/parts/[partId]/zip`,
@@ -165,11 +165,12 @@ Makes tenant isolation correct by construction rather than by review. Note the r
 node scripts/lint-conventions.mjs --list unwrapped-route
 ```
 
-Remaining by domain: `files` 16, `parts` 7, `boms` 6, `lifecycle` 5, `workflows` 4, `folders` 4, `ecos` 4, `admin` 4, `public` 3, `approval-groups` 3, then singles. Run the `--list` command above rather than trusting this line; it drifts.
+Remaining by domain: `files` 16, `parts` 7, `boms` 6, `lifecycle` 5, `workflows` 4, `folders` 4, `admin` 4, `public` 3, `approval-groups` 3, `ecos` 2, then singles. Run the `--list` command above rather than trusting this line; it drifts.
 
-**`ecos/[ecoId]/implement` is the one worth converting next.** It is the most
-consequential handler in the app — it is the only caller of `implement_eco`,
-it is where a change order becomes real, and it still resolves auth by hand.
+**Finish `ecos` next.** `ecos/[ecoId]/implement`, the only caller of
+`implement_eco`, and `ecos/[ecoId]/items` moved to `withTenant` with AUD-003
+CHG-2 and CHG-3 (2026-09-15). `ecos/route.ts` and `ecos/[ecoId]/bom-impact`
+are what is left of the domain.
 
 **Convert a whole domain at a time, not individual handlers.** Routes within a domain share helpers and permission choices, and splitting one across two styles is how a guard gets dropped.
 

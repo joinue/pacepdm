@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1, CHG-2 done)
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1 to CHG-3 done)
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -640,9 +640,9 @@ roughly this order within an area.
 - Inbox and badge count seats rather than requests (five cards for an ALL group
   of five). Reminders ignore request status, notify the whole group once per
   seat, and are not reset on resubmit.
-- `implement_eco` (migration 049) bumps part revisions with `chr(ascii+1)`, onto
-  reserved letters, and audits a skipped checked-out file as transitioned. Needs
-  a migration.
+- ~~`implement_eco` (migration 049) bumps part revisions with `chr(ascii+1)`,
+  onto reserved letters, and audits a skipped checked-out file as
+  transitioned.~~ Fixed 2026-09-15 with CHG-3 (migration 056), below.
 - A PUT that combines field edits with a status change drops the fields. ~~A
   REWORK request cannot be recalled.~~ Fixed 2026-09-15 with CHG-1, below.
 
@@ -962,16 +962,62 @@ mishandle.
   a toast has room for; the page now reads `details.blockers` and shows the
   whole list on the ECO, with a Try again button
   (`ecos/components/eco-blockers-panel.tsx`).
-- Not done, and worth knowing: a file released through a part still gets no
-  audit row of its own, only the part's `part.eco_released` row. The release
-  manifest still does not filter by state (AUD-4), but for a release made from
-  an ECO the check now means every file it lists is Released by the time the
-  manifest is written.
+- ~~A file released through a part gets no audit row of its own.~~ Fixed with
+  CHG-3 (migration 056). The release manifest still does not filter by state
+  (AUD-4), but for a release made from an ECO the check means every file it
+  lists is Released by the time the manifest is written.
+
+**CHG-3, an approved ECO whose implement failed was stuck for good — done
+2026-09-15.** Needs migration 056, applied after the deploy (its header says
+why the order matters and how to check it is live).
+
+- **The way back.** `ECO_STATUS_FLOW` allows APPROVED → REJECTED, for holders
+  of `eco.approve` like any decision, and the ECO page shows Reject on an
+  approved ECO. REJECTED → DRAFT already existed, so a rejected ECO reopens,
+  its items can change, and its files unlock. It is allowed while a workflow
+  governs approvals, as a direct rejection already was: it releases nothing.
+  The content-lock and release-check messages now point to it for an approved
+  ECO instead of recall or rework, which only apply while a request is out.
+- **One revision rule.** `implement_eco` bumped a blank "To revision" with
+  `chr(ascii + 1)`: R3, 01 and Z raised after approval, and the letters it did
+  produce included the reserved I, O, Q, S and X. The function now requires
+  the revision on the item and refuses releasing a part as the revision it is
+  already at. The app works the revision out with `nextRevision`
+  (`lib/revision.ts`) and writes it onto the item when the ECO is submitted, so
+  the approvers see the letter they approve; implement writes it for an ECO
+  submitted before this change.
+- **Explicit revisions are checked.** `revisionTargetProblem` refuses a "To
+  revision" equal to the part's current one, or earlier in the same scheme.
+  Adding a part refuses it, and refuses a blank one the rules cannot follow
+  on from; submit and implement check again, since the part's own revision
+  can still be changed by hand (CHG-4). A move to another scheme (R4 → A) is
+  allowed.
+- **Every released file is in its own history.** A file released through a
+  part now gets a `file.eco_implemented` row naming the part, as a listed file
+  does; and that row no longer says "transitioned" for a file left alone
+  because it was checked out.
+- `ecos/[ecoId]/items` is on `withTenant`. The add-item dialog's hint and the
+  items tab say where a blank revision comes from.
+- To find ECOs stuck by the old behaviour: approved ECOs with a part item
+  whose revision the old bump could not follow.
+
+```sql
+select e."ecoNumber", p."partNumber", p.revision
+from ecos e
+join eco_items i on i."ecoId" = e.id
+join parts p on p.id = i."partId"
+where e.status = 'APPROVED' and e."deletedAt" is null
+  and coalesce(trim(i."toRevision"), '') = ''
+  and p.revision !~ '^[A-Y]$';
+```
+
+Each can now be implemented if the app can follow the revision on (R3 → R4),
+or rejected and reopened to set one.
 
 ### Stages 3–4 — still to do
 
-- **Stage 3, before the product is the release record.** An approved ECO whose implement fails has no
-  exit (CHG-3); parts can be set Released or re-lettered with `file.edit`
+- **Stage 3, before the product is the release record.** Parts can be set
+  Released or re-lettered with `file.edit`
   (CHG-4); lifecycle edits silently remove approval gates, and the gate fails
   open (CHG-5); implemented ECOs are deletable (CHG-6); folder ACLs are skipped
   by part and release zips, part and release shares, and direct PostgREST

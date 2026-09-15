@@ -43,7 +43,10 @@ export const VALID_TRANSITIONS: Record<
     { status: "APPROVED", label: "Approve", variant: "success" },
     { status: "REJECTED", label: "Reject", variant: "destructive" },
   ],
-  APPROVED: [{ status: "IMPLEMENTED", label: "Mark Implemented", variant: "success" }],
+  APPROVED: [
+    { status: "IMPLEMENTED", label: "Mark Implemented", variant: "success" },
+    { status: "REJECTED", label: "Reject", variant: "destructive" },
+  ],
   REJECTED: [{ status: "DRAFT", label: "Reopen as Draft" }],
   IMPLEMENTED: [{ status: "CLOSED", label: "Close", variant: "default" }],
   CLOSED: [],
