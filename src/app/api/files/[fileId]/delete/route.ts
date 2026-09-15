@@ -2,6 +2,7 @@ import { withTenant, conflict } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { loadFile } from "@/lib/folder-access-guards";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 import { z, uuid } from "@/lib/validation";
 
 const ParamsSchema = z.object({ fileId: uuid });
@@ -21,6 +22,14 @@ export const DELETE = withTenant(
     if (file.lifecycleState === "Released") {
       throw conflict("Cannot delete a released file. Mark it as obsolete first.");
     }
+    // `implement_eco` released trashed files along with the rest, so a file an
+    // approved change order carries could be released out of the trash.
+    const refusal = await fileChangeRefusal(
+      tenantUser.tenantId,
+      params.fileId,
+      "moved to the trash"
+    );
+    if (refusal) throw conflict(refusal);
 
     // Soft-delete: mark the file as deleted instead of removing the row.
     // Child rows (versions, metadata) are left intact for audit trail, and

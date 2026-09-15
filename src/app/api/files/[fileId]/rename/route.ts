@@ -4,7 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 
 const RenameSchema = z.object({ name: nonEmptyString });
 
@@ -46,7 +46,7 @@ export async function PUT(
     }
     // Nor while a release of it is under review: the name reviewers approved
     // is the name that should be released. See lib/pending-approval.ts.
-    const refusal = await pendingApprovalRefusal(tenantUser.tenantId, fileId, "renamed");
+    const refusal = await fileChangeRefusal(tenantUser.tenantId, fileId, "renamed");
     if (refusal) {
       return NextResponse.json({ error: refusal }, { status: 409 });
     }

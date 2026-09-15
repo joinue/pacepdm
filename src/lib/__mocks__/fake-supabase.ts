@@ -263,8 +263,18 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
     }),
   };
 
+  /** Database functions: record each call, answer from `rpcResults`. */
+  const rpcCalls: { fn: string; args: unknown }[] = [];
+  const rpcResults: Record<string, { data: unknown; error: DbError | null }> = {};
+  async function rpc(fn: string, args?: unknown) {
+    rpcCalls.push({ fn, args });
+    return rpcResults[fn] ?? { data: null, error: null };
+  }
+
   return {
-    client: { from, storage },
+    client: { from, storage, rpc },
+    rpcCalls,
+    rpcResults,
     tables,
     objects,
     signedUploadKeys,

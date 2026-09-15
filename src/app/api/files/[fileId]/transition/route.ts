@@ -6,6 +6,7 @@ import { notifyFileTransition, sideEffect } from "@/lib/notifications";
 import { startWorkflow, findWorkflowForTrigger } from "@/lib/approval-engine";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
+import { lockingEcoForFile, ecoLockMessage } from "@/lib/eco-content-lock";
 import { nextRevision } from "@/lib/revision";
 
 const TransitionSchema = z.object({ transitionId: nonEmptyString });
@@ -40,6 +41,18 @@ export async function POST(
 
     if (file.isCheckedOut) {
       return NextResponse.json({ error: "Cannot transition a checked-out file" }, { status: 409 });
+    }
+
+    // A change order carrying the file decides its release. Moving it by hand
+    // meanwhile — releasing it early, sending it to review, obsoleting it —
+    // changed what implement would do, and implement skipped any file it did
+    // not find in WIP without saying so.
+    const lockingEco = await lockingEcoForFile(tenantUser.tenantId, fileId);
+    if (lockingEco) {
+      return NextResponse.json(
+        { error: ecoLockMessage(lockingEco, "This file", "moved to another lifecycle state") },
+        { status: 409 }
+      );
     }
 
     const { data: transition } = await db

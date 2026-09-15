@@ -10,6 +10,7 @@ import {
 import { ECO_STATUS_FLOW as VALID_TRANSITIONS, ecoAwaitsApproval } from "@/lib/status-flows";
 import { z, optionalString, uuid } from "@/lib/validation";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
+import { checkEcoRelease, describeBlockers } from "@/lib/eco-release-check";
 
 // Update body: status transitions and field updates can be combined.
 // Field updates are only allowed in DRAFT (enforced after parse). The
@@ -337,6 +338,19 @@ export const PUT = withTenant(
         ))
       ) {
         throw forbidden(selfApprovalRefusal("decide"));
+      }
+
+      // Submitting locks the ECO's files for review (lib/eco-content-lock.ts),
+      // so anything that would stop implement releasing them has to be fixed
+      // now: a file checked out at this point could never be checked in, and
+      // one in the trash or outside WIP would be skipped at implementation.
+      if (status === "SUBMITTED") {
+        const { blockers } = await checkEcoRelease(tenantUser.tenantId, ecoId, "submit");
+        if (blockers.length > 0) {
+          throw conflict(describeBlockers(`${eco.ecoNumber} cannot be submitted yet`, blockers), {
+            blockers,
+          });
+        }
       }
 
       // Check for an approval workflow on SUBMITTED / IN_REVIEW transitions.

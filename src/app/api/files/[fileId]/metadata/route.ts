@@ -5,7 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody, optionalString } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 
 const MetadataSchema = z.object({
   partNumber: optionalString,
@@ -62,7 +62,7 @@ export async function PUT(
     // the frozen check above — an admin can edit them once released anyway.
     // See lib/pending-approval.ts.
     if (!permissions.includes("*")) {
-      const refusal = await pendingApprovalRefusal(tenantUser.tenantId, fileId, "edited");
+      const refusal = await fileChangeRefusal(tenantUser.tenantId, fileId, "edited");
       if (refusal) {
         return NextResponse.json({ error: refusal }, { status: 409 });
       }

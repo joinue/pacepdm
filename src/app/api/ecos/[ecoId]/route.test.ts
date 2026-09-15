@@ -84,6 +84,14 @@ vi.mock("@/lib/notifications", () => ({
   notify: vi.fn().mockResolvedValue(undefined),
   sideEffect: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/eco-release-check", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/eco-release-check")>("@/lib/eco-release-check");
+  return {
+    ...actual,
+    checkEcoRelease: vi.fn().mockResolvedValue({ blockers: [], filesToRelease: [] }),
+  };
+});
 // No workflow assigned — the fall-through path that made this reachable.
 vi.mock("@/lib/approval-engine", () => ({
   findWorkflowForTrigger: vi.fn().mockResolvedValue(null),
@@ -99,6 +107,7 @@ import {
 } from "@/lib/approval-engine";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
+import { checkEcoRelease } from "@/lib/eco-release-check";
 import { fromDateInputValue } from "@/app/(dashboard)/ecos/effectivity";
 
 const ECO_ID = "33333333-3333-4333-8333-333333333333";
@@ -345,6 +354,38 @@ describe("direct status changes while an approval request is pending", () => {
  * sat in SUBMITTED or IN_REVIEW with nothing pending, and a Manager could
  * approve it here while the tenant's workflow never ran.
  */
+/**
+ * Submitting locks an ECO's files, so anything that would stop implement
+ * releasing them has to be fixed before it is submitted (AUD-003 CHG-2).
+ */
+describe("submitting an ECO whose files implement could not release", () => {
+  it("refuses, naming each problem, before any workflow starts", async () => {
+    mockTenantUser.current = engineer;
+    tableResults.ecos = { data: { ...inReviewEco, status: "DRAFT" }, error: null };
+    vi.mocked(checkEcoRelease).mockResolvedValueOnce({
+      blockers: ["bracket.SLDDRW is checked out by Bob. Check it in first."],
+      filesToRelease: [],
+    });
+
+    const res = await PUT(req({ status: "SUBMITTED" }), { params });
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.error).toMatch(/ECO-001 cannot be submitted yet: bracket.SLDDRW is checked out/);
+    expect(body.details.blockers).toHaveLength(1);
+    expect(checkEcoRelease).toHaveBeenCalledWith("tenant-1", ECO_ID, "submit");
+    expect(findWorkflowForTrigger).not.toHaveBeenCalled();
+    expect(updateCalls.filter((c) => c.table === "ecos")).toHaveLength(0);
+  });
+
+  it("submits when nothing blocks", async () => {
+    mockTenantUser.current = engineer;
+    tableResults.ecos = { data: { ...inReviewEco, status: "DRAFT" }, error: null };
+    const res = await PUT(req({ status: "SUBMITTED" }), { params });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("direct approval while a workflow governs ECO approvals", () => {
   beforeEach(() => {
     vi.mocked(findEcoApprovalWorkflow).mockResolvedValue({ id: "wf-1", name: "ECO Board" });

@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { canEditFolder, canViewFolder, getFolderAccessScope } from "@/lib/folder-access";
 import { nextRevision } from "@/lib/revision";
+import { lockingEcoForFile } from "@/lib/eco-content-lock";
 
 const BulkTransitionSchema = z.object({
   fileIds: z.array(nonEmptyString).min(1, "At least one fileId is required"),
@@ -108,6 +109,13 @@ export async function POST(request: NextRequest) {
       }
       if (file.isCheckedOut) {
         errors.push(`${file.name}: checked out`);
+        continue;
+      }
+      // See files/[fileId]/transition: a change order carrying the file
+      // decides its release.
+      const lockingEco = await lockingEcoForFile(tenantUser.tenantId, fileId);
+      if (lockingEco) {
+        errors.push(`${file.name}: on ${lockingEco.ecoNumber}, which will release it`);
         continue;
       }
 

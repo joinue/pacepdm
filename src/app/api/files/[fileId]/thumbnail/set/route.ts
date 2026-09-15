@@ -4,7 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { extractThumbnail } from "@/lib/thumbnail";
 import { requireFileAccess } from "@/lib/folder-access-guards";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 import { fileThumbnailKey } from "@/lib/vault-uploads";
 
 /**
@@ -59,11 +59,7 @@ export async function POST(
     }
     // For the same reason, it cannot change while that approval is pending.
     // See lib/pending-approval.ts.
-    const refusal = await pendingApprovalRefusal(
-      tenantUser.tenantId,
-      fileId,
-      "given a new thumbnail"
-    );
+    const refusal = await fileChangeRefusal(tenantUser.tenantId, fileId, "given a new thumbnail");
     if (refusal) {
       return NextResponse.json({ error: refusal }, { status: 409 });
     }

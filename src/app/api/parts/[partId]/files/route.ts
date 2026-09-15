@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { v4 as uuid } from "uuid";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { ecoLockMessage, lockingEcoForPart } from "@/lib/eco-content-lock";
 
 const LinkFileSchema = z.object({
   fileId: nonEmptyString,
@@ -43,6 +44,17 @@ export async function POST(
       .single();
     if (!partRecord) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
+
+    // `implement_eco` releases every file linked to a part the ECO carries.
+    // Linking one after the ECO was submitted released a file no reviewer
+    // had seen (AUD-003 CHG-2).
+    const lockingEco = await lockingEcoForPart(tenantUser.tenantId, partId);
+    if (lockingEco) {
+      return NextResponse.json(
+        { error: ecoLockMessage(lockingEco, "This part", "given new file links") },
+        { status: 409 }
+      );
     }
 
     // Snapshot the file name for the audit log — tenant-scoped lookup also
@@ -150,6 +162,16 @@ export async function DELETE(
       .single();
     if (!partRecord) {
       return NextResponse.json({ error: "Part not found" }, { status: 404 });
+    }
+
+    // Unlinking a file from a carried part drops it from what the ECO
+    // releases, after reviewers approved it as part of the change.
+    const lockingEco = await lockingEcoForPart(tenantUser.tenantId, partId);
+    if (lockingEco) {
+      return NextResponse.json(
+        { error: ecoLockMessage(lockingEco, "This part", "unlinked from its files") },
+        { status: 409 }
+      );
     }
 
     // Snapshot the file name before the link is gone, so the audit entry

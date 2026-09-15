@@ -68,9 +68,6 @@
   "src/app/api/ecos/[ecoId]/bom-impact/route.ts": {
     "unwrapped-route": 4
   },
-  "src/app/api/ecos/[ecoId]/implement/route.ts": {
-    "unwrapped-route": 4
-  },
   "src/app/api/ecos/[ecoId]/items/route.ts": {
     "unwrapped-route": 9
   },

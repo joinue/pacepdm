@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1 done)
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stage 3 in progress (CHG-1, CHG-2 done)
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -931,10 +931,42 @@ where e.status in ('SUBMITTED', 'IN_REVIEW') and e."deletedAt" is null
     where r."entityType" = 'eco' and r."entityId" = e.id and r.status = 'PENDING');
 ```
 
+**CHG-2, an approved ECO's files could change, and implement reported partial
+work as success — done 2026-09-15.** No migration: the database function is
+unchanged, and the app now makes sure it is never called on content it would
+mishandle.
+
+- **One lock for carried content** (`src/lib/eco-content-lock.ts`). A file is
+  locked while an ECO that lists it, or lists a part it is linked to, is
+  Submitted, In Review or Approved — the statuses that already lock carried
+  BOMs. `fileChangeRefusal` combines this with the existing pending-approval
+  lock and replaces it at every caller: checkout, check-in and upload-version,
+  restore, rename, metadata, manual thumbnail. It is also new on the trash
+  (implement released trashed files) and on lifecycle transitions, single and
+  bulk (implement skipped any file not in WIP). A carried part's file links are
+  locked too (`lockingEcoForPart` on `parts/[partId]/files` POST and DELETE):
+  linking a file after approval released a file nobody reviewed. Undoing a
+  checkout stays allowed, as it does for the approval lock.
+- **The release check** (`src/lib/eco-release-check.ts`) runs the function's
+  own selection in advance and names each file or part it would mishandle: in
+  the trash, checked out, awaiting its own lifecycle approval, or in any state
+  but WIP or Released. Submitting an ECO refuses with that list — the cheapest
+  moment to fix it, and from then on the lock keeps it fixed — and implement
+  checks again, for ECOs submitted before the lock existed. Both return the
+  full list in `details.blockers`.
+- **Implement announces only real releases.** It notified a release for every
+  file the ECO touched, including ones already released or skipped; it now
+  notifies only the files the check found in WIP, and logs when the function's
+  count disagrees. The route is on `withTenant`.
+- Not done, and worth knowing: a file released through a part still gets no
+  audit row of its own, only the part's `part.eco_released` row. The release
+  manifest still does not filter by state (AUD-4), but for a release made from
+  an ECO the check now means every file it lists is Released by the time the
+  manifest is written.
+
 ### Stages 3–4 — still to do
 
-- **Stage 3, before the product is the release record.** Files on an approved ECO are not locked and implement reports
-  partial work as success (CHG-2); an approved ECO whose implement fails has no
+- **Stage 3, before the product is the release record.** An approved ECO whose implement fails has no
   exit (CHG-3); parts can be set Released or re-lettered with `file.edit`
   (CHG-4); lifecycle edits silently remove approval gates, and the gate fails
   open (CHG-5); implemented ECOs are deletable (CHG-6); folder ACLs are skipped

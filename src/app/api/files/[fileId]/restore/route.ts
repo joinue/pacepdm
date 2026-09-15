@@ -5,7 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { z, parseBody } from "@/lib/validation";
 import { requireFileAccess } from "@/lib/folder-access-guards";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 
 const RestoreSchema = z.object({
   version: z.number().int().positive(),
@@ -48,7 +48,7 @@ export async function POST(
     }
     // A restore is a new version, and would become what the approval
     // releases. See lib/pending-approval.ts.
-    const refusal = await pendingApprovalRefusal(
+    const refusal = await fileChangeRefusal(
       tenantUser.tenantId,
       fileId,
       "restored to an earlier version"

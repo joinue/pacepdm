@@ -36,7 +36,7 @@ import { badRequest, conflict, forbidden } from "@/lib/api-route";
 import { hasPermission } from "@/lib/permissions";
 import { getServiceClient } from "@/lib/db";
 import { runAfterResponse } from "@/lib/notifications";
-import { pendingApprovalRefusal } from "@/lib/pending-approval";
+import { fileChangeRefusal } from "@/lib/eco-content-lock";
 import { extractThumbnail } from "@/lib/thumbnail";
 
 export const VAULT_BUCKET = "vault";
@@ -235,15 +235,12 @@ export async function assertCanAddVersion(
     }
   }
 
-  // A version added mid-review is what the approval would release, unreviewed.
-  // See lib/pending-approval.ts.
-  const refusal = await pendingApprovalRefusal(file.tenantId, file.id, "given a new version");
+  // A version added mid-review, or after the file's change order was approved,
+  // is what the approval or implementation would release, unreviewed. See
+  // lib/eco-content-lock.ts.
+  const refusal = await fileChangeRefusal(file.tenantId, file.id, "given a new version");
   if (refusal) {
-    throw conflict(
-      purpose === "checkin"
-        ? `${refusal} Undo your checkout, or recall the request first.`
-        : refusal
-    );
+    throw conflict(purpose === "checkin" ? `${refusal} Until then, undo your checkout.` : refusal);
   }
 }
 
