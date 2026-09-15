@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchJson, isAbortError, errorMessage } from "@/lib/api-client";
 import type { BreadcrumbEntry } from "@/components/vault/vault-types";
@@ -27,13 +27,49 @@ function isFlatView(value: string | null): value is FlatView {
   return value !== null && (FLAT_VIEWS as readonly string[]).includes(value);
 }
 
+/** Where a vault URL points. */
+export interface VaultLocation {
+  viewMode: VaultViewMode;
+  folderId: string;
+  fileId: string | null;
+}
+
+/**
+ * Read a vault URL.
+ *
+ * `file` is accepted as another spelling of `fileId`. Notification links were
+ * written as `/vault?file=<id>` while this hook only read `fileId`, so every
+ * "file released" or "checked in" notification opened the vault root instead
+ * of the file — and those rows are already stored, so the old spelling has to
+ * keep working after the link builders were corrected.
+ */
+export function readVaultLocation(
+  params: Pick<URLSearchParams, "get">,
+  rootFolderId: string
+): VaultLocation {
+  const view = params.get("view");
+  return {
+    viewMode: isFlatView(view) ? view : "folder",
+    folderId: params.get("folderId") || rootFolderId,
+    fileId: params.get("fileId") || params.get("file") || null,
+  };
+}
+
+/**
+ * Identity of a location for comparison. A flat view hides the folder from
+ * the URL, so the folder is not part of a flat view's identity.
+ */
+function locationKey(loc: VaultLocation): string {
+  return [loc.viewMode, loc.viewMode === "folder" ? loc.folderId : "", loc.fileId ?? ""].join("|");
+}
+
 /**
  * Vault navigation state and helpers.
  *
  * Manages the current folder, breadcrumb trail, the selected file ID, the
  * active view mode (folder listing vs a flat cross-folder view), and keeps
- * the URL query params in sync with all of them. Also resolves ancestor
- * breadcrumbs on initial deep-link load.
+ * the URL query params in sync with all of them — in both directions. Also
+ * resolves ancestor breadcrumbs on initial deep-link load.
  *
  * Split out from `useVaultBrowser` so navigation concerns are isolated
  * from contents loading, file actions, drag-and-drop, etc.
@@ -42,19 +78,13 @@ export function useVaultNavigation(rootFolderId: string) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initialViewParam = searchParams.get("view");
-  const initialViewMode: VaultViewMode = isFlatView(initialViewParam) ? initialViewParam : "folder";
-
-  const [viewMode, setViewMode] = useState<VaultViewMode>(initialViewMode);
-  const [currentFolderId, setCurrentFolderId] = useState(
-    searchParams.get("folderId") || rootFolderId
-  );
+  const [initialLocation] = useState(() => readVaultLocation(searchParams, rootFolderId));
+  const [viewMode, setViewMode] = useState<VaultViewMode>(initialLocation.viewMode);
+  const [currentFolderId, setCurrentFolderId] = useState(initialLocation.folderId);
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbEntry[]>([
     { id: rootFolderId, name: "Vault" },
   ]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(
-    searchParams.get("fileId") || null
-  );
+  const [selectedFile, setSelectedFile] = useState<string | null>(initialLocation.fileId);
 
   // Asked before any navigation that would close the open file. The detail
   // panel holds unsaved property edits, and every way out of it — the back
@@ -69,12 +99,22 @@ export function useVaultNavigation(rootFolderId: string) {
   }, []);
   const mayLeaveFile = useCallback(() => leaveGuardRef.current?.() ?? true, []);
 
+  // The last URL location this hook has seen, and the ones it has written
+  // itself but not yet seen come back. Together they tell the vault's own
+  // navigation apart from a navigation that arrived from outside.
+  const lastUrlKey = useRef(locationKey(initialLocation));
+  const pendingWrites = useRef<string[]>([]);
+
   // URL is the source of truth for sharing/deep-linking, so every state
   // transition below routes through `updateUrl`. The `view` param takes
   // precedence over `folderId` — a flat view is conceptually rootless,
   // so we drop `folderId` while it's active.
   const updateUrl = useCallback(
     (mode: VaultViewMode, folderId: string, fileId: string | null) => {
+      const key = locationKey({ viewMode: mode, folderId, fileId });
+      if (key !== lastUrlKey.current) {
+        pendingWrites.current = [...pendingWrites.current.slice(-9), key];
+      }
       const params = new URLSearchParams();
       if (mode !== "folder") {
         params.set("view", mode);
@@ -87,6 +127,86 @@ export function useVaultNavigation(rootFolderId: string) {
     },
     [rootFolderId, router]
   );
+
+  // One breadcrumb request at a time: a newer navigation aborts the older one,
+  // so a slow response cannot put the previous folder's trail back.
+  const breadcrumbRequest = useRef<AbortController | null>(null);
+  const loadBreadcrumbs = useCallback(
+    (folderId: string) => {
+      breadcrumbRequest.current?.abort();
+      breadcrumbRequest.current = null;
+      setBreadcrumbs([{ id: rootFolderId, name: "Vault" }]);
+      if (folderId === rootFolderId) return;
+
+      const controller = new AbortController();
+      breadcrumbRequest.current = controller;
+      fetchJson<{ ancestors?: BreadcrumbEntry[] }>(`/api/folders/${folderId}`, {
+        signal: controller.signal,
+      })
+        .then((data) => {
+          if (!controller.signal.aborted && data.ancestors) setBreadcrumbs(data.ancestors);
+        })
+        .catch((err) => {
+          if (!isAbortError(err)) {
+            console.warn("Failed to load breadcrumbs:", errorMessage(err));
+          }
+        });
+    },
+    [rootFolderId]
+  );
+
+  // ─── Following the URL ───────────────────────────────────────────────
+  //
+  // State was initialised from the URL once, so a navigation that changed only
+  // the query string — Cmd-K to a file or folder while already in the vault, a
+  // notification link, the browser's back button — changed the address bar
+  // and nothing on screen. A URL change the vault did not make is applied
+  // here. Its own writes are recognised and skipped, so the two never fight.
+  useEffect(() => {
+    const loc = readVaultLocation(searchParams, rootFolderId);
+    const key = locationKey(loc);
+    if (key === lastUrlKey.current) return;
+    lastUrlKey.current = key;
+
+    const own = pendingWrites.current.indexOf(key);
+    if (own !== -1) {
+      pendingWrites.current = pendingWrites.current.slice(own + 1);
+      return;
+    }
+    pendingWrites.current = [];
+
+    const current = { viewMode, folderId: currentFolderId, fileId: selectedFile };
+    if (key === locationKey(current)) return;
+
+    // Leaving an open file with unsaved edits: ask, and if the answer is to
+    // stay, put the address back where the screen is.
+    if (selectedFile !== null && loc.fileId !== selectedFile && !mayLeaveFile()) {
+      updateUrl(viewMode, currentFolderId, selectedFile);
+      return;
+    }
+
+    // The URL is the outside system here and the state has to follow it.
+    // Deferred past the effect body, as elsewhere in the app, to satisfy
+    // react-hooks/set-state-in-effect.
+    queueMicrotask(() => {
+      setViewMode(loc.viewMode);
+      // A flat view's URL carries no folder; the folder to return to is kept.
+      if (loc.viewMode === "folder" && loc.folderId !== currentFolderId) {
+        setCurrentFolderId(loc.folderId);
+        loadBreadcrumbs(loc.folderId);
+      }
+      setSelectedFile(loc.fileId);
+    });
+  }, [
+    searchParams,
+    rootFolderId,
+    viewMode,
+    currentFolderId,
+    selectedFile,
+    mayLeaveFile,
+    updateUrl,
+    loadBreadcrumbs,
+  ]);
 
   const navigateToFolder = useCallback(
     (folder: NavigableFolder) => {
@@ -166,24 +286,12 @@ export function useVaultNavigation(rootFolderId: string) {
    * to build in that mode.
    */
   const hydrateBreadcrumbsFromDeepLink = useCallback(() => {
-    if (initialViewMode !== "folder") return () => {};
-    const paramFolderId = searchParams.get("folderId");
-    if (!paramFolderId || paramFolderId === rootFolderId) return () => {};
-
-    const controller = new AbortController();
-    fetchJson<{ ancestors?: BreadcrumbEntry[] }>(`/api/folders/${paramFolderId}`, {
-      signal: controller.signal,
-    })
-      .then((data) => {
-        if (data.ancestors) setBreadcrumbs(data.ancestors);
-      })
-      .catch((err) => {
-        if (!isAbortError(err)) {
-          console.warn("Failed to load breadcrumbs:", errorMessage(err));
-        }
-      });
-    return () => controller.abort();
-  }, [initialViewMode, searchParams, rootFolderId]);
+    const abort = () => breadcrumbRequest.current?.abort();
+    if (initialLocation.viewMode !== "folder") return abort;
+    if (initialLocation.folderId === rootFolderId) return abort;
+    loadBreadcrumbs(initialLocation.folderId);
+    return abort;
+  }, [initialLocation, rootFolderId, loadBreadcrumbs]);
 
   return {
     viewMode,

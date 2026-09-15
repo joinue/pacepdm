@@ -5,7 +5,7 @@ import { withTenant } from "@/lib/api-route";
 // grouping that maps onto sidebar nav items. Categories overlap with
 // types but aren't identical: a BOM status change uses type=transition
 // with link=/boms/... , and a file release uses type=transition with
-// link=/vault?file=... — we need to split them for the sidebar.
+// link=/vault?fileId=... — we need to split them for the sidebar.
 //
 // We return one object so the client makes a single request instead of
 // fanning out. The query is a simple indexed scan on (userId, isRead).

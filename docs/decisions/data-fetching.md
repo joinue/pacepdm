@@ -64,9 +64,17 @@ So `npm run lint:conventions` now fails the build on a raw `fetch(` in a client 
 ## Linking to a record
 
 A link to a record carries that record's identifier. `/boms/<id>`,
-`/parts?partId=<id>`, `/vault?fileId=<id>`, `/ecos?ecoId=<id>` — every one of
+`/ecos/<id>`, `/parts?partId=<id>`, `/vault?fileId=<id>` — every one of
 those destinations already supports being deep-linked, and every list page
 already knows how to open the record it was given.
+
+Use exactly those shapes. `/ecos?ecoId=<id>` and `/boms?bomId=<id>` were
+linked from global search, the search page, where-used and the BOM revision
+history while the list pages ignored the parameter, so each opened the index.
+The list pages now redirect those two to the record route so a stored or
+bookmarked link still lands, and the vault accepts `?file=` as an alias of
+`?fileId=` because notification rows already hold it — both are for links
+that already exist, not shapes to write.
 
 The failure is silent, which is what makes it worth a rule: nothing errors,
 the user simply lands on an index and has to find by hand what they had

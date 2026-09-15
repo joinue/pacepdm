@@ -33,7 +33,35 @@ const { afterCallbacks, mockSendEmail } = vi.hoisted(() => ({
 vi.mock("next/server", () => ({ after: (cb: () => unknown) => afterCallbacks.push(cb) }));
 vi.mock("@/lib/email/send", () => ({ sendNotificationEmail: mockSendEmail }));
 
-import { notify, notifyApprovalGroupMembers } from "./notifications";
+import { notify, notifyApprovalGroupMembers, notifyFileTransition } from "./notifications";
+
+/**
+ * The vault reads `fileId`. These links were built as `?file=`, so every file
+ * transition notification opened the vault root instead of the file.
+ */
+describe("notifyFileTransition", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInsert.mockResolvedValue({ data: null, error: null });
+    mockFrom.mockImplementation(() => ({ insert: mockInsert }));
+  });
+
+  it("links to the file with the parameter the vault reads", async () => {
+    await notifyFileTransition({
+      tenantId: "tenant-1",
+      fileId: "file-42",
+      fileName: "bracket.sldprt",
+      toStateName: "In Review",
+      actorId: "actor-1",
+      actorFullName: "Dana",
+      createdById: "creator-1",
+    });
+
+    expect(mockInsert).toHaveBeenCalledWith([
+      expect.objectContaining({ userId: "creator-1", link: "/vault?fileId=file-42" }),
+    ]);
+  });
+});
 
 describe("notify", () => {
   beforeEach(() => {

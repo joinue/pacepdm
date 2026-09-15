@@ -145,7 +145,7 @@ export function GlobalSearch() {
 
   function selectEco(eco: ECOResult) {
     closeAndReset();
-    router.push(`/ecos?ecoId=${eco.id}`);
+    router.push(`/ecos/${eco.id}`);
   }
 
   function selectPart(part: PartResult) {
@@ -155,7 +155,7 @@ export function GlobalSearch() {
 
   function selectBom(bom: BomResult) {
     closeAndReset();
-    router.push(`/boms?bomId=${bom.id}`);
+    router.push(`/boms/${bom.id}`);
   }
 
   function selectFolder(folder: FolderResult) {

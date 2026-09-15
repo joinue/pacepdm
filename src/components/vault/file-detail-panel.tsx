@@ -1146,7 +1146,7 @@ export function FileDetailPanel({
                   representsBoms={whereUsedData.representsBoms}
                   ecos={whereUsedData.ecos}
                   onNavigateBom={(bomId) => router.push(`/boms/${bomId}`)}
-                  onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
+                  onNavigateEco={(ecoId) => router.push(`/ecos/${ecoId}`)}
                 />
               </>
             )}
@@ -1223,7 +1223,7 @@ export function FileDetailPanel({
                 </p>
                 {v.eco && (
                   <Link
-                    href={`/ecos?ecoId=${v.eco.id}`}
+                    href={`/ecos/${v.eco.id}`}
                     className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                   >
                     <ClipboardList className="w-3 h-3" />

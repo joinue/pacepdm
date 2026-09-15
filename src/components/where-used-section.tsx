@@ -6,9 +6,9 @@
 // route. Callers pass in the already-resolved payload from one of
 // the where-used endpoints plus a set of navigation callbacks. This
 // is deliberate — the file detail panel and the parts detail panel
-// each have their own routing quirks (BOMs have no deep link today,
-// ECOs use `?ecoId=`, parts use `?id=`), so we let the caller decide
-// what happens on click rather than baking URLs in here.
+// each have their own navigation (a part opens in place in the parts
+// panel, BOMs and ECOs route to `/boms/<id>` and `/ecos/<id>`), so we let
+// the caller decide what happens on click rather than baking URLs in here.
 //
 // Every category is rendered as its own sub-section. Categories with
 // no rows are hidden so the section collapses cleanly for isolated

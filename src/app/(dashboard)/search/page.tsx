@@ -935,7 +935,7 @@ function ECOResults({
         <div
           key={eco.id}
           className="flex items-center justify-between p-3 hover:bg-muted/50 cursor-pointer transition-colors group first:rounded-t-lg last:rounded-b-lg"
-          onClick={() => onNavigate(`/ecos?ecoId=${eco.id}`)}
+          onClick={() => onNavigate(`/ecos/${eco.id}`)}
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -1055,7 +1055,7 @@ function BOMResults({
         <div
           key={bom.id}
           className="flex items-center justify-between p-3 hover:bg-muted/50 cursor-pointer transition-colors group first:rounded-t-lg last:rounded-b-lg"
-          onClick={() => onNavigate(`/boms?bomId=${bom.id}`)}
+          onClick={() => onNavigate(`/boms/${bom.id}`)}
         >
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">

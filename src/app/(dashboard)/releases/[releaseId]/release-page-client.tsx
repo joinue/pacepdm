@@ -25,7 +25,7 @@ export function ReleasePageClient({ release }: { release: ReleaseRow }) {
             <h1 className="text-2xl font-semibold truncate">{release.name}</h1>
             <div className="text-sm text-muted-foreground flex items-center gap-3 flex-wrap">
               <Link
-                href={`/ecos`}
+                href={`/ecos/${release.ecoId}`}
                 className="hover:text-foreground underline-offset-2 hover:underline"
               >
                 {release.ecoNumber}
@@ -144,7 +144,7 @@ export function ReleasePageClient({ release }: { release: ReleaseRow }) {
                       </td>
                       <td className="px-3 py-2 text-right">
                         <Link
-                          href={`/vault?file=${f.fileId}`}
+                          href={`/vault?fileId=${f.fileId}`}
                           className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
                         >
                           Open <ExternalLink className="w-3 h-3" />

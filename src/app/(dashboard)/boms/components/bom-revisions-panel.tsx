@@ -111,7 +111,7 @@ export function BomRevisionsPanel({ bomId }: { bomId: string }) {
                   {rev.eco ? (
                     <button
                       type="button"
-                      onClick={() => router.push(`/ecos?ecoId=${rev.eco!.id}`)}
+                      onClick={() => router.push(`/ecos/${rev.eco!.id}`)}
                       className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                     >
                       <span className="font-mono">{rev.eco.ecoNumber}</span>

@@ -206,7 +206,7 @@ export function PartDetailPanel({
             ecos={partWhereUsed.ecos}
             onNavigateBom={(bomId) => router.push(`/boms/${bomId}`)}
             onNavigatePart={(partId) => onNavigatePartDetail(partId)}
-            onNavigateEco={(ecoId) => router.push(`/ecos?ecoId=${ecoId}`)}
+            onNavigateEco={(ecoId) => router.push(`/ecos/${ecoId}`)}
           />
         ) : (
           <p className="text-xs text-muted-foreground">Not used anywhere yet.</p>

@@ -166,7 +166,7 @@ export async function notifyFileTransition({
       title: `File ${toStateName.toLowerCase()}`,
       message: `${actorFullName} moved "${fileName}" to ${toStateName}`,
       type: "transition",
-      link: `/vault?file=${fileId}`,
+      link: `/vault?fileId=${fileId}`,
       refId: fileId,
       actorId,
     });
@@ -179,7 +179,9 @@ export async function notifyFileTransition({
     title: `File moved to ${toStateName}`,
     message: `${actorFullName} moved "${fileName}" to ${toStateName}`,
     type: "transition",
-    link: `/vault?file=${fileId}`,
+    // `fileId` is what the vault reads. Rows written before this carry
+    // `?file=`, which the vault still accepts as an alias.
+    link: `/vault?fileId=${fileId}`,
     refId: fileId,
     actorId,
   });

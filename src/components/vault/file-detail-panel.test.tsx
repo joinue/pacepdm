@@ -24,6 +24,7 @@ const server = vi.hoisted(() => ({
   file: null as Record<string, unknown> | null,
   saves: [] as Array<Record<string, unknown>>,
   failSave: null as string | null,
+  revisions: [] as Array<Record<string, unknown>>,
 }));
 vi.mock("@/lib/api-client", () => ({
   fetchJson: vi.fn(async (url: string, init?: { method?: string; body?: unknown }) => {
@@ -35,7 +36,8 @@ vi.mock("@/lib/api-client", () => ({
       return { ok: true };
     }
     if (url.endsWith("/where-used")) return { boms: [], representsBoms: [], ecos: [] };
-    if (url.endsWith("/revisions") || url.endsWith("/parts")) return [];
+    if (url.endsWith("/revisions")) return structuredClone(server.revisions);
+    if (url.endsWith("/parts")) return [];
     return structuredClone(server.file);
   }),
   errorMessage: (err: unknown) => (err instanceof Error ? err.message : String(err)),
@@ -118,6 +120,7 @@ beforeEach(() => {
   server.file = fileRow();
   server.saves.length = 0;
   server.failSave = null;
+  server.revisions = [];
   realtime.handlers = {};
   // FilePreview asks for a preview with plain fetch.
   vi.stubGlobal(
@@ -237,5 +240,29 @@ describe("FileDetailPanel — unsaved state", () => {
     const dirty = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(dirty);
     expect(dirty.defaultPrevented).toBe(true);
+  });
+});
+
+describe("FileDetailPanel — record links", () => {
+  /** It linked to `/ecos?ecoId=`, which the ECO list page ignored. */
+  it("links a version's releasing ECO to the ECO itself", async () => {
+    const user = userEvent.setup();
+    server.revisions = [
+      {
+        id: "v1",
+        version: 1,
+        revision: "A",
+        fileSize: 10,
+        comment: null,
+        createdAt: "2026-09-01T00:00:00Z",
+        ecoId: "eco-7",
+        uploadedBy: { fullName: "Dana" },
+        eco: { id: "eco-7", ecoNumber: "ECO-0007", title: "Thicker wall", status: "IMPLEMENTED" },
+      },
+    ];
+    await renderPanel();
+    await user.click(screen.getByRole("tab", { name: "Versions" }));
+    const link = await screen.findByRole("link", { name: /released by ECO-0007/i });
+    expect(link).toHaveAttribute("href", "/ecos/eco-7");
   });
 });
