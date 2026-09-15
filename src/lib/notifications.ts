@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { sendNotificationEmail } from "@/lib/email/send";
 
@@ -18,8 +19,28 @@ export async function sideEffect<T>(promise: Promise<T>, context: string): Promi
   }
 }
 
-// In-app notification system. Email can be added later via Resend/SES.
-// For now, we store notifications in the database and show them in the UI.
+/**
+ * Run work after the response has been sent, and keep the function alive
+ * until it finishes.
+ *
+ * A bare unawaited promise is not enough on Vercel: once the response is
+ * returned the instance can be frozen, and whatever was still in flight —
+ * notification emails, here — is simply dropped. `after` is Next's way of
+ * telling the platform to wait.
+ *
+ * `after` throws outside a request (a script, a test). Nothing will cut the
+ * work short there, so it just runs.
+ */
+export function runAfterResponse(task: () => Promise<unknown>, context: string): void {
+  try {
+    after(() => sideEffect(task(), context));
+  } catch {
+    void sideEffect(task(), context);
+  }
+}
+
+// In-app notifications, stored in the database and shown in the UI, with an
+// email per recipient sent after the response.
 
 export async function notify({
   tenantId,
@@ -81,23 +102,26 @@ export async function notify({
       return;
     }
 
-    // Fire-and-forget per-recipient email. sendNotificationEmail enforces
-    // user/tenant opt-out and writes emailSentAt/emailError back to the
-    // notifications row. Failures never block the in-app write.
-    for (const n of notifications) {
-      sideEffect(
-        sendNotificationEmail({
-          notificationId: n.id,
-          tenantId: n.tenantId,
-          userId: n.userId,
-          type: n.type,
-          title: n.title,
-          message: n.message,
-          link: n.link,
-        }),
-        `email notification ${n.id}`
-      );
-    }
+    // One email per recipient, after the response. sendNotificationEmail
+    // enforces user/tenant opt-out and writes emailSentAt/emailError back to
+    // the notification row. Sent one at a time rather than all at once, which
+    // ran straight into Resend's rate limit for any group of more than two.
+    runAfterResponse(async () => {
+      for (const n of notifications) {
+        await sideEffect(
+          sendNotificationEmail({
+            notificationId: n.id,
+            tenantId: n.tenantId,
+            userId: n.userId,
+            type: n.type,
+            title: n.title,
+            message: n.message,
+            link: n.link,
+          }),
+          `email notification ${n.id}`
+        );
+      }
+    }, `emails for ${notifications.length} ${type} notification(s)`);
   }
 }
 

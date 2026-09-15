@@ -14,22 +14,80 @@ import { NextRequest } from "next/server";
  * through the front door with permissions nobody granted them.
  */
 
-const { tableResults, inserts, mockFrom } = vi.hoisted(() => {
+const { tableResults, tableRows, insertErrors, inserts, mockFrom } = vi.hoisted(() => {
   type QueryResult = { data: unknown; error: unknown };
+  type Row = Record<string, unknown>;
   const tableResults: Record<string, QueryResult> = {};
+  const insertErrors: Record<string, { code: string; message: string }> = {};
   const inserts: { table: string; row: Record<string, unknown> }[] = [];
+
+  /**
+   * Rows for tables whose queries must actually be filtered. A canned result
+   * answers every query on a table the same way, which cannot tell "this
+   * email in my workspace" from "this account active anywhere" — and a mock
+   * that cannot tell those apart is how the case-sensitive lookup survived.
+   */
+  const tableRows: Record<string, Row[]> = {};
+
+  /** Postgres ILIKE: `%` any run, `_` one character, backslash escapes. */
+  function ilikeMatches(value: unknown, pattern: string) {
+    let re = "";
+    for (let i = 0; i < pattern.length; i++) {
+      const c = pattern[i];
+      if (c === "\\" && i + 1 < pattern.length)
+        re += pattern[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      else if (c === "%") re += ".*";
+      else if (c === "_") re += ".";
+      else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return typeof value === "string" && new RegExp(`^${re}$`, "i").test(value);
+  }
 
   function makeChain(table: string) {
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
+    const filters: ((row: Row) => boolean)[] = [];
+    let limit: number | undefined;
+    const matched = () => {
+      const rows = tableRows[table]!.filter((r) => filters.every((f) => f(r)));
+      return limit === undefined ? rows : rows.slice(0, limit);
+    };
     const resolvable = () => tableResults[table] ?? { data: null, error: null };
-    for (const m of ["select", "eq", "in", "neq", "is", "order", "limit", "ilike"] as const) {
+    const one = () => {
+      if (!tableRows[table]) return resolvable();
+      const rows = matched();
+      return { data: rows[0] ?? null, error: null };
+    };
+    const many = () => (tableRows[table] ? { data: matched(), error: null } : resolvable());
+
+    for (const m of ["select", "in", "is", "order"] as const) {
       chain[m] = () => chain;
     }
-    chain.single = () => resolvable();
-    chain.maybeSingle = () => resolvable();
+    chain.eq = (col: unknown, val: unknown) => {
+      filters.push((r) => r[col as string] === val);
+      return chain;
+    };
+    chain.neq = (col: unknown, val: unknown) => {
+      filters.push((r) => r[col as string] !== val);
+      return chain;
+    };
+    chain.ilike = (col: unknown, pattern: unknown) => {
+      filters.push((r) => ilikeMatches(r[col as string], pattern as string));
+      return chain;
+    };
+    chain.limit = (n: unknown) => {
+      limit = n as number;
+      return chain;
+    };
+    chain.single = () => one();
+    chain.maybeSingle = () => one();
     chain.insert = (row: unknown) => {
-      inserts.push({ table, row: row as Record<string, unknown> });
-      return { select: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) };
+      const error = insertErrors[table] ?? null;
+      if (!error) inserts.push({ table, row: row as Record<string, unknown> });
+      return {
+        select: () => ({
+          single: () => Promise.resolve(error ? { data: null, error } : { data: row, error: null }),
+        }),
+      };
     };
     chain.update = () => {
       const u: Record<string, (...a: unknown[]) => unknown> = {};
@@ -37,12 +95,18 @@ const { tableResults, inserts, mockFrom } = vi.hoisted(() => {
       u.single = () => resolvable();
       return u;
     };
-    chain.then = ((resolve: (v: unknown) => void) => resolve(resolvable())) as unknown as (
+    chain.then = ((resolve: (v: unknown) => void) => resolve(many())) as unknown as (
       ...args: unknown[]
     ) => unknown;
     return chain;
   }
-  return { tableResults, inserts, mockFrom: (table: string) => makeChain(table) };
+  return {
+    tableResults,
+    tableRows,
+    insertErrors,
+    inserts,
+    mockFrom: (table: string) => makeChain(table),
+  };
 });
 
 const mockTenantUser = vi.hoisted(() => ({
@@ -112,6 +176,8 @@ const admin = {
 
 beforeEach(() => {
   for (const k of Object.keys(tableResults)) delete tableResults[k];
+  for (const k of Object.keys(tableRows)) delete tableRows[k];
+  for (const k of Object.keys(insertErrors)) delete insertErrors[k];
   inserts.length = 0;
   mockTenantUser.current = null;
 
@@ -350,5 +416,145 @@ describe("inviting an existing account", () => {
     expect(res.status).toBe(400);
     expect(tenantUserInserts()).toHaveLength(0);
     expect(authAdmin.listUsers).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * One active membership per account.
+ *
+ * Sign-in resolves the caller with `.single()` over their active memberships,
+ * so a second active row locks them out of their own workspace. The only guard
+ * compared emails case-sensitively while the account lookup lowercased: any
+ * stranger could create a workspace, invite `Bob@Acme.com`, and lock Bob out.
+ */
+describe("one active membership per account", () => {
+  const alreadyRegistered = {
+    data: { user: null, properties: null },
+    error: {
+      code: "email_exists",
+      message: "A user with this email address has already been registered",
+    },
+  };
+
+  // Mallory runs her own workspace — sign-up is open, so she is its Admin.
+  const mallory = {
+    id: "mal-1",
+    tenantId: "tenant-mal",
+    fullName: "Mallory",
+    role: { permissions: ["*"] },
+  };
+
+  const bobAtAcme = {
+    id: "bob-acme",
+    tenantId: "tenant-acme",
+    authUserId: "auth-bob",
+    email: "bob@acme.com",
+    isActive: true,
+  };
+
+  function strangerInvites() {
+    mockTenantUser.current = mallory;
+    tableRows.tenant_users = [bobAtAcme];
+    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+    authAdmin.generateLink.mockResolvedValue(alreadyRegistered);
+    authAdmin.listUsers.mockResolvedValue({
+      data: { users: [{ id: "auth-bob", email: "bob@acme.com" }] },
+      error: null,
+    });
+  }
+
+  const tenantUserInserts = () => inserts.filter((i) => i.table === "tenant_users");
+
+  it("refuses to invite a differently capitalised address that is active in another workspace", async () => {
+    strangerInvites();
+
+    const res = await POST(req({ email: "Bob@Acme.com", fullName: "Bob", roleId: "role-eng" }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("active in another workspace");
+    expect(tenantUserInserts()).toHaveLength(0);
+    expect(authAdmin.generateLink).not.toHaveBeenCalled();
+  });
+
+  it("checks the account, not the email, once the account is found", async () => {
+    // The membership row was created under a different address than the one
+    // the account now has, so no email lookup can connect them.
+    strangerInvites();
+    tableRows.tenant_users = [{ ...bobAtAcme, email: "robert.smith@acme.com" }];
+
+    const res = await POST(req({ email: "bob@acme.com", fullName: "Bob", roleId: "role-eng" }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("active in another workspace");
+    expect(tenantUserInserts()).toHaveLength(0);
+  });
+
+  it("adds an existing account that is not active anywhere", async () => {
+    strangerInvites();
+    tableRows.tenant_users = [{ ...bobAtAcme, isActive: false }];
+
+    const res = await POST(req({ email: "bob@acme.com", fullName: "Bob", roleId: "role-eng" }));
+
+    expect(res.status).toBe(200);
+    expect(tenantUserInserts()[0].row).toMatchObject({ authUserId: "auth-bob", isActive: true });
+  });
+
+  it("finds a member of this workspace whatever the capitalisation", async () => {
+    mockTenantUser.current = mallory;
+    tableRows.tenant_users = [
+      {
+        id: "pat-mal",
+        tenantId: "tenant-mal",
+        authUserId: "auth-pat",
+        email: "Pat@Example.com",
+        isActive: true,
+      },
+    ];
+    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+
+    const res = await POST(req({ email: "pat@example.com", fullName: "Pat", roleId: "role-eng" }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("already exists in this workspace");
+  });
+
+  it("does not treat an underscore in the address as a wildcard", async () => {
+    mockTenantUser.current = mallory;
+    tableRows.tenant_users = [{ ...bobAtAcme, email: "bobxsmith@acme.com" }];
+    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+
+    const res = await POST(
+      req({ email: "bob_smith@acme.com", fullName: "Bob", roleId: "role-eng" })
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("stores the address lowercased", async () => {
+    mockTenantUser.current = mallory;
+    tableRows.tenant_users = [];
+    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+
+    await POST(req({ email: "  Pat.Lee@Example.COM ", fullName: "Pat", roleId: "role-eng" }));
+
+    expect(tenantUserInserts()[0].row).toMatchObject({ email: "pat.lee@example.com" });
+  });
+
+  it("answers 409, not 500, when the database refuses a second active membership", async () => {
+    // Migration 054's partial unique index — the backstop for a race past
+    // the checks above.
+    mockTenantUser.current = mallory;
+    tableRows.tenant_users = [];
+    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+    insertErrors.tenant_users = {
+      code: "23505",
+      message:
+        'duplicate key value violates unique constraint "tenant_users_one_active_per_auth_user"',
+    };
+
+    const res = await POST(req({ email: "pat@example.com", fullName: "Pat", roleId: "role-eng" }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("active in another workspace");
   });
 });

@@ -67,6 +67,7 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
   const [partSearch, setPartSearch] = useState("");
   const [partResults, setPartResults] = useState<SearchPart[]>([]);
   const [searchingParts, setSearchingParts] = useState(false);
+  const [partSearchError, setPartSearchError] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<SearchPart | null>(null);
   const [toRevision, setToRevision] = useState("");
 
@@ -79,6 +80,7 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
   const [fileSearch, setFileSearch] = useState("");
   const [fileResults, setFileResults] = useState<SearchFile[]>([]);
   const [searchingFiles, setSearchingFiles] = useState(false);
+  const [fileSearchError, setFileSearchError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<SearchFile | null>(null);
 
   const [changeType, setChangeType] = useState("MODIFY");
@@ -114,11 +116,13 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
     setTarget("part");
     setPartSearch("");
     setPartResults([]);
+    setPartSearchError(null);
     setSelectedPart(null);
     setToRevision("");
     setSelectedBom(null);
     setFileSearch("");
     setFileResults([]);
+    setFileSearchError(null);
     setSelectedFile(null);
     setChangeType("MODIFY");
     setReason("");
@@ -136,11 +140,13 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
       return;
     }
     setSearchingParts(true);
+    setPartSearchError(null);
     try {
       const data = await fetchJson<SearchPart[]>(`/api/parts?q=${encodeURIComponent(q)}`);
       setPartResults((data || []).slice(0, 10));
-    } catch {
+    } catch (err) {
       setPartResults([]);
+      setPartSearchError(errorMessage(err));
     } finally {
       setSearchingParts(false);
     }
@@ -153,13 +159,19 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
       return;
     }
     setSearchingFiles(true);
+    setFileSearchError(null);
     try {
-      const data = await fetchJson<SearchFile[] | { files: SearchFile[] }>(
-        `/api/files?q=${encodeURIComponent(q)}&limit=10`
+      // /api/search, not /api/files. The vault listing route answers 400
+      // without a folderId, and the error was swallowed into "No files found",
+      // so no loose file could ever be added to an ECO. Search also applies
+      // folder access, so the picker offers only files the user can see.
+      const data = await fetchJson<{ files?: SearchFile[] }>(
+        `/api/search?q=${encodeURIComponent(q)}&type=files`
       );
-      setFileResults(Array.isArray(data) ? data : data.files || []);
-    } catch {
+      setFileResults((data.files ?? []).slice(0, 10));
+    } catch (err) {
       setFileResults([]);
+      setFileSearchError(errorMessage(err));
     } finally {
       setSearchingFiles(false);
     }
@@ -300,11 +312,17 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                           ))}
                         </div>
                       )}
-                      {partSearch.length >= 2 && !searchingParts && partResults.length === 0 && (
-                        <p className="text-xs text-muted-foreground/60 px-1 italic">
-                          No parts found matching &ldquo;{partSearch}&rdquo;
-                        </p>
+                      {partSearchError && (
+                        <p className="text-xs text-destructive px-1">{partSearchError}</p>
                       )}
+                      {partSearch.length >= 2 &&
+                        !searchingParts &&
+                        !partSearchError &&
+                        partResults.length === 0 && (
+                          <p className="text-xs text-muted-foreground/60 px-1 italic">
+                            No parts found matching &ldquo;{partSearch}&rdquo;
+                          </p>
+                        )}
                     </div>
                   )}
                 </div>
@@ -466,11 +484,17 @@ export function AddEcoItemDialog({ open, onOpenChange, ecoId, onAdded }: AddEcoI
                           ))}
                         </div>
                       )}
-                      {fileSearch.length >= 2 && !searchingFiles && fileResults.length === 0 && (
-                        <p className="text-xs text-muted-foreground/60 px-1 italic">
-                          No files found matching &ldquo;{fileSearch}&rdquo;
-                        </p>
+                      {fileSearchError && (
+                        <p className="text-xs text-destructive px-1">{fileSearchError}</p>
                       )}
+                      {fileSearch.length >= 2 &&
+                        !searchingFiles &&
+                        !fileSearchError &&
+                        fileResults.length === 0 && (
+                          <p className="text-xs text-muted-foreground/60 px-1 italic">
+                            No files found matching &ldquo;{fileSearch}&rdquo;
+                          </p>
+                        )}
                     </div>
                   )}
                 </div>

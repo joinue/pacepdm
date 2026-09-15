@@ -5,6 +5,9 @@ const authFile = path.join(__dirname, "e2e", ".auth", "user.json");
 
 export default defineConfig({
   testDir: "./e2e",
+  // Refuses to run unless E2E_SUPABASE_PROJECT names the project the suite
+  // may write to. See e2e/global-setup.ts.
+  globalSetup: require.resolve("./e2e/global-setup"),
   fullyParallel: false,
   retries: 0,
   workers: 1,

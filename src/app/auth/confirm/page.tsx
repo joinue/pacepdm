@@ -12,6 +12,7 @@ import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/layout/logo";
+import { safeNextPath } from "@/lib/safe-redirect";
 
 function ConfirmInner() {
   const params = useSearchParams();
@@ -21,7 +22,7 @@ function ConfirmInner() {
 
   const token_hash = params.get("token_hash");
   const type = params.get("type");
-  const next = params.get("next") ?? "/";
+  const next = safeNextPath(params.get("next"));
 
   async function handleConfirm() {
     if (!token_hash || !type) {

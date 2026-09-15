@@ -35,7 +35,13 @@ export async function GET(
       return NextResponse.json({ error: "Version not found" }, { status: 404 });
     }
 
-    const { data, error } = await db.storage.from("vault").createSignedUrl(version.storageKey, 60);
+    // `download` makes storage answer with Content-Disposition: attachment and
+    // the file's real name. Without it the browser named the file after its
+    // storage key — `1726…-Bracket.SLDPRT` — so parts downloaded one at a time
+    // no longer matched the names their assemblies reference.
+    const { data, error } = await db.storage
+      .from("vault")
+      .createSignedUrl(version.storageKey, 60, { download: file.name });
 
     if (error || !data) {
       return NextResponse.json({ error: "Failed to generate download URL" }, { status: 500 });

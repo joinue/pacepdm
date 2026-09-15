@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/db", () => ({ getServiceClient: vi.fn() }));
 
-import { appEmailConfigured, sendInviteEmail } from "./send";
+import { appBaseUrl, appEmailConfigured, sendInviteEmail } from "./send";
 
 const invite = {
   to: "pat@example.com",
@@ -60,5 +60,64 @@ describe("sendInviteEmail", () => {
     expect(appEmailConfigured()).toBe(false);
     expect(await sendInviteEmail(invite)).toMatchObject({ ok: false, skipped: true });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Resend allows 2 requests a second by default. An approval request to a group
+ * of four used to send four emails at once, and the refused ones were never
+ * retried, so some approvers were simply never told.
+ */
+describe("rate limiting", () => {
+  it("retries a 429 and reports the send that then succeeds", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response("rate limited", { status: 429, headers: { "retry-after": "0" } })
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "email-2" }), { status: 200 }));
+
+    const result = await sendInviteEmail(invite);
+
+    expect(result).toEqual({ ok: true, providerId: "email-2" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after three attempts and reports the 429", async () => {
+    fetchMock.mockImplementation(
+      async () => new Response("rate limited", { status: 429, headers: { "retry-after": "0" } })
+    );
+
+    const result = await sendInviteEmail(invite);
+
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining("resend 429") });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a refusal that waiting will not fix", async () => {
+    fetchMock.mockResolvedValue(new Response("domain is not verified", { status: 403 }));
+
+    await sendInviteEmail(invite);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Links in notification emails are built from this. The README tells people to
+ * set NEXT_PUBLIC_APP_URL for emails, but only APP_URL was read, so with the
+ * documented variable alone every button in every email was a dead relative
+ * link.
+ */
+describe("appBaseUrl", () => {
+  it("prefers APP_URL", () => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://other.example.com");
+    expect(appBaseUrl()).toBe("https://app.example.com");
+  });
+
+  it("falls back to NEXT_PUBLIC_APP_URL", () => {
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.com/");
+    expect(appBaseUrl()).toBe("https://app.example.com");
   });
 });

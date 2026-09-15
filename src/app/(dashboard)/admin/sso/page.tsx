@@ -21,6 +21,7 @@ import { fetchJson, errorMessage } from "@/lib/api-client";
 interface Role {
   id: string;
   name: string;
+  permissions?: unknown;
 }
 
 type DomainStatus = "pending_verification" | "verified" | "active" | "error";
@@ -69,20 +70,25 @@ export default function SsoAdminPage() {
         fetchJson<Role[]>("/api/roles"),
       ]);
       setDomains(domainsRes.domains || []);
+      // No role is preselected. Roles sort system-first by name, so the first
+      // one is Admin: an admin who typed a domain and clicked Add gave every
+      // future SSO user from it full access, in a role that cannot be edited
+      // on the domain afterwards.
       setRoles(rolesRes || []);
-      if (!newRoleId && rolesRes && rolesRes.length > 0) {
-        setNewRoleId(rolesRes[0].id);
-      }
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to load SSO settings");
     } finally {
       setLoading(false);
     }
-  }, [newRoleId]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const selectedRole = roles.find((r) => r.id === newRoleId);
+  const selectedRoleIsFullAccess =
+    Array.isArray(selectedRole?.permissions) && selectedRole.permissions.includes("*");
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +101,7 @@ export default function SsoAdminPage() {
       });
       toast.success("Domain added — next, verify DNS");
       setNewDomain("");
+      setNewRoleId("");
       await load();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -160,6 +167,13 @@ export default function SsoAdminPage() {
                 Users provisioned via SSO land in this role. You can change individual users later
                 in the Users admin page.
               </p>
+              {selectedRoleIsFullAccess && (
+                <p className="text-xs text-destructive flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 mt-px shrink-0" />
+                  This role has full access. Everyone who signs in with an address at this domain
+                  will be able to change roles, settings and approvals.
+                </p>
+              )}
             </div>
             <Button type="submit" disabled={adding || !newDomain.trim() || !newRoleId}>
               {adding ? "Adding…" : "Add domain"}

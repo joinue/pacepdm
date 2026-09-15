@@ -25,7 +25,14 @@ interface FileContent {
   canPreview: boolean;
   previewType?: "pdf" | "image" | "text" | "cad";
   fileType?: string;
-  url?: string; // Signed storage URL, ~5 min expiry
+  url?: string; // Signed storage URL for the preview, ~5 min expiry
+  /**
+   * Signed with the file's name as an attachment, so it saves as `Bracket.pdf`
+   * rather than as its storage key. Kept apart from `url` because an
+   * attachment disposition would stop the preview rendering inline. Only
+   * issued when the link allows downloads.
+   */
+  downloadUrl?: string;
   allowDownload: boolean;
 }
 
@@ -69,6 +76,8 @@ interface PartContent {
     isPreliminary: boolean;
     /** Signed storage URL, ~5 min expiry. Absent if signing failed. */
     url?: string;
+    /** As `url`, but saves under the file's name. Only when downloads are allowed. */
+    downloadUrl?: string;
   }>;
   boms: PartPackageBom[];
   /** Drives the viewer's package-level warning banner. */
@@ -203,9 +212,9 @@ export async function GET(
           if (version) {
             const { data: signed } = await db.storage
               .from("vault")
-              .createSignedUrl(version.storageKey, 300);
+              .createSignedUrl(version.storageKey, 300, { download: file.name });
             if (signed) {
-              payload.url = signed.signedUrl;
+              payload.downloadUrl = signed.signedUrl;
               downloadIssued = true;
             }
           }
@@ -276,6 +285,12 @@ export async function GET(
         url: signed.signedUrl,
         allowDownload: row.allowDownload,
       };
+      if (row.allowDownload) {
+        const { data: download } = await db.storage
+          .from("vault")
+          .createSignedUrl(version.storageKey, 300, { download: file.name });
+        if (download) payload.downloadUrl = download.signedUrl;
+      }
       void bumpAccessCount(row.id);
       logShareAccess({
         tenantId: row.tenantId,
@@ -364,6 +379,11 @@ export async function GET(
           const { data: signed } = await db.storage
             .from("vault")
             .createSignedUrl(f.storageKey, 300);
+          const { data: download } = row.allowDownload
+            ? await db.storage
+                .from("vault")
+                .createSignedUrl(f.storageKey, 300, { download: f.fileName })
+            : { data: null };
           return {
             fileName: f.fileName,
             fileType: f.fileType,
@@ -375,6 +395,7 @@ export async function GET(
             // which internal lifecycle state it sits in.
             isPreliminary: f.isPreliminary,
             url: signed?.signedUrl,
+            downloadUrl: download?.signedUrl,
           };
         })
       );

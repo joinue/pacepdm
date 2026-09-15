@@ -15,12 +15,18 @@ import { test, expect } from "@playwright/test";
  */
 test.describe("Invite user", () => {
   test("admin can invite a teammate", async ({ page }) => {
+    // The invitation is a real email through the production sending domain.
+    // The old default, qa+invite@example.com, cannot receive mail, and every
+    // run's bounce counted against the reputation the team's notifications
+    // depend on.
+    const baseEmail = process.env.E2E_INVITE_EMAIL_BASE ?? "";
+    test.skip(!baseEmail.includes("@"), "Set E2E_INVITE_EMAIL_BASE to an address you control");
+
     // Use a unique alias on every run so the test is rerunnable. Most
     // mailbox providers ignore +suffixes, so this routes to the same
     // inbox in real usage but the API treats them as distinct addresses.
-    const baseEmail = process.env.E2E_INVITE_EMAIL_BASE || "qa+invite@example.com";
     const [local, domain] = baseEmail.split("@");
-    const uniq = `${local}-${Date.now()}@${domain || "example.com"}`;
+    const uniq = `${local}-${Date.now()}@${domain}`;
 
     await page.goto("/admin/users");
 

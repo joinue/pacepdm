@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { downloadVaultFile } from "@/lib/file-download";
 import type { FileItem, FolderItem, TransitionOption } from "@/components/vault/vault-types";
 
 interface DialogTarget {
@@ -92,9 +93,7 @@ export function useFileActions({
 
   const handleDownload = useCallback(async (fileId: string) => {
     try {
-      const d = await fetchJson<{ url?: string }>(`/api/files/${fileId}/download`);
-      if (d.url) window.open(d.url, "_blank");
-      else toast.error("Failed to download — no URL returned");
+      await downloadVaultFile(fileId);
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to download");
     }

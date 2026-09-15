@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useFetch } from "@/hooks/use-fetch";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import { downloadVaultFile } from "@/lib/file-download";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -366,9 +367,7 @@ export default function SearchPage() {
 
   async function handleDownload(fileId: string) {
     try {
-      const d = await fetchJson<{ url?: string }>(`/api/files/${fileId}/download`);
-      if (d.url) window.open(d.url, "_blank");
-      else toast.error("Failed to download — no URL returned");
+      await downloadVaultFile(fileId);
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to download");
     }

@@ -180,5 +180,21 @@ export function ilikeContains(term: string): string {
   return `"%${escaped}%"`;
 }
 
+/**
+ * An `.ilike()` pattern that matches `value` exactly, ignoring case.
+ *
+ * For comparing emails. `tenant_users.email` is plain TEXT holding whatever
+ * capitalisation an admin typed, while Supabase Auth lowercases, so an `.eq()`
+ * on email misses `Bob@Acme.com` when the row says `bob@acme.com`. That miss
+ * let any workspace add a second active membership to someone else's account
+ * and lock them out of their own.
+ *
+ * `.ilike()` escapes the value as a parameter, but LIKE still reads `%` and
+ * `_` inside it as wildcards — and `_` is common in addresses.
+ */
+export function ilikeExact(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 // Re-export z so consumers don't need a separate import.
 export { z };

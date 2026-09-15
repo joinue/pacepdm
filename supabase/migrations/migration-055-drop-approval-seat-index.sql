@@ -1,0 +1,35 @@
+-- PACE PDM Migration 055: drop the leftover one-seat-per-group index
+--
+-- Unblocks ALL and MAJORITY approval steps (AUD-003 OPS-1).
+--
+-- Migration 002 created "approval_decisions_requestId_groupId_key" as a
+-- UNIQUE INDEX — one decision row per group per request. Migration 006 meant
+-- to remove it, because a workflow can use the same group in more than one
+-- step, but wrote
+--
+--   ALTER TABLE "approval_decisions" DROP CONSTRAINT IF EXISTS "…_key";
+--
+-- A CREATE UNIQUE INDEX makes an index, not a constraint, so that statement
+-- finds no constraint by that name, prints a NOTICE, and leaves the index in
+-- place. No later migration drops it.
+--
+-- It mattered little until functional-audit finding 4 was fixed: ALL and
+-- MAJORITY steps now get one decision row ("seat") per group member, all
+-- with the same requestId and groupId. With the index still present, the
+-- second seat is refused with 23505 and startWorkflow fails with "Could not
+-- create approval seat 2 of N" — every ALL or MAJORITY step with two or more
+-- members, and any workflow that uses one group in two steps. Unit tests mock
+-- the database, so they could not see it.
+--
+-- Not verified against the live database; the audit session could not query
+-- it. To check whether this migration has anything to do:
+--
+--   select indexname from pg_indexes where tablename = 'approval_decisions';
+--
+-- Nothing depends on the index: no upsert targets it, and the engine's own
+-- guards (stale-seat refusal, compare-and-swap on settling a step) do not
+-- rely on uniqueness.
+--
+-- Idempotent: DROP INDEX IF EXISTS is a no-op once the index is gone.
+
+DROP INDEX IF EXISTS "approval_decisions_requestId_groupId_key";

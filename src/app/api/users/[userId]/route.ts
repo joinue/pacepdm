@@ -52,13 +52,39 @@ export async function PATCH(
 
     const { data: targetUser } = await db
       .from("tenant_users")
-      .select("id, fullName, tenantId, roleId")
+      .select("id, fullName, tenantId, roleId, authUserId")
       .eq("id", userId)
       .eq("tenantId", tenantUser.tenantId)
       .single();
 
     if (!targetUser) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // ── Reactivation ─────────────────────────────────────────────────
+    // One active membership per account, the same rule invite enforces.
+    // Reactivating someone who has since joined another workspace gave them
+    // two active rows; findTenantUser's `.single()` fails on that, so they
+    // resolved to no workspace and onboarding offered to create a third.
+    if (body.isActive === true) {
+      const { data: activeElsewhere, error: elsewhereError } = await db
+        .from("tenant_users")
+        .select("id")
+        .eq("authUserId", targetUser.authUserId)
+        .eq("isActive", true)
+        .neq("id", userId)
+        .limit(1)
+        .maybeSingle();
+      if (elsewhereError) throw elsewhereError;
+      if (activeElsewhere) {
+        return NextResponse.json(
+          {
+            error:
+              "This user is active in another workspace. They must be deactivated there before they can be reactivated here.",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     // ── Role change ───────────────────────────────────────────────────
@@ -175,7 +201,17 @@ export async function PATCH(
       .eq("id", userId)
       .eq("tenantId", tenantUser.tenantId);
 
-    if (error) throw error;
+    if (error) {
+      // Migration 054's partial unique index, if a reactivation raced a join
+      // elsewhere past the check above.
+      if (error.code === "23505") {
+        return NextResponse.json(
+          { error: "This user is active in another workspace." },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     if (body.isActive !== undefined) {
       await logAudit({

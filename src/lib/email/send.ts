@@ -13,7 +13,9 @@
  *   EMAIL_FROM       — e.g. "PACE PDM <notifications@pacepdm.com>". Required
  *                      when RESEND_API_KEY is set.
  *   APP_URL          — e.g. "https://app.pacepdm.com". Used to build absolute
- *                      links in email bodies. Falls back to a relative link.
+ *                      links in email bodies. Falls back to NEXT_PUBLIC_APP_URL,
+ *                      which the README documents as the one that drives
+ *                      emails; with neither set, links are relative and dead.
  */
 
 import { getServiceClient } from "@/lib/db";
@@ -46,11 +48,55 @@ interface SendResult {
   providerId?: string;
 }
 
+const RESEND_ATTEMPTS = 3;
+const MAX_RETRY_WAIT_MS = 5000;
+
+/**
+ * POST to Resend, retrying a 429.
+ *
+ * Resend's default limit is 2 requests a second, and an approval request to a
+ * group of four sent four emails at once, so the later ones were refused and
+ * never retried. Honours `Retry-After` when Resend sends it.
+ */
+async function postToResend(apiKey: string, payload: unknown): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (res.status !== 429 || attempt >= RESEND_ATTEMPTS) return res;
+    const retryAfter = Number(res.headers.get("retry-after") ?? NaN);
+    const waitMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : attempt * 1000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, MAX_RETRY_WAIT_MS)));
+  }
+}
+
+/** The app's origin for links in emails, without a trailing slash. */
+export function appBaseUrl(): string {
+  const url = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "";
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+let warnedNoApiKey = false;
+
 export async function sendNotificationEmail(
   params: SendNotificationEmailParams
 ): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return { ok: false, skipped: true, reason: "no-api-key" };
+  if (!apiKey) {
+    // Once per process. Skipping is right for local runs, but in production a
+    // missing key means no notification email reaches anyone, and nothing
+    // else would ever say so.
+    if (!warnedNoApiKey) {
+      warnedNoApiKey = true;
+      console.warn("[email] RESEND_API_KEY is not set; notification emails are not being sent");
+    }
+    return { ok: false, skipped: true, reason: "no-api-key" };
+  }
 
   const db = getServiceClient();
 
@@ -84,13 +130,14 @@ export async function sendNotificationEmail(
 
   const from = process.env.EMAIL_FROM;
   if (!from) {
+    console.warn("[email] EMAIL_FROM is not set; notification emails are not being sent");
     return { ok: false, skipped: true, reason: "no-from-address" };
   }
 
   const replyTo =
     (typeof tenantSettings.emailReplyTo === "string" && tenantSettings.emailReplyTo) || undefined;
 
-  const appUrl = process.env.APP_URL || "";
+  const appUrl = appBaseUrl();
   const absoluteLink = params.link
     ? params.link.startsWith("http")
       ? params.link
@@ -107,24 +154,17 @@ export async function sendNotificationEmail(
   });
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [user.email],
-        subject,
-        html,
-        text,
-        reply_to: replyTo,
-        tags: [
-          { name: "type", value: params.type },
-          { name: "tenant", value: params.tenantId },
-        ],
-      }),
+    const res = await postToResend(apiKey, {
+      from,
+      to: [user.email],
+      subject,
+      html,
+      text,
+      reply_to: replyTo,
+      tags: [
+        { name: "type", value: params.type },
+        { name: "tenant", value: params.tenantId },
+      ],
     });
 
     if (!res.ok) {
@@ -218,24 +258,17 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<Se
   });
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [params.to],
-        subject,
-        html,
-        text,
-        reply_to: params.replyTo,
-        tags: [
-          { name: "type", value: "invite" },
-          { name: "tenant", value: params.tenantId },
-        ],
-      }),
+    const res = await postToResend(apiKey, {
+      from,
+      to: [params.to],
+      subject,
+      html,
+      text,
+      reply_to: params.replyTo,
+      tags: [
+        { name: "type", value: "invite" },
+        { name: "tenant", value: params.tenantId },
+      ],
     });
 
     if (!res.ok) {

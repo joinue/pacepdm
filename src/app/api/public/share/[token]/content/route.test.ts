@@ -22,9 +22,15 @@ const { tableResults, signedUrls, mockFrom, mockStorage } = vi.hoisted(() => {
   type Handler = QueryResult | ((filters: Record<string, unknown>) => QueryResult);
 
   const tableResults: Record<string, Handler> = {};
-  const signedUrls: { result: { data: unknown; error: unknown }; calls: string[] } = {
+  const signedUrls: {
+    result: { data: unknown; error: unknown };
+    calls: string[];
+    /** The `download` option of each call, in order — undefined for a preview URL. */
+    downloadNames: (string | undefined)[];
+  } = {
     result: { data: { signedUrl: "https://storage.test/signed" }, error: null },
     calls: [],
+    downloadNames: [],
   };
 
   function makeChain(table: string) {
@@ -57,8 +63,9 @@ const { tableResults, signedUrls, mockFrom, mockStorage } = vi.hoisted(() => {
 
   const mockStorage = {
     from: () => ({
-      createSignedUrl: (key: string) => {
+      createSignedUrl: (key: string, _expiresIn: number, opts?: { download?: string }) => {
         signedUrls.calls.push(key);
+        signedUrls.downloadNames.push(opts?.download);
         return Promise.resolve(signedUrls.result);
       },
     }),
@@ -143,6 +150,7 @@ beforeEach(() => {
   for (const key of Object.keys(tableResults)) delete tableResults[key];
   signedUrls.result = { data: { signedUrl: "https://storage.test/signed" }, error: null };
   signedUrls.calls.length = 0;
+  signedUrls.downloadNames.length = 0;
   releaseResult.current = null;
   packageResult.current = null;
   process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
@@ -322,11 +330,36 @@ describe("file shares", () => {
     expect(signedUrls.calls).toHaveLength(0);
   });
 
-  it("includes the URL for an unpreviewable file when downloads are allowed", async () => {
+  it("includes a download URL for an unpreviewable file when downloads are allowed", async () => {
     givenToken({ allowDownload: true });
     givenFile({ ...pdfFile, name: "archive.zip", fileType: "zip" });
     const body = await (await GET(makeRequest(), { params })).json();
-    expect(body).toMatchObject({ canPreview: false, url: "https://storage.test/signed" });
+    expect(body).toMatchObject({
+      canPreview: false,
+      downloadUrl: "https://storage.test/signed",
+    });
+    expect(signedUrls.downloadNames).toEqual(["archive.zip"]);
+  });
+
+  /**
+   * A signed URL without `download` makes the browser name the file after its
+   * storage key — `1726…-drawing.pdf` — whatever the `download` attribute on
+   * the link says, because that attribute is ignored across origins.
+   */
+  it("signs a separate download URL under the file's name, keeping the preview inline", async () => {
+    givenToken({ allowDownload: true });
+    givenFile(pdfFile);
+    const body = await (await GET(makeRequest(), { params })).json();
+    expect(body).toMatchObject({ url: expect.any(String), downloadUrl: expect.any(String) });
+    expect(signedUrls.downloadNames).toEqual([undefined, "drawing.pdf"]);
+  });
+
+  it("issues no download URL for a previewable file when downloads are off", async () => {
+    givenToken({ allowDownload: false });
+    givenFile(pdfFile);
+    const body = await (await GET(makeRequest(), { params })).json();
+    expect(body.downloadUrl).toBeUndefined();
+    expect(signedUrls.downloadNames).toEqual([undefined]);
   });
 
   it("404s when the current version row is missing", async () => {
@@ -351,7 +384,8 @@ describe("file shares", () => {
     givenToken();
     givenFile(pdfFile);
     await GET(makeRequest(), { params });
-    expect(signedUrls.calls).toEqual(["vault/tenant-1/file-1/v3"]);
+    expect(signedUrls.calls.length).toBeGreaterThan(0);
+    expect(new Set(signedUrls.calls)).toEqual(new Set(["vault/tenant-1/file-1/v3"]));
   });
 });
 
@@ -513,6 +547,22 @@ describe("part shares", () => {
       isPrimary: true,
       url: "https://storage.test/signed",
     });
+  });
+
+  it("gives each file a download URL under its own name when downloads are allowed", async () => {
+    packageResult.current = pkg;
+    givenToken({ resourceType: "part", resourceId: "part-1", allowDownload: true });
+    const body = await (await GET(makeRequest(), { params })).json();
+    expect(body.files[0].downloadUrl).toBe("https://storage.test/signed");
+    expect(signedUrls.downloadNames).toContain("a.pdf");
+  });
+
+  it("gives no download URLs when downloads are off", async () => {
+    packageResult.current = pkg;
+    givenToken({ resourceType: "part", resourceId: "part-1", allowDownload: false });
+    const body = await (await GET(makeRequest(), { params })).json();
+    expect(body.files[0].downloadUrl).toBeUndefined();
+    expect(signedUrls.downloadNames.filter(Boolean)).toHaveLength(0);
   });
 
   /**

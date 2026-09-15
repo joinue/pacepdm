@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-14 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stage 1 done, migrations 054–055 applied
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -617,9 +617,8 @@ roughly this order within an area.
 - **Removing a user on an active SSO domain does nothing.** The next page load
   finds no row and JIT provisions a fresh one (`auth.ts` → `sso-jit.ts`).
   Deactivating works. Until fixed, deactivate rather than remove.
-- **Reactivating skips the one-active-workspace guard** (`users/[userId]`), so a
-  user invited elsewhere meanwhile ends up with two active rows, resolves to no
-  tenant, and onboarding creates a third.
+- ~~**Reactivating skips the one-active-workspace guard**~~ Fixed 2026-09-15 with
+  the third pass's SEC-1, below.
 - A refused last-admin deactivation still releases that admin's checkouts and
   writes their audit rows first.
 - No ceiling on reactivating, demoting or removing a more privileged user; no
@@ -629,7 +628,8 @@ roughly this order within an area.
 - JIT adopts a row by email alone, not by provider — _plausible_ takeover if
   Supabase accepts an asserted email outside the provider's domains. Verify.
 - Deactivated members still count as seats and still receive approval requests.
-- No "resend invite"; the tenant duplicate-email check is case-sensitive.
+- No "resend invite". ~~The tenant duplicate-email check is case-sensitive.~~
+  Fixed 2026-09-15, and it was worse than listed: see SEC-1 below.
 
 **Approvals and ECOs**
 
@@ -699,6 +699,122 @@ roughly this order within an area.
   release; a desktop drop uploads only the first file.
 
 ---
+
+## Third pass — pre-rollout audit AUD-003 (2026-09-15)
+
+Before the team starts using the product. Eight parallel reads covering route
+authorization, auth and public surfaces, both halves of the list above,
+releases and audit, admin configuration, frontend journeys, and operations.
+The live database was **not** queried — the pass was blocked from production
+reads — so everything that depends on it is marked for checking below. The
+full report (85 findings, P0–P3, with a staged fix order and a day-one admin
+checklist) was published privately to the owner; the headline order is kept
+here so this file stays the place to look.
+
+It re-traced all 60 parts of the "Still open" list above: 54 still open, 4
+partly fixed, 1 downgraded (concurrent upload-versions fail loudly on the
+unique index), 1 unreachable (`fileSize` INTEGER behind a 100 MB body limit).
+
+### Stage 1 — before anyone logs in. Done in code 2026-09-15
+
+- **SEC-1: any stranger could lock a user out of their workspace.** The invite
+  route's "active elsewhere" check compared emails case-sensitively while the
+  auth lookup lowercased, so inviting `Bob@Acme.com` added a second active
+  membership to Bob's account, and `findTenantUser`'s `.single()` failed on
+  two rows. Sign-up is open, so it needed only an address. The route now
+  lowercases input, compares with `ilikeExact`, checks memberships by
+  `authUserId` once the account is known, and maps 23505 to a 409.
+  Reactivation got the same check. **Migration 054** adds a partial unique
+  index — one active membership per account — and refuses to apply while any
+  account already breaks the rule, naming them. Still open: an invite to an
+  existing account that is _not_ active anywhere is not held for acceptance,
+  so a stranger can pre-claim an address before your admin invites it.
+- **SEC-2:** `next` 16.3.0 → 16.3.5 (critical advisory), plus fflate, vitest
+  and transitive updates. `npm audit` reports 0. npm 11.0.0's installer
+  crashes on vitest's peer set (`reading 'edgesOut'`); `npx npm@11.6.2`
+  resolves it.
+- **OPS-1: ALL and MAJORITY steps with two or more members probably cannot
+  start.** Migration 002 made `approval_decisions_requestId_groupId_key` a
+  unique _index_; migration 006 tried `DROP CONSTRAINT IF EXISTS`, a no-op for
+  an index. Finding 4's one-seat-per-member fix inserts rows that collide with
+  it. **Migration 055** drops it. The same class as finding 1: a mocked
+  database cannot see an index.
+- **UI-1: no loose file could be added to an ECO.** The picker called
+  `/api/files?q=`, which answers 400 without a folder, and swallowed the error
+  into "No files found". Now `/api/search?type=files`, which also applies
+  folder access.
+- **VLT-3: downloads saved as `<ms>-<name>`**, breaking SolidWorks assembly
+  references. Signed with `{ download: file.name }`; public shares get a
+  separate `downloadUrl` so previews stay inline. The four client copies of
+  fetch-then-`window.open` are now `downloadVaultFile`, which surfaces errors.
+  One of them had opened the JSON route itself.
+- **SEC-4:** the SSO page preselected Admin as the JIT role. No default now,
+  and a warning on a full-access choice.
+- **SEC-7:** `/auth/confirm` and `/auth/callback` accepted any `next`. Now
+  `safeNextPath`. Its first version let `/..//evil.example` through — dot
+  segments resolve to a same-origin path beginning `//` — and the test caught
+  it.
+- **SEC-5:** no security headers at all. Enforced: `frame-ancestors 'none'`,
+  `X-Frame-Options`, `nosniff`, HSTS, `no-referrer` on `/share/*`. The full CSP
+  ships as **Report-Only**: it has never run against the real app, and
+  enforcing it blind could blank a PDF preview or the CAD viewer. Enforce it
+  once a pass through vault, share, BOM and CAD pages shows a clean console.
+- **OPS-3:** notification emails were started unawaited, so Vercel could
+  freeze the instance before they went out, and all at once into Resend's
+  2-a-second limit. Now `runAfterResponse` (Next's `after`), one at a time,
+  with a 429 retry. Links fall back from `APP_URL` to `NEXT_PUBLIC_APP_URL`.
+- **OPS-4:** Playwright ran against `next dev`, whose `.env.local` is
+  production. `e2e/global-setup.ts` now refuses to run unless
+  `E2E_SUPABASE_PROJECT` names the project and a local app is configured for
+  it. **Decided 2026-09-15: no separate Supabase project.** The suite runs
+  against production, so the `E2E_EMAIL` account must be the Admin of a
+  workspace used only for testing; tenant isolation keeps what the suite
+  creates out of the team's. The invite test used to email
+  `qa+invite@example.com` through the production sending domain on every run;
+  it now skips unless `E2E_INVITE_EMAIL_BASE` is an address someone controls.
+
+**Deploying Stage 1:**
+
+1. ~~Apply migrations 054 and 055.~~ Applied by the owner 2026-09-15.
+2. ~~Confirm Auth's "Confirm email" is on (SEC-3).~~ Confirmed on, so SEC-3
+   stays P1.
+3. The `vault` bucket is private (checked 2026-09-15) and has no bucket-level
+   size restriction, which means the project-wide upload limit in Storage
+   settings applies — 50 MB unless raised. Raise it toward 100 MB (VLT-1);
+   past that, Vercel's request limit is the ceiling until Stage 2.
+4. After deploy: invite an address you control, capitalised differently from
+   an existing member's, and confirm the 409; download a file and confirm it
+   saves under its own name.
+
+### Stages 2–4 — not started
+
+Headline order, by finding ID:
+
+- **Stage 2, before loading the real vault.** Upload straight to storage with
+  signed upload URLs (VLT-1: every upload goes through a route handler, so
+  Vercel's 100 MB body limit and the bucket limit apply, behind a generic
+  error); fix the SolidWorks preview scan, which is quadratic — 31 s for
+  50 MB, 161 s and 1.46 GB for 100 MB (VLT-2); storage keys from ids, since raw
+  names with Ø ° [ ] are refused (VLT-4); zip manifests server-side, since the
+  token in the URL fails past ~50 files (VLT-5); multi-file upload (VLT-6); CSV
+  into an existing BOM, LOCKED cost source, AUTO numbering (BOM-1, 2, 7);
+  folder listing paging (OPS-6); unsaved panel edits and record links (UI-2,
+  UI-3).
+- **Stage 3, before the product is the release record.** Recall and rework
+  leave an ECO where it can be approved directly, skipping its workflow
+  (CHG-1); files on an approved ECO are not locked and implement reports
+  partial work as success (CHG-2); an approved ECO whose implement fails has no
+  exit (CHG-3); parts can be set Released or re-lettered with `file.edit`
+  (CHG-4); lifecycle edits silently remove approval gates, and the gate fails
+  open (CHG-5); implemented ECOs are deletable (CHG-6); folder ACLs are skipped
+  by part and release zips, part and release shares, and direct PostgREST
+  reads under tenant-only RLS (ACL-1–3); removing a user nulls them out of the
+  audit log and every signature, and the audit viewer shows only 200 rows
+  (AUD-1–5); no error monitoring (OPS-2).
+- **Stage 4, first 90 days.** Row caps; onboarding (a teammate who signs up
+  before being invited can never join); MFA, CAPTCHA and rate limits;
+  share-link admin and expiry; storage backups; dead settings and misleading
+  permission copy.
 
 ## Related
 

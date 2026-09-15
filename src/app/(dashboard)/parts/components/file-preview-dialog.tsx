@@ -12,6 +12,9 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { FileText, Download, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
+import { errorMessage } from "@/lib/api-client";
+import { downloadVaultFile } from "@/lib/file-download";
 
 interface FilePreviewDialogProps {
   file: { id: string; name: string } | null;
@@ -42,7 +45,10 @@ export function FilePreviewDialog({ file, onClose }: FilePreviewDialogProps) {
             variant="outline"
             size="sm"
             onClick={() => {
-              window.open(`/api/files/${file?.id}/download`, "_blank");
+              // This used to open the API route itself, which answers with
+              // JSON, so the new tab showed {"url": …} instead of the file.
+              if (!file) return;
+              downloadVaultFile(file.id).catch((err) => toast.error(errorMessage(err)));
             }}
           >
             <Download className="w-3.5 h-3.5 mr-1.5" />

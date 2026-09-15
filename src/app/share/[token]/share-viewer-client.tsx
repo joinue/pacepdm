@@ -27,6 +27,7 @@ interface FileContent {
   previewType?: "pdf" | "image" | "text" | "cad";
   fileType?: string;
   url?: string;
+  downloadUrl?: string;
   allowDownload: boolean;
 }
 
@@ -108,6 +109,7 @@ interface PartContent {
     version: number;
     isPreliminary: boolean;
     url?: string;
+    downloadUrl?: string;
   }>;
   boms: Array<{
     bomId: string;
@@ -337,9 +339,9 @@ function FileContentView({ content }: { content: FileContent }) {
             </p>
           )}
         </div>
-        {content.allowDownload && content.url && (
+        {content.allowDownload && content.downloadUrl && (
           <a
-            href={content.url}
+            href={content.downloadUrl}
             download={content.fileName}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
@@ -808,9 +810,9 @@ function PartContentView({ content, token }: { content: PartContent; token: stri
                     <td className="px-3 py-2 font-mono text-xs">{f.revision || "—"}</td>
                     {content.allowDownload && (
                       <td className="px-3 py-2 text-right">
-                        {f.url ? (
+                        {f.downloadUrl ? (
                           <a
-                            href={f.url}
+                            href={f.downloadUrl}
                             download={f.fileName}
                             className="text-xs underline underline-offset-2 hover:text-foreground text-muted-foreground"
                           >

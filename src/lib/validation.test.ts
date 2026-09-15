@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ilikeContains } from "./validation";
+import { ilikeContains, ilikeExact } from "./validation";
 
 /**
  * `.or()` is the one Supabase builder that takes a raw filter string, so an
@@ -41,5 +41,26 @@ describe("ilikeContains", () => {
 
   it("handles an empty term without producing broken syntax", () => {
     expect(ilikeContains("")).toBe('"%%"');
+  });
+});
+
+/**
+ * Emails are compared with `.ilike()` so capitalisation cannot make one
+ * account look like two. LIKE still treats `%` and `_` as wildcards, and `_`
+ * is common in addresses: unescaped, `a_b@x.com` would also match `axb@x.com`.
+ */
+describe("ilikeExact", () => {
+  it("leaves an ordinary address alone", () => {
+    expect(ilikeExact("pat.lee+pdm@example.com")).toBe("pat.lee+pdm@example.com");
+  });
+
+  it("escapes the LIKE wildcards so they match only themselves", () => {
+    expect(ilikeExact("pat_lee@example.com")).toBe("pat\\_lee@example.com");
+    expect(ilikeExact("100%@example.com")).toBe("100\\%@example.com");
+  });
+
+  it("escapes a backslash so it cannot escape the character after it", () => {
+    // Input a\_b (3 chars + backslash); output a\\\_b.
+    expect(ilikeExact("a\\_b")).toBe("a\\\\\\_b");
   });
 });

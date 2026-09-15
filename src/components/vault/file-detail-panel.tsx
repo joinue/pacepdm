@@ -50,6 +50,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
+import { downloadVaultFile } from "@/lib/file-download";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 import { WhereUsedSection } from "@/components/where-used-section";
@@ -236,11 +237,7 @@ function FilePreview({
             variant="outline"
             size="sm"
             onClick={() => {
-              fetch(`/api/files/${fileId}/download`)
-                .then((r) => r.json())
-                .then((d) => {
-                  if (d.url) window.open(d.url, "_blank");
-                });
+              downloadVaultFile(fileId).catch((err) => toast.error(errorMessage(err)));
             }}
           >
             <Download className="w-3.5 h-3.5 mr-1.5" />
@@ -605,12 +602,7 @@ export function FileDetailPanel({
   }
 
   function handleDownload(version?: number) {
-    const qs = version ? `?version=${version}` : "";
-    fetch(`/api/files/${fileId}/download${qs}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.url) window.open(d.url, "_blank");
-      });
+    downloadVaultFile(fileId, version).catch((err) => toast.error(errorMessage(err)));
   }
 
   function formatFileSize(bytes: number): string {

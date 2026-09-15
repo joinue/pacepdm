@@ -24,6 +24,15 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("uuid", () => ({ v4: () => "notif-uuid-1234" }));
 
+// `after` callbacks are collected rather than run, so a test can tell work
+// scheduled for after the response from work done inside it.
+const { afterCallbacks, mockSendEmail } = vi.hoisted(() => ({
+  afterCallbacks: [] as (() => unknown)[],
+  mockSendEmail: vi.fn(),
+}));
+vi.mock("next/server", () => ({ after: (cb: () => unknown) => afterCallbacks.push(cb) }));
+vi.mock("@/lib/email/send", () => ({ sendNotificationEmail: mockSendEmail }));
+
 import { notify, notifyApprovalGroupMembers } from "./notifications";
 
 describe("notify", () => {
@@ -220,5 +229,94 @@ describe("notifyApprovalGroupMembers", () => {
     });
 
     expect(mockInsert).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Emails go out after the response, through `after`. They used to be started
+ * and left unawaited, and on Vercel an instance can be frozen as soon as the
+ * response is returned — taking the unsent emails with it. They were also all
+ * started at once, which ran into Resend's 2-a-second limit for any group
+ * bigger than two.
+ */
+describe("notification emails", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterCallbacks.length = 0;
+    mockFrom.mockImplementation(() => ({ insert: mockInsert }));
+    mockInsert.mockResolvedValue({ data: null, error: null });
+  });
+
+  it("sends nothing during the request, and hands the emails to after()", async () => {
+    mockSendEmail.mockResolvedValue({ ok: true });
+
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1", "user-2"],
+      title: "Review",
+      message: "Please",
+      type: "approval",
+    });
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(afterCallbacks).toHaveLength(1);
+
+    await afterCallbacks[0]();
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends one email at a time", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    mockSendEmail.mockImplementation(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return { ok: true };
+    });
+
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1", "user-2", "user-3", "user-4"],
+      title: "Review",
+      message: "Please",
+      type: "approval",
+    });
+    await afterCallbacks[0]();
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(4);
+    expect(maxInFlight).toBe(1);
+  });
+
+  it("keeps going when one recipient's email fails", async () => {
+    mockSendEmail.mockRejectedValueOnce(new Error("boom")).mockResolvedValue({ ok: true });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1", "user-2"],
+      title: "Review",
+      message: "Please",
+      type: "approval",
+    });
+    await afterCallbacks[0]();
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("schedules no emails when the notification rows were not written", async () => {
+    mockInsert.mockResolvedValue({ data: null, error: { message: "nope" } });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await notify({
+      tenantId: "tenant-1",
+      userIds: ["user-1"],
+      title: "Review",
+      message: "Please",
+      type: "approval",
+    });
+
+    expect(afterCallbacks).toHaveLength(0);
   });
 });

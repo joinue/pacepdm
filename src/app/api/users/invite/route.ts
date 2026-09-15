@@ -9,14 +9,34 @@ import {
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { z, parseBody, nonEmptyString, ilikeExact } from "@/lib/validation";
 import { appEmailConfigured, sendInviteEmail } from "@/lib/email/send";
 
 const InviteSchema = z.object({
-  email: z.string().email("Must be a valid email"),
+  // Lowercased on the way in: Supabase Auth stores emails lowercased, and a
+  // membership row holding another capitalisation is how one account came to
+  // look like two (see the active-membership checks below).
+  email: z.string().trim().toLowerCase().email("Must be a valid email"),
   fullName: nonEmptyString,
   roleId: nonEmptyString,
 });
+
+const ACTIVE_ELSEWHERE =
+  "This user is active in another workspace. They must be deactivated there before they can join yours.";
+const ALREADY_MEMBER = "User already exists in this workspace";
+
+/**
+ * The partial unique index from migration 054 allows one active membership
+ * per auth account. It is the backstop for the checks in this route: two
+ * invites racing, or a row whose email no longer matches the account's.
+ */
+function membershipConflict(error: { code?: string; message?: string }) {
+  if (error.code !== "23505") return null;
+  const message = error.message?.includes("tenant_users_one_active_per_auth_user")
+    ? ACTIVE_ELSEWHERE
+    : ALREADY_MEMBER;
+  return NextResponse.json({ error: message }, { status: 409 });
+}
 
 const AUTH_USERS_PAGE_SIZE = 1000;
 
@@ -61,38 +81,41 @@ export async function POST(request: NextRequest) {
 
     const db = getServiceClient();
 
-    // Check if user already exists in this tenant
-    const { data: existing } = await db
+    // Both lookups ignore case. They used `.eq("email")`, so inviting
+    // `Bob@Acme.com` walked past Bob's `bob@acme.com` row while the auth
+    // lookup below (which lowercases) still found his account — and inserted a
+    // second active membership for it. findTenantUser's `.single()` then fails
+    // on two rows, so Bob resolved to no workspace and was locked out of his
+    // own. Any stranger could do it: sign-up is open, and every new workspace
+    // makes its creator an Admin.
+    const { data: existing, error: existingError } = await db
       .from("tenant_users")
       .select("id")
       .eq("tenantId", tenantUser.tenantId)
-      .eq("email", email)
-      .single();
+      .ilike("email", ilikeExact(email))
+      .limit(1)
+      .maybeSingle();
+    if (existingError) throw existingError;
 
     if (existing) {
-      return NextResponse.json({ error: "User already exists in this workspace" }, { status: 409 });
+      return NextResponse.json({ error: ALREADY_MEMBER }, { status: 409 });
     }
 
-    // Guard: if this email is active in another tenant, block the invite.
-    // A user can only be active in one workspace at a time — this prevents
-    // the .single() auth lookup from failing when multiple active rows exist.
-    const { data: activeElsewhere } = await db
+    // A user can only be active in one workspace at a time. This is the early
+    // check, before anything is sent; the authoritative one is by account id,
+    // once the account is known, below.
+    const { data: activeElsewhere, error: elsewhereError } = await db
       .from("tenant_users")
-      .select("id, tenant:tenants(name)")
-      .eq("email", email)
+      .select("id")
+      .ilike("email", ilikeExact(email))
       .eq("isActive", true)
       .neq("tenantId", tenantUser.tenantId)
       .limit(1)
       .maybeSingle();
+    if (elsewhereError) throw elsewhereError;
 
     if (activeElsewhere) {
-      return NextResponse.json(
-        {
-          error:
-            "This user is active in another workspace. They must be deactivated there before they can join yours.",
-        },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: ACTIVE_ELSEWHERE }, { status: 409 });
     }
 
     // Verify role belongs to tenant
@@ -180,6 +203,22 @@ export async function POST(request: NextRequest) {
         const existingAuthUser = await findAuthUserByEmail(supabaseAdmin, email);
 
         if (existingAuthUser) {
+          // Check memberships by account, not by email. A membership row's
+          // email is whatever was typed when it was created and can differ
+          // from the account's; the account id cannot.
+          const { data: memberships, error: membershipsError } = await db
+            .from("tenant_users")
+            .select("id, tenantId, isActive")
+            .eq("authUserId", existingAuthUser.id);
+          if (membershipsError) throw membershipsError;
+
+          if (memberships?.some((m) => m.tenantId === tenantUser.tenantId)) {
+            return NextResponse.json({ error: ALREADY_MEMBER }, { status: 409 });
+          }
+          if (memberships?.some((m) => m.isActive)) {
+            return NextResponse.json({ error: ACTIVE_ELSEWHERE }, { status: 409 });
+          }
+
           const now = new Date().toISOString();
           const { data: newUser, error: insertError } = await db
             .from("tenant_users")
@@ -197,7 +236,11 @@ export async function POST(request: NextRequest) {
             .select()
             .single();
 
-          if (insertError) throw insertError;
+          if (insertError) {
+            const conflict = membershipConflict(insertError);
+            if (conflict) return conflict;
+            throw insertError;
+          }
 
           await logAudit({
             tenantId: tenantUser.tenantId,
@@ -264,7 +307,11 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      const conflict = membershipConflict(insertError);
+      if (conflict) return conflict;
+      throw insertError;
+    }
 
     await logAudit({
       tenantId: tenantUser.tenantId,

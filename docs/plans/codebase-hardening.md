@@ -6,7 +6,7 @@
 routes-total: 111
 routes-wrapped: 44
 unwrapped-route: 317
-raw-fetch: 44
+raw-fetch: 42
 generic-error-toast: 8
 swallowed-error: 6
 token-violations: 6
@@ -95,7 +95,7 @@ npm run probe:rls                                      # live RLS posture
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
 | Routes on `withTenant`                | 0                | **44 / 111**                          | 111                                                   |
-| `raw-fetch` in client components      | 112              | **44**                                | 0                                                     |
+| `raw-fetch` in client components      | 112              | **42**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **8**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
 | Component tests                       | 0                | **11** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
@@ -195,13 +195,13 @@ Things that will trip you up:
 - **Helpers that take a raw client** (`captureBomSnapshot`, `getFileWhereUsed`, `getReleaseById`) need `db.unscoped("reason")`. They scope by the `tenantId` you pass them.
 - **Add a case to `src/app/api/tenant-isolation.test.ts`** for any route that resolves a record by id. That file is the registry of what is proven safe.
 
-### 2. Adopt `useFetch` / `fetchJson` — 44 sites
+### 2. Adopt `useFetch` / `fetchJson` — 42 sites
 
 ```bash
 node scripts/lint-conventions.mjs --list raw-fetch
 ```
 
-Worst offenders: `vault/file-detail-panel.tsx` (13), `vault/upload-file-dialog.tsx` (7), `parts/components/part-form-dialog.tsx` (6). Everything below that is a one- or two-line tail spread across sixteen files.
+Worst offenders: `vault/file-detail-panel.tsx` (11), `vault/upload-file-dialog.tsx` (7), `parts/components/part-form-dialog.tsx` (6). Everything below that is a one- or two-line tail spread across sixteen files.
 
 **These headings are prose, so `lint:plans` does not check them.** Only the
 `plan-metrics` block is verified; a count written into a heading drifts
