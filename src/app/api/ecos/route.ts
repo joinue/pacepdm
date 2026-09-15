@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
           title: "New ECO created",
           message: `${tenantUser.fullName} created ${ecoNumber}: ${title}`,
           type: "eco",
-          link: `/ecos`,
+          link: `/ecos/${eco.id}`,
           refId: eco.id,
           actorId: tenantUser.id,
         }),

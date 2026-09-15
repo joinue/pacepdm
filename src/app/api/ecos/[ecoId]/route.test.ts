@@ -93,6 +93,7 @@ vi.mock("@/lib/approval-engine", () => ({
 import { PUT } from "./route";
 import { findWorkflowForTrigger, startWorkflow } from "@/lib/approval-engine";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 import { fromDateInputValue } from "@/app/(dashboard)/ecos/effectivity";
 
 const ECO_ID = "33333333-3333-4333-8333-333333333333";
@@ -167,6 +168,16 @@ describe("ECO decision transitions require ECO_APPROVE", () => {
     tableResults.ecos = { data: { ...inReviewEco, status: "SUBMITTED" }, error: null };
     const res = await PUT(req({ status: "IN_REVIEW" }), { params });
     expect(res.status).not.toBe(403);
+  });
+
+  it("links the creator's notification to the ECO, not the list", async () => {
+    // Every ECO notification used to link to /ecos, so clicking one landed on
+    // the whole list and left the reader to find which change it was about.
+    mockTenantUser.current = manager;
+    await PUT(req({ status: "APPROVED" }), { params });
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ["user-1"], link: `/ecos/${ECO_ID}` })
+    );
   });
 
   it("rejects an invalid transition before checking the permission", async () => {

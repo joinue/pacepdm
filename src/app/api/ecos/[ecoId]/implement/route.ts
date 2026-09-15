@@ -123,7 +123,7 @@ export async function POST(
           title: `ECO ${eco.ecoNumber} implemented`,
           message: `${tenantUser.fullName} implemented ${eco.ecoNumber}: ${eco.title}`,
           type: "eco",
-          link: `/ecos`,
+          link: `/ecos/${ecoId}`,
           refId: ecoId,
           actorId: tenantUser.id,
         }),

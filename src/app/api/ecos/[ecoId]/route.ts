@@ -186,7 +186,7 @@ export const PUT = withTenant(
           title: `ECO ${eco.ecoNumber} ${to.toLowerCase()}`,
           message: `${tenantUser.fullName} moved ${eco.ecoNumber} to ${to}`,
           type: "eco",
-          link: `/ecos`,
+          link: `/ecos/${eco.id}`,
           refId: eco.id,
           actorId: tenantUser.id,
         }),
