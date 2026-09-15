@@ -1,6 +1,6 @@
 import CFB from "cfb";
 import sharp from "sharp";
-import { inflateSync } from "fflate";
+import { constants as zlibConstants, inflateSync, type ZlibOptions } from "node:zlib";
 
 // ─── Public dispatcher ────────────────────────────────────────────────────
 //
@@ -559,16 +559,19 @@ async function convertCandidate(
   content: Uint8Array,
   detected: CfbStreamInfo["detected"]
 ): Promise<{ data: Uint8Array; mimeType: string } | null> {
+  // A view, not a copy: raw-scan candidates are slices of the whole upload,
+  // and Buffer.from(Uint8Array) would duplicate each one per attempt.
+  const input = Buffer.from(content.buffer, content.byteOffset, content.byteLength);
   try {
     if (detected === "png" || detected === "jpeg") {
-      await sharp(Buffer.from(content)).metadata();
+      await sharp(input).metadata();
       return {
         data: content,
         mimeType: detected === "png" ? "image/png" : "image/jpeg",
       };
     }
     if (detected === "bmp") {
-      const pngBuffer = await sharp(Buffer.from(content)).png().toBuffer();
+      const pngBuffer = await sharp(input).png().toBuffer();
       return { data: new Uint8Array(pngBuffer), mimeType: "image/png" };
     }
     if (detected === "dib") {
@@ -625,12 +628,82 @@ function formatRejected(rejected: { name: string; size: number; detected: string
 // Modern SolidWorks (~2015+) saves files in a proprietary binary container
 // that is NOT an OLE Compound Document. CFB.read throws on them. Instead
 // of giving up, we scan the raw bytes for image signatures at any offset,
-// then also inflate every zlib-compressed section and scan those for
-// images. Between the two, we'll find a raster preview if one is embedded
+// then also look for zlib-compressed sections whose content starts with an
+// image. Between the two, we'll find a raster preview if one is embedded
 // anywhere in the file — no matter what the container structure looks
 // like. If the file genuinely has no preview (the "Save tessellation
 // data" option was off when the file was saved), nothing pure-JS can do
 // will produce a thumbnail — that data simply isn't in the file.
+//
+// Both passes are linear in the file size and every expensive step is
+// capped. The zlib pass used to hand the whole rest of the file to a raw
+// DEFLATE decoder at every `78 xx` pair: it could not decode a zlib stream
+// at all (the two-byte header is not DEFLATE), and it took two minutes and
+// 1.6 GB to scan 100 MB of noise, synchronously, on a shared instance.
+
+const MB = 1024 * 1024;
+
+/**
+ * Nothing larger than this is an embedded preview. SOLIDWORKS previews are
+ * tens to hundreds of KB; the cap is generous, and exists so that a false
+ * signature or a decompression bomb can't hand sharp or zlib most of a file.
+ */
+const MAX_PREVIEW_BYTES = 32 * MB;
+
+/**
+ * Raw signature matches examined per image format before the pass gives up.
+ * A three-byte JPEG start turns up by chance about once per 16 MB of
+ * compressed data; a real file has a handful.
+ */
+const MAX_SIGNATURE_HITS = 1024;
+
+/** Image-bearing zlib streams kept as candidates before the pass gives up. */
+const MAX_ZLIB_CANDIDATES = 256;
+
+/**
+ * Native inflate calls one scan may make. Each costs ~40µs even when zlib
+ * rejects the data on its first byte (mostly building the Error it throws).
+ * Random-looking (compressed) data leaves about one plausible offset per
+ * 8 KB after `couldStartZlibStream`, so this covers ~400 MB of real file.
+ */
+const ZLIB_MAX_ATTEMPTS = 50_000;
+
+/**
+ * Bytes zlib may produce, plus compressed bytes walked by full inflates,
+ * across one scan. Bounds CPU on crafted input, and caps the memory held by
+ * candidates, since everything kept was charged here.
+ */
+const ZLIB_WORK_BUDGET_BYTES = 256 * MB;
+
+/** Output needed to classify a stream: `detectImageType` reads 44 bytes for EMF. */
+const ZLIB_PROBE_OUTPUT_BYTES = 44;
+
+/**
+ * Compressed input handed to the probe, growing ×4 per retry. Stored and
+ * fixed-Huffman blocks yield 44 bytes from the first window; a dynamic
+ * block's code tables can take a few hundred bytes before the first literal.
+ * Starting small keeps a highly compressible stream from inflating a
+ * megabyte just to be classified.
+ */
+const ZLIB_PROBE_FIRST_WINDOW = 64;
+const ZLIB_PROBE_MAX_WINDOW = 4096;
+
+/** Two header bytes plus a dynamic block's header fields and code-length codes. */
+const ZLIB_MIN_STREAM_BYTES = 12;
+
+/**
+ * Compressed input handed to a full inflate. DEFLATE expands incompressible
+ * data by a fraction of a percent (stored blocks cost 5 bytes per 64 KB), so
+ * any stream whose output fits MAX_PREVIEW_BYTES fits in this window.
+ */
+const ZLIB_MAX_STREAM_INPUT = MAX_PREVIEW_BYTES + MB;
+
+interface ImageCandidate {
+  name: string;
+  size: number;
+  detected: CfbStreamInfo["detected"];
+  content: Uint8Array;
+}
 
 async function scanRawBytesForImage(
   bytes: Uint8Array,
@@ -639,96 +712,32 @@ async function scanRawBytesForImage(
   thumbnail: { data: Uint8Array; mimeType: string } | null;
   report: ExtractionReport;
 }> {
-  interface Candidate {
-    name: string;
-    size: number;
-    detected: CfbStreamInfo["detected"];
-    content: Uint8Array;
-  }
-  const candidates: Candidate[] = [];
+  const candidates: ImageCandidate[] = [];
+  const limits: string[] = [];
 
-  // Pass 1: scan the raw file for uncompressed image content.
-  // PNG: 89 50 4E 47 0D 0A 1A 0A. We check the IEND marker to find the
-  // end of the stream, rather than guessing at a length.
-  for (const start of findAllSequences(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
-    const end = indexOfSequence(bytes, [0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82], start);
-    if (end === -1) continue;
-    const content = bytes.subarray(start, end + 8);
-    if (content.length < 100) continue;
-    const name = `raw@${start}`;
-    candidates.push({ name, size: content.length, detected: "png", content });
-    report.streams.push({
-      name,
-      size: content.length,
-      magicHex: hexBytes(content, 8),
-      detected: "png",
-    });
+  // Pass 1: uncompressed images sitting directly in the file.
+  for (const format of RAW_IMAGE_FORMATS) {
+    const limit = collectRawImageCandidates(bytes, format, candidates, report);
+    if (limit) limits.push(limit);
   }
 
-  // JPEG: FF D8 FF ... FF D9. We don't validate the whole JFIF structure,
-  // but we do require the end marker to bound the stream.
-  for (const start of findAllSequences(bytes, [0xff, 0xd8, 0xff])) {
-    const end = indexOfSequence(bytes, [0xff, 0xd9], start + 2);
-    if (end === -1) continue;
-    const content = bytes.subarray(start, end + 2);
-    if (content.length < 100) continue;
-    const name = `raw@${start}`;
-    candidates.push({ name, size: content.length, detected: "jpeg", content });
-    report.streams.push({
-      name,
-      size: content.length,
-      magicHex: hexBytes(content, 8),
-      detected: "jpeg",
-    });
-  }
+  // Pass 2: zlib streams whose inflated content starts with an image. The
+  // new SolidWorks container stores most of its data zlib-compressed; the
+  // preview, if present, may live inside one of those streams.
+  const zlibLimit = collectZlibCandidates(bytes, candidates, report);
+  if (zlibLimit) limits.push(zlibLimit);
 
-  // Pass 2: inflate every zlib-compressed section we can find and scan
-  // the inflated content for images too. The new SolidWorks container
-  // stores most of its data zlib-compressed; the preview, if present,
-  // may live inside one of those streams.
-  const zlibOffsets: number[] = [];
-  for (let i = 0; i < bytes.length - 2; i++) {
-    const a = bytes[i];
-    const b = bytes[i + 1];
-    // Common zlib header bytes: 78 9c (default), 78 da (best), 78 01 (fastest), 78 5e.
-    if (a === 0x78 && (b === 0x9c || b === 0xda || b === 0x01 || b === 0x5e)) {
-      zlibOffsets.push(i);
-    }
-  }
-
-  for (const off of zlibOffsets) {
-    let inflated: Uint8Array;
-    try {
-      inflated = inflateSync(bytes.subarray(off));
-    } catch {
-      continue;
-    }
-    if (inflated.length < 100) continue;
-    const detected = detectImageType(inflated);
-    report.streams.push({
-      name: `zlib@${off}`,
-      size: inflated.length,
-      magicHex: hexBytes(inflated, 8),
-      detected,
-    });
-    if (detected !== "unknown" && detected !== "emf") {
-      candidates.push({
-        name: `zlib@${off}`,
-        size: inflated.length,
-        detected,
-        content: inflated,
-      });
-    }
-  }
+  const limitNote = limits.length > 0 ? ` Scan stopped early: ${limits.join("; ")}.` : "";
 
   if (candidates.length === 0) {
     const hasEmf = report.streams.some((s) => s.detected === "emf");
-    report.reason = hasEmf
-      ? "Only EMF (vector metafile) previews found — pure-JS rasterization isn't supported."
-      : "No raster image found in the raw bytes or in any of the inflated zlib streams. " +
-        'This file likely has no embedded preview at all — SolidWorks\' "Save preview picture" ' +
-        "option was off when it was saved. The only fix is to upload a thumbnail manually or " +
-        "re-save the file in SolidWorks with that option enabled.";
+    report.reason =
+      (hasEmf
+        ? "Only EMF (vector metafile) previews found — pure-JS rasterization isn't supported."
+        : "No raster image found in the raw bytes or in any of the inflated zlib streams. " +
+          'This file likely has no embedded preview at all — SolidWorks\' "Save preview picture" ' +
+          "option was off when it was saved. The only fix is to upload a thumbnail manually or " +
+          "re-save the file in SolidWorks with that option enabled.") + limitNote;
     return { thumbnail: null, report };
   }
 
@@ -741,7 +750,8 @@ async function scanRawBytesForImage(
   if (!converted || !winner) {
     report.reason =
       `All ${candidates.length} image candidates failed to decode through sharp. ` +
-      `Rejected: ${formatRejected(rejected)}.`;
+      `Rejected: ${formatRejected(rejected)}.` +
+      limitNote;
     return { thumbnail: null, report };
   }
 
@@ -753,24 +763,266 @@ async function scanRawBytesForImage(
   return { thumbnail: converted, report };
 }
 
-function findAllSequences(haystack: Uint8Array, needle: number[]): number[] {
-  const hits: number[] = [];
-  let pos = 0;
-  while (pos <= haystack.length - needle.length) {
-    const idx = indexOfSequence(haystack, needle, pos);
-    if (idx === -1) break;
-    hits.push(idx);
-    pos = idx + 1;
-  }
-  return hits;
+interface RawImageFormat {
+  detected: "png" | "jpeg";
+  signature: Buffer;
+  endMarker: Buffer;
+  /** Where, relative to the signature, the end-marker search begins. */
+  endSearchOffset: number;
 }
 
-function indexOfSequence(haystack: Uint8Array, needle: number[], from = 0): number {
-  outer: for (let i = from; i <= haystack.length - needle.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) continue outer;
+const RAW_IMAGE_FORMATS: RawImageFormat[] = [
+  // PNG: 89 50 4E 47 0D 0A 1A 0A. We look for the IEND chunk (its type and
+  // fixed CRC) to find the end of the stream, rather than guessing a length.
+  {
+    detected: "png",
+    signature: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    endMarker: Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]),
+    endSearchOffset: 0,
+  },
+  // JPEG: FF D8 FF ... FF D9. We don't validate the whole JFIF structure,
+  // but we do require the end marker to bound the stream.
+  {
+    detected: "jpeg",
+    signature: Buffer.from([0xff, 0xd8, 0xff]),
+    endMarker: Buffer.from([0xff, 0xd9]),
+    endSearchOffset: 2,
+  },
+];
+
+/**
+ * Add every raw `format` image in `bytes` to `candidates`. Returns a note
+ * when the signature cap cut the pass short, otherwise null.
+ *
+ * Each signature pairs with the first end marker after it. Searching afresh
+ * from every signature is quadratic when many signatures share one distant
+ * end marker (or none), so the last marker found is reused while it still
+ * lies ahead: every stretch of the file is searched once.
+ */
+function collectRawImageCandidates(
+  bytes: Uint8Array,
+  format: RawImageFormat,
+  candidates: ImageCandidate[],
+  report: ExtractionReport
+): string | null {
+  const haystack = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let hits = 0;
+  let end = -1;
+  for (
+    let start = haystack.indexOf(format.signature);
+    start !== -1;
+    start = haystack.indexOf(format.signature, start + 1)
+  ) {
+    if (++hits > MAX_SIGNATURE_HITS) {
+      return `found more than ${MAX_SIGNATURE_HITS} raw ${format.detected} signatures, the next at byte ${start}`;
     }
-    return i;
+    const searchFrom = start + format.endSearchOffset;
+    if (end < searchFrom) {
+      end = haystack.indexOf(format.endMarker, searchFrom);
+      // No end marker after this signature means none after any later one.
+      if (end === -1) break;
+    }
+    const content = bytes.subarray(start, end + format.endMarker.length);
+    if (content.length < 100 || content.length > MAX_PREVIEW_BYTES) continue;
+    const name = `raw@${start}`;
+    candidates.push({ name, size: content.length, detected: format.detected, content });
+    report.streams.push({
+      name,
+      size: content.length,
+      magicHex: hexBytes(content, 8),
+      detected: format.detected,
+    });
   }
-  return -1;
+  return null;
+}
+
+/**
+ * Add every zlib stream in `bytes` that inflates to an image to
+ * `candidates`. Returns a note when a limit cut the pass short, otherwise
+ * null.
+ *
+ * Per plausible offset: a cheap header check in JS, then a probe that
+ * inflates only the first few dozen bytes, and a full inflate — capped at
+ * MAX_PREVIEW_BYTES — only when those bytes are an image signature. A stream
+ * that inflates fully is skipped past, since nothing else can start inside
+ * it. Node's zlib does the decoding: it reads a zlib stream (header and
+ * Adler-32 trailer included), stops at the stream's end regardless of what
+ * follows, rejects corrupt data within a few bytes, and can be told to stop
+ * at an output size.
+ */
+function collectZlibCandidates(
+  bytes: Uint8Array,
+  candidates: ImageCandidate[],
+  report: ExtractionReport
+): string | null {
+  let attempts = 0;
+  let work = 0;
+  let kept = 0;
+
+  for (let off = 0; off + ZLIB_MIN_STREAM_BYTES <= bytes.length; off++) {
+    if (!couldStartZlibStream(bytes, off)) continue;
+
+    if (attempts >= ZLIB_MAX_ATTEMPTS) {
+      return `reached the ${ZLIB_MAX_ATTEMPTS}-attempt zlib limit at byte ${off}`;
+    }
+    if (work >= ZLIB_WORK_BUDGET_BYTES) {
+      return `spent the ${ZLIB_WORK_BUDGET_BYTES / MB} MB zlib work budget by byte ${off}`;
+    }
+    const probe = probeZlibStream(bytes, off);
+    attempts += probe.attempts;
+    work += probe.outputBytes;
+    if (!probe.prefix) continue;
+
+    const detected = detectImageType(probe.prefix);
+    if (detected === "unknown") continue;
+
+    if (kept >= MAX_ZLIB_CANDIDATES) {
+      return `found more than ${MAX_ZLIB_CANDIDATES} zlib image streams, the next at byte ${off}`;
+    }
+    // Charge the worst case up front, so a stream that fails part-way
+    // through can't overrun the budget.
+    const worstCase = Math.min(bytes.length - off, ZLIB_MAX_STREAM_INPUT) + MAX_PREVIEW_BYTES;
+    if (work + worstCase > ZLIB_WORK_BUDGET_BYTES) {
+      return `spent the ${ZLIB_WORK_BUDGET_BYTES / MB} MB zlib work budget by byte ${off}`;
+    }
+    attempts++;
+    let stream: { output: Uint8Array; consumed: number };
+    try {
+      stream = inflateCounted(bytes.subarray(off, off + ZLIB_MAX_STREAM_INPUT), {
+        maxOutputLength: MAX_PREVIEW_BYTES,
+      });
+    } catch {
+      // Corrupt past the probe, truncated, or larger than any preview.
+      work += worstCase;
+      continue;
+    }
+    work += stream.consumed + stream.output.length;
+    const name = `zlib@${off}`;
+    off += stream.consumed - 1;
+
+    const content = stream.output;
+    if (content.length < 100) continue;
+    report.streams.push({
+      name,
+      size: content.length,
+      magicHex: hexBytes(content, 8),
+      detected,
+    });
+    if (detected === "emf") continue;
+    candidates.push({ name, size: content.length, detected, content });
+    kept++;
+  }
+  return null;
+}
+
+/**
+ * Inflate just enough of the stream at `off` to classify it. `prefix` is
+ * null when zlib rejects the data or the stream ends too soon to hold an
+ * image signature.
+ */
+function probeZlibStream(
+  bytes: Uint8Array,
+  off: number
+): { prefix: Uint8Array | null; attempts: number; outputBytes: number } {
+  let attempts = 0;
+  let outputBytes = 0;
+  for (let window = ZLIB_PROBE_FIRST_WINDOW; ; window *= 4) {
+    const input = bytes.subarray(off, off + window);
+    attempts++;
+    let result: { output: Uint8Array; consumed: number };
+    try {
+      // Z_SYNC_FLUSH returns what the truncated input decodes to instead of
+      // throwing "unexpected end of file". Corrupt data still throws.
+      result = inflateCounted(input, { finishFlush: zlibConstants.Z_SYNC_FLUSH });
+    } catch {
+      return { prefix: null, attempts, outputBytes };
+    }
+    outputBytes += result.output.length;
+    if (result.output.length >= ZLIB_PROBE_OUTPUT_BYTES) {
+      return { prefix: result.output, attempts, outputBytes };
+    }
+    const streamEnded = result.consumed < input.length;
+    const sawEverything = input.length < window || window >= ZLIB_PROBE_MAX_WINDOW;
+    if (streamEnded || sawEverything) return { prefix: null, attempts, outputBytes };
+  }
+}
+
+/**
+ * `zlib.inflateSync` plus how many input bytes the stream occupied, which
+ * is less than the input when the stream ends before it does. `info: true`
+ * is the documented way to get the engine back; @types/node doesn't model
+ * the changed return type.
+ */
+function inflateCounted(
+  input: Uint8Array,
+  options: ZlibOptions
+): { output: Uint8Array; consumed: number } {
+  const { buffer, engine } = inflateSync(input, { ...options, info: true }) as unknown as {
+    buffer: Buffer;
+    engine: { bytesWritten: number };
+  };
+  return {
+    output: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+    consumed: engine.bytesWritten,
+  };
+}
+
+/**
+ * Whether a zlib stream could begin at `off`, from the bytes zlib checks
+ * before it produces any output. Each test mirrors a check zlib itself
+ * makes, so this rejects nothing zlib would decode; it exists because
+ * compressed data is full of offsets that pass the two-byte header check
+ * (about one in 2 KB) and a native call per offset is the scan's main cost.
+ */
+function couldStartZlibStream(bytes: Uint8Array, off: number): boolean {
+  if (off + ZLIB_MIN_STREAM_BYTES > bytes.length) return false;
+
+  // RFC 1950 header: CM = 8 (deflate), CINFO ≤ 7 (window ≤ 32K), FCHECK
+  // makes CMF·256 + FLG a multiple of 31, and no preset dictionary (FDICT),
+  // which we would have no way to supply.
+  const cmf = bytes[off];
+  const flg = bytes[off + 1];
+  if ((cmf & 0x0f) !== 8 || cmf >> 4 > 7) return false;
+  if (((cmf << 8) | flg) % 31 !== 0 || flg & 0x20) return false;
+
+  // RFC 1951 first block header: BFINAL (1 bit), then BTYPE (2 bits).
+  const block = (off + 2) * 8;
+  const blockType = readBits(bytes, block + 1, 2);
+
+  if (blockType === 0) {
+    // Stored: LEN then its one's complement NLEN, from the next whole byte.
+    const len = bytes[off + 3] | (bytes[off + 4] << 8);
+    const nlen = bytes[off + 5] | (bytes[off + 6] << 8);
+    return len === (~nlen & 0xffff);
+  }
+  if (blockType === 1) return true; // fixed Huffman: nothing cheap left to check
+  if (blockType === 3) return false; // reserved
+
+  // Dynamic Huffman. zlib refuses more than 286 literal/length or 30
+  // distance codes, and a code-length code that is not a complete prefix
+  // code (over-subscribed or incomplete).
+  const literalCodes = readBits(bytes, block + 3, 5) + 257;
+  const distanceCodes = readBits(bytes, block + 8, 5) + 1;
+  const codeLengthCodes = readBits(bytes, block + 13, 4) + 4;
+  if (literalCodes > 286 || distanceCodes > 30) return false;
+  const lengthCounts = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < codeLengthCodes; i++) {
+    lengthCounts[readBits(bytes, block + 17 + i * 3, 3)]++;
+  }
+  let unused = 1;
+  for (let length = 1; length <= 7; length++) {
+    unused = unused * 2 - lengthCounts[length];
+    if (unused < 0) return false;
+  }
+  return unused === 0;
+}
+
+/** `count` bits starting at bit `bitPos`, least-significant bit first (RFC 1951 order). */
+function readBits(bytes: Uint8Array, bitPos: number, count: number): number {
+  let value = 0;
+  for (let i = 0; i < count; i++) {
+    const at = bitPos + i;
+    value |= ((bytes[at >> 3] >> (at & 7)) & 1) << i;
+  }
+  return value;
 }
