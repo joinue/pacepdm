@@ -7,19 +7,28 @@ import { NextRequest } from "next/server";
  * rows should land the 497.
  *
  * These tests cover the third outcome that sits between those two: a row that
- * lands but carries something worth a second look. Today that is a revision
- * using a letter ASME Y14.35 reserves. An imported part at revision `S` is a
+ * lands but carries something worth a second look. Today that is a number cell
+ * that does not parse, or a revision using a letter ASME Y14.35 reserves. An
+ * imported part at revision `S` is a
  * fact about the source system, not a mistake this importer gets to refuse —
  * but `nextRevision` cannot sequence it, so the first person to revise that
  * part will be asked for the next revision by hand, and the import is where
  * they should find out why.
  */
 
-const { tableResults, inserts, updates, mockFrom } = vi.hoisted(() => {
+const { tableResults, inserts, updates, mockFrom, resetMockDb } = vi.hoisted(() => {
   type QueryResult = { data: unknown; error: unknown };
+  type ListQuery = { in?: [string, unknown[]]; order?: string; range?: [number, number] };
   const tableResults: Record<string, QueryResult> = {};
   const inserts: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
+  /** Part numbers a parts insert has landed, for the unique index below. */
+  const landedParts = new Set<string>();
+  /** Unordered list reads served so far, per table. */
+  const unorderedReads: Record<string, number> = {};
+
+  /** PostgREST's max-rows: no list read returns more, however it asks. */
+  const POSTGREST_MAX_ROWS = 1000;
 
   /**
    * The NOT NULL columns this mock enforces, so an insert that would be
@@ -48,19 +57,80 @@ const { tableResults, inserts, updates, mockFrom } = vi.hoisted(() => {
     return null;
   }
 
+  /**
+   * `parts_tenantId_partNumber_key`, enforced so that inserting a part number
+   * which already exists fails here the way it fails in Postgres, rather than
+   * quietly landing a duplicate that every count then includes.
+   */
+  function uniqueViolation(table: string, data: Record<string, unknown>) {
+    if (table !== "parts") return null;
+    const library = tableResults.parts?.data;
+    const taken =
+      landedParts.has(String(data.partNumber)) ||
+      (Array.isArray(library) &&
+        library.some((p) => (p as Record<string, unknown>).partNumber === data.partNumber));
+    return taken
+      ? {
+          code: "23505",
+          message: `duplicate key value violates unique constraint "parts_tenantId_partNumber_key"`,
+        }
+      : null;
+  }
+
+  /**
+   * Answer a list read the way PostgREST would: `.in()` filters, `.order()`
+   * sorts, `.range()` slices, and nothing comes back past max-rows.
+   *
+   * Without `.order()` Postgres promises no order at all, and two reads of the
+   * same table may disagree. The fake makes that concrete by serving every
+   * second unordered read reversed, so paging without an order skips rows here
+   * the way it can in production.
+   */
+  function listResult(table: string, result: QueryResult, q: ListQuery): QueryResult {
+    if (!Array.isArray(result.data)) return result;
+    let rows = result.data as Array<Record<string, unknown>>;
+    if (q.in) {
+      const [col, values] = q.in;
+      const wanted = new Set(values);
+      rows = rows.filter((r) => wanted.has(r[col]));
+    }
+    if (q.order) {
+      const col = q.order;
+      rows = [...rows].sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : 1));
+    } else {
+      unorderedReads[table] = (unorderedReads[table] ?? 0) + 1;
+      if (unorderedReads[table] % 2 === 0) rows = [...rows].reverse();
+    }
+    if (q.range) rows = rows.slice(q.range[0], q.range[1] + 1);
+    return { ...result, data: rows.slice(0, POSTGREST_MAX_ROWS) };
+  }
+
   function makeChain(table: string) {
     const chain: Record<string, (...args: unknown[]) => unknown> = {};
+    const query: ListQuery = {};
     const resolvable = () => tableResults[table] ?? { data: null, error: null };
+    for (const m of ["select", "eq", "neq", "is", "limit"] as const) chain[m] = () => chain;
+    chain.in = (col, values) => {
+      query.in = [col as string, values as unknown[]];
+      return chain;
+    };
+    chain.order = (col) => {
+      query.order = col as string;
+      return chain;
+    };
     // `range` is what the QuickBooks path uses to page the tenant's own parts
     // rather than querying by 6,000 part numbers.
-    for (const m of ["select", "eq", "neq", "in", "is", "order", "limit", "range"] as const)
-      chain[m] = () => chain;
+    chain.range = (from, to) => {
+      query.range = [from as number, to as number];
+      return chain;
+    };
     chain.single = () => resolvable();
     chain.maybeSingle = () => resolvable();
     chain.insert = (data: unknown) => {
       const row = data as Record<string, unknown>;
       inserts.push({ __table: table, ...row });
-      const error = notNullViolation(table, row);
+      const error = notNullViolation(table, row) ?? uniqueViolation(table, row);
+      if (!error && table === "parts") landedParts.add(String(row.partNumber));
       const result = { data: error ? null : { ...row }, error };
       // An insert is awaited directly in some places and chained through
       // `.select().single()` in others, so the mock has to be both.
@@ -72,18 +142,34 @@ const { tableResults, inserts, updates, mockFrom } = vi.hoisted(() => {
       return ins;
     };
     chain.update = (data: unknown) => {
-      updates.push({ __table: table, ...(data as Record<string, unknown>) });
+      const entry: Record<string, unknown> = {
+        __table: table,
+        ...(data as Record<string, unknown>),
+      };
+      updates.push(entry);
       const u: Record<string, (...a: unknown[]) => unknown> = {};
-      u.eq = () => u;
+      // Which row the update targeted, so a test can tell two parts apart.
+      u.eq = (col, val) => {
+        if (col === "id") entry.__id = val;
+        return u;
+      };
       u.neq = () => u;
       u.then = ((r: (v: unknown) => void) => r({ data: null, error: null })) as never;
       return u;
     };
-    chain.then = ((r: (v: unknown) => void) => r(resolvable())) as never;
+    chain.then = ((r: (v: unknown) => void) => r(listResult(table, resolvable(), query))) as never;
     return chain;
   }
 
-  return { tableResults, inserts, updates, mockFrom: (t: string) => makeChain(t) };
+  function resetMockDb() {
+    inserts.length = 0;
+    updates.length = 0;
+    landedParts.clear();
+    for (const k of Object.keys(tableResults)) delete tableResults[k];
+    for (const k of Object.keys(unorderedReads)) delete unorderedReads[k];
+  }
+
+  return { tableResults, inserts, updates, resetMockDb, mockFrom: (t: string) => makeChain(t) };
 });
 
 const mockTenantUser = vi.hoisted(() => ({
@@ -131,9 +217,7 @@ const HEADER = "Part Number,Name,Revision";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  inserts.length = 0;
-  updates.length = 0;
-  for (const k of Object.keys(tableResults)) delete tableResults[k];
+  resetMockDb();
   tableResults.parts = { data: [], error: null }; // nothing exists yet
   mockTenantUser.current = engineer;
 });
@@ -296,6 +380,152 @@ describe("POST /api/parts/import — row outcomes", () => {
   it("numbers rows from 2, so a row number matches the spreadsheet", async () => {
     const body = await (await POST(csv(`${HEADER}\nPN-1,Bracket,A\nPN-2,Housing,B`))).json();
     expect(body.results.map((r: { row: number }) => r.row)).toEqual([2, 3]);
+  });
+});
+
+/**
+ * An import never erases a value. Updating used to write null for every
+ * column the sheet did not have, so re-importing `Part Number,Name,Category`
+ * wiped every description and cost in the library, and a sheet without a
+ * Category column turned every sub-assembly back into MANUFACTURED.
+ */
+describe("POST /api/parts/import — updating an existing part", () => {
+  /** The fields the update wrote, without the mock's bookkeeping. */
+  function partUpdate() {
+    const update = updates.find((u) => u.__table === "parts");
+    expect(update).toBeDefined();
+    return Object.fromEntries(Object.entries(update!).filter(([k]) => !k.startsWith("__")));
+  }
+
+  beforeEach(() => {
+    tableResults.parts = { data: [{ id: "part-1", partNumber: "PN-1" }], error: null };
+  });
+
+  it("writes only the columns the sheet has", async () => {
+    const body = await (
+      await POST(csv("Part Number,Name,Category\nPN-1,Bracket,Sub Assembly"))
+    ).json();
+    expect(body.updated).toBe(1);
+    expect(Object.keys(partUpdate()).sort()).toEqual([
+      "category",
+      "deletedAt",
+      "name",
+      "updatedAt",
+    ]);
+    // Re-importing a soft-deleted part still brings it back.
+    expect(partUpdate()).toMatchObject({ category: "SUB_ASSEMBLY", deletedAt: null });
+  });
+
+  it("does not reset the category of a sheet that has no Category column", async () => {
+    await POST(csv("Part Number,Name,Unit Cost\nPN-1,Bracket,12.50"));
+    expect(partUpdate().unitCost).toBe(12.5);
+    expect(partUpdate()).not.toHaveProperty("category");
+  });
+
+  it("leaves a value alone when its cell is blank", async () => {
+    await POST(
+      csv("Part Number,Name,Description,Category,Unit Cost,Notes\nPN-1,Bracket,Machined,,,")
+    );
+    expect(partUpdate().description).toBe("Machined");
+    for (const blank of ["category", "unitCost", "notes"]) {
+      expect(partUpdate()).not.toHaveProperty(blank);
+    }
+  });
+
+  it("leaves an unparseable number unchanged and names the cell", async () => {
+    const body = await (
+      await POST(csv(`Part Number,Name,Weight,Unit Cost\nPN-1,Bracket,2.5 kg,"€1.234,50"`))
+    ).json();
+
+    expect(partUpdate()).not.toHaveProperty("weight");
+    expect(partUpdate()).not.toHaveProperty("unitCost");
+    // The row still landed — this is a warning, not a failure.
+    expect(body).toMatchObject({ updated: 1, failed: 0, warned: 1 });
+    expect(body.results[0].action).toBe("updated");
+    expect(body.results[0].warning).toContain(`Weight "2.5 kg"`);
+    expect(body.results[0].warning).toContain(`Unit Cost "€1.234,50"`);
+    expect(body.results[0].warning).toMatch(/unchanged/);
+  });
+
+  it("adds a number warning to a revision warning rather than replacing it", async () => {
+    const body = await (
+      await POST(csv("Part Number,Name,Revision,Unit Cost\nPN-1,Bracket,S,about ten"))
+    ).json();
+    expect(body.warned).toBe(1);
+    expect(body.results[0].warning).toContain("Y14.35");
+    expect(body.results[0].warning).toContain(`Unit Cost "about ten"`);
+  });
+});
+
+describe("POST /api/parts/import — inserting a new part", () => {
+  it("keeps the defaults, and warns on an unparseable number", async () => {
+    const body = await (await POST(csv("Part Number,Name,Unit Cost\nPN-9,Widget,TBD"))).json();
+
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toMatchObject({
+      category: "MANUFACTURED",
+      revision: "A",
+      lifecycleState: "WIP",
+      weightUnit: "kg",
+      currency: "USD",
+      unit: "EA",
+      unitCost: null,
+    });
+    expect(body).toMatchObject({ inserted: 1, failed: 0, warned: 1 });
+    expect(body.results[0].warning).toContain(`Unit Cost "TBD"`);
+    expect(body.results[0].warning).toMatch(/left blank/);
+  });
+});
+
+/**
+ * Deciding insert-or-update rests entirely on the lookup of existing part
+ * numbers. When it misses a part, that row goes down the insert path and fails
+ * on the unique index — so a lookup that misses silently fails rows loudly.
+ */
+describe("POST /api/parts/import — finding existing parts", () => {
+  const pn = (i: number) => `PN-${String(i).padStart(4, "0")}`;
+
+  /**
+   * One `.in()` over every part number came back capped at PostgREST's 1,000
+   * rows, and every existing part past the cap failed with a duplicate key.
+   */
+  it("updates every existing part in a sheet larger than PostgREST's row cap", async () => {
+    const count = 1500;
+    tableResults.parts = {
+      data: Array.from({ length: count }, (_, i) => ({ id: `part-${i}`, partNumber: pn(i) })),
+      error: null,
+    };
+    const rows = Array.from({ length: count }, (_, i) => `${pn(i)},Part ${i},A`).join("\n");
+    const body = await (await POST(csv(`${HEADER}\n${rows}`))).json();
+
+    expect(body).toMatchObject({ updated: count, inserted: 0, failed: 0 });
+    expect(inserts).toHaveLength(0);
+    expect(new Set(updates.map((u) => u.__id)).size).toBe(count);
+  });
+
+  it("fails the import rather than guessing when the lookup fails", async () => {
+    tableResults.parts = {
+      data: null,
+      error: { message: "canceling statement due to statement timeout" },
+    };
+    const res = await POST(csv(`${HEADER}\nPN-1,Bracket,A`));
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toMatch(/statement timeout/);
+    expect(inserts).toHaveLength(0);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("updates the part an earlier row of the same file created", async () => {
+    const body = await (
+      await POST(csv("Part Number,Name,Description\nPN-1,Bracket,First\nPN-1,Bracket,Second"))
+    ).json();
+
+    expect(body).toMatchObject({ inserted: 1, updated: 1, failed: 0 });
+    expect(inserts).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ __id: "mock-uuid", description: "Second" });
+    expect(body.results.map((r: { action: string }) => r.action)).toEqual(["inserted", "updated"]);
   });
 });
 
@@ -551,6 +781,32 @@ describe("POST /api/parts/import — QuickBooks export", () => {
     ].join("\n");
     const body = await (await POST(csv(`${QB_HEADER}\n${rows}`))).json();
     expect(body.results[0].warning).toMatch(/two parts sharing a number/i);
+  });
+
+  /**
+   * The library is read a page at a time. Without an ORDER BY, Postgres may
+   * return a different order for each page, so pages overlap and skip parts —
+   * which then read as `notInLibrary` and quietly receive nothing.
+   */
+  it("finds a part on the second page of a library larger than one page", async () => {
+    givenLibrary(
+      Array.from({ length: 1500 }, (_, i) => {
+        const partNumber = `PN-${String(i).padStart(4, "0")}`;
+        return {
+          id: `p${String(i).padStart(4, "0")}`,
+          partNumber,
+          revision: null,
+          name: partNumber,
+        };
+      })
+    );
+    const body = await (
+      await POST(csv(`${QB_HEADER}\n${qbRow("A:B:PN-1200", "Gearbox", "41.00", "Kunshan")}`))
+    ).json();
+
+    expect(body.notInLibrary).toBe(0);
+    expect(body.updated).toBe(1);
+    expect(lastUpdateTo("parts").unitCost).toBe(41);
   });
 
   it("does not fall through to the generic importer's Name requirement", async () => {

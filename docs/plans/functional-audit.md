@@ -477,6 +477,27 @@ Managing access on an unrestricted folder is `FOLDER_MANAGE_ACCESS` only. The
 predicate is the only thing that changed, so it holds for the access route
 whether or not it has been moved onto `withTenant` yet.
 
+### ~~B. Re-importing parts erased what the sheet left out~~ Fixed 2026-09-14
+
+The generic CSV path of `POST /api/parts/import` built every absent column as
+null and wrote the whole row on update, with category defaulting to
+`MANUFACTURED`. A three-column sheet — the bulk category fix
+[`cad-erp-integration.md`](cad-erp-integration.md) recommends — wiped
+descriptions, materials, weights, costs and notes library-wide, and reported
+every row as `updated`.
+
+Two volume faults sat behind it. The existing-part lookup was one `.in()` over
+every part number, capped at 1,000 rows with its error discarded, so re-importing
+a larger sheet sent the overflow down the insert path to fail on the unique
+index. And the QuickBooks path paged with `.range()` and no `.order()`, which
+is not stable between requests.
+
+An update now writes only cells with a value; the lookup is chunked and throws;
+a part number repeated in one file updates the row inserted above it; the
+QuickBooks pages are ordered. The test mock now caps at 1,000 rows, enforces
+the unique index and reverses unordered reads — a mock that does none of that is
+why none of this was caught.
+
 ---
 
 ## Related

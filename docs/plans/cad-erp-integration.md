@@ -104,7 +104,13 @@ Behaviour worth knowing before re-running it:
   `SUB_ASSEMBLY`; everything else takes the `MANUFACTURED` default. The source
   distinguishes only "Finished Good" from "Raw Good", which says nothing about
   whether a leaf is machined or bought. Fix in bulk later via
-  `POST /api/parts/import`.
+  `POST /api/parts/import` — a `Part Number,Name,Category` sheet changes only
+  the category. **Until 2026-09-14 it did not:** the generic path wrote null
+  for every column a sheet left out and reset a blank category to
+  `MANUFACTURED`, so exactly that sheet would have erased every description and
+  cost in the library. An update now never writes a blank or absent cell, and
+  a number that does not parse is skipped with a row warning. The flip side is
+  that an import cannot clear a field; that is an edit in the part form.
 
 ### What the build list does not carry
 

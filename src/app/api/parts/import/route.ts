@@ -31,8 +31,9 @@ type TenantUser = NonNullable<Awaited<ReturnType<typeof getApiTenantUser>>>;
  * The request body is the raw CSV as text (Content-Type: text/csv) or
  * as a FormData field `file`. Header names are normalized (lowercased,
  * trimmed) and matched against the column map below. Extra columns are
- * ignored. Missing columns default to null except for partNumber and
- * name, which are required.
+ * ignored. partNumber and name are required. A new part takes the
+ * defaults for anything else the sheet leaves out; an existing part keeps
+ * whatever the sheet leaves out or leaves blank — see the update below.
  *
  * We intentionally do NOT wrap the import in a transaction. A 500-row
  * spreadsheet with 3 bad rows should land the 497 good ones and
@@ -73,11 +74,15 @@ const VALID_CATEGORIES = new Set([
   "SUB_ASSEMBLY",
 ]);
 
+/**
+ * One sheet row. Every optional field is null when the sheet has nothing to
+ * say about it — the column is absent, or its cell is blank.
+ */
 interface ParsedRow {
   partNumber: string;
   name: string;
   description: string | null;
-  category: string;
+  category: string | null;
   revision: string | null;
   lifecycleState: string | null;
   material: string | null;
@@ -87,7 +92,24 @@ interface ParsedRow {
   currency: string | null;
   unit: string | null;
   notes: string | null;
+  /** Number cells that had something in them but did not parse. */
+  unparsedNumbers: Array<{ column: string; raw: string }>;
 }
+
+/** The optional fields an update writes, each only when the row has a value. */
+const UPDATABLE_FIELDS = [
+  "description",
+  "category",
+  "revision",
+  "lifecycleState",
+  "material",
+  "weight",
+  "weightUnit",
+  "unitCost",
+  "currency",
+  "unit",
+  "notes",
+] as const satisfies ReadonlyArray<keyof ParsedRow>;
 
 interface RowResult {
   row: number;
@@ -104,7 +126,12 @@ interface RowResult {
 /**
  * Non-fatal observations about a row that is otherwise fine.
  *
- * Currently one: a revision using a letter ASME Y14.35 reserves. The standard
+ * A number cell that does not parse — `2.5 kg`, `€1.234,50` — is one. It used
+ * to become null without a word, which on an update erased the value the part
+ * already had. It is now skipped and named here, so the user can see which
+ * cell was not taken rather than find a missing cost later.
+ *
+ * The other is a revision using a letter ASME Y14.35 reserves. The standard
  * excludes I, O, Q, S, X and Z because they misread — I and O as 1 and 0, Q as
  * O, S as 5, Z as 2, and X means experimental.
  *
@@ -115,15 +142,22 @@ interface RowResult {
  * first person to revise that part will be told to set the revision by hand,
  * and this is where they find out why.
  */
-function warningsFor(parsed: ParsedRow): string | undefined {
+function warningsFor(parsed: ParsedRow, updating: boolean): string | undefined {
+  const notes: string[] = [];
   if (parsed.revision && usesReservedLetter(parsed.revision)) {
-    return (
+    notes.push(
       `Revision "${parsed.revision}" uses a letter ASME Y14.35 reserves ` +
-      `(I, O, Q, S, X, Z). Imported as-is, but it cannot be sequenced — ` +
-      `revising this part will ask for the next revision by hand.`
+        `(I, O, Q, S, X, Z). Imported as-is, but it cannot be sequenced — ` +
+        `revising this part will ask for the next revision by hand.`
     );
   }
-  return undefined;
+  for (const { column, raw } of parsed.unparsedNumbers) {
+    notes.push(
+      `${column} "${raw}" is not a number, so ` +
+        (updating ? `the part's existing value was left unchanged.` : `it was left blank.`)
+    );
+  }
+  return notes.length > 0 ? notes.join(" ") : undefined;
 }
 
 function parseOptionalNumber(value: string): number | null {
@@ -155,13 +189,24 @@ function buildRow(
   if (!partNumber) return { error: "Missing Part Number" };
   if (!name) return { error: "Missing Name" };
 
-  const categoryRaw = field("category").toUpperCase().replace(/\s+/g, "_");
-  const category = categoryRaw || "MANUFACTURED";
-  if (!VALID_CATEGORIES.has(category)) {
+  // Null when blank, so an update leaves the part's category alone; only an
+  // insert falls back to MANUFACTURED.
+  const category = field("category").toUpperCase().replace(/\s+/g, "_") || null;
+  if (category !== null && !VALID_CATEGORIES.has(category)) {
     return {
       error: `Invalid category "${field("category")}" (allowed: ${Array.from(VALID_CATEGORIES).join(", ")})`,
     };
   }
+
+  // A cell that has something in it but does not parse is recorded rather
+  // than collapsed into a blank, so the row can say which one it skipped.
+  const unparsedNumbers: ParsedRow["unparsedNumbers"] = [];
+  const numberField = (name: string, column: string): number | null => {
+    const raw = field(name);
+    const n = parseOptionalNumber(raw);
+    if (raw && n === null) unparsedNumbers.push({ column, raw });
+    return n;
+  };
 
   return {
     row: {
@@ -172,12 +217,13 @@ function buildRow(
       revision: field("revision") || null,
       lifecycleState: field("lifecycleState") || null,
       material: field("material") || null,
-      weight: parseOptionalNumber(field("weight")),
+      weight: numberField("weight", "Weight"),
       weightUnit: field("weightUnit") || null,
-      unitCost: parseOptionalNumber(field("unitCost")),
+      unitCost: numberField("unitCost", "Unit Cost"),
       currency: field("currency") || null,
       unit: field("unit") || null,
       notes: field("notes") || null,
+      unparsedNumbers,
     },
   };
 }
@@ -331,6 +377,10 @@ async function importFromQuickBooks(
   // Read the tenant's own parts rather than querying by 6,000 part numbers.
   // A `.in()` filter with that many values produces a URL PostgREST refuses,
   // and the library is inherently the smaller side of this join.
+  //
+  // Ordered, because `.range()` pages over whatever order Postgres returns and
+  // without an ORDER BY that order is not stable between requests — pages can
+  // overlap and skip parts, which would then be reported as notInLibrary.
   const existing = new Map<
     string,
     { id: string; partNumber: string; revision: string | null; name: string }
@@ -342,6 +392,7 @@ async function importFromQuickBooks(
       .select("id, partNumber, revision, name")
       .eq("tenantId", tenantUser.tenantId)
       .is("deletedAt", null)
+      .order("id")
       .range(offset, offset + PAGE - 1);
     if (error) throw new Error(error.message);
     for (const p of data ?? []) existing.set(p.partNumber as string, p as never);
@@ -539,8 +590,7 @@ export const POST = withTenant(
     }
 
     // Fetch every existing part in this tenant that matches any
-    // incoming partNumber, in one round trip. We use this to decide
-    // insert vs update per row.
+    // incoming partNumber. We use this to decide insert vs update per row.
     const incomingPartNumbers = Array.from(
       new Set(
         rows
@@ -558,17 +608,26 @@ export const POST = withTenant(
     );
 
     const existingById = new Map<string, { id: string }>();
-    if (incomingPartNumbers.length > 0) {
+    // In chunks, and a failed lookup fails the import. This was one `.in()`
+    // over every part number with its error discarded. PostgREST caps a
+    // response at 1,000 rows, so re-importing a larger sheet sent every
+    // existing part past the cap down the insert path to fail on the unique
+    // index — and a long enough `.in()` list is a URL the gateway refuses.
+    // Part numbers are unique per tenant, so a chunk can never return more
+    // rows than it has part numbers, which keeps each one under the cap.
+    const LOOKUP_CHUNK = 100;
+    for (let i = 0; i < incomingPartNumbers.length; i += LOOKUP_CHUNK) {
       // Includes soft-deleted parts on purpose. parts_tenantId_partNumber_key
       // is a plain unique index, so a deleted part still owns its part
       // number; treating it as absent would send the row down the insert
       // path and fail it with a 23505 the importer can't recover from.
       // Matching it means a re-import revives the row instead.
-      const { data: existing } = await db
+      const { data: existing, error } = await db
         .from("parts")
         .select("id, partNumber")
         .eq("tenantId", tenantUser.tenantId)
-        .in("partNumber", incomingPartNumbers);
+        .in("partNumber", incomingPartNumbers.slice(i, i + LOOKUP_CHUNK));
+      if (error) throw new Error(`Could not look up existing parts: ${error.message}`);
       for (const row of existing ?? []) {
         existingById.set(row.partNumber, { id: row.id });
       }
@@ -601,32 +660,29 @@ export const POST = withTenant(
 
       const parsed = built.row;
       const existing = existingById.get(parsed.partNumber);
-      const warning = warningsFor(parsed);
+      const warning = warningsFor(parsed, !!existing);
       if (warning) warned++;
 
       try {
         if (existing) {
-          const { error } = await db
-            .from("parts")
-            .update({
-              name: parsed.name,
-              description: parsed.description,
-              category: parsed.category,
-              revision: parsed.revision ?? undefined,
-              lifecycleState: parsed.lifecycleState ?? undefined,
-              material: parsed.material,
-              weight: parsed.weight,
-              weightUnit: parsed.weightUnit ?? undefined,
-              unitCost: parsed.unitCost,
-              currency: parsed.currency ?? undefined,
-              unit: parsed.unit ?? undefined,
-              notes: parsed.notes,
-              updatedAt: now,
-              // Re-importing a part number that was soft-deleted brings it
-              // back, rather than updating a row the user can't see.
-              deletedAt: null,
-            })
-            .eq("id", existing.id);
+          const changes: Record<string, unknown> = {
+            name: parsed.name,
+            updatedAt: now,
+            // Re-importing a part number that was soft-deleted brings it
+            // back, rather than updating a row the user can't see.
+            deletedAt: null,
+          };
+          // An import never erases a value. A column the sheet does not have
+          // is not written, and neither is a blank cell in one it does: a
+          // spreadsheet cannot tell "clear this" from "nothing to say", and
+          // reading it as the first wiped every description and cost in the
+          // library whenever someone re-imported a sheet of a few columns.
+          // An unparseable number is null here too, so it is skipped and
+          // warned about rather than written.
+          for (const key of UPDATABLE_FIELDS) {
+            if (parsed[key] !== null) changes[key] = parsed[key];
+          }
+          const { error } = await db.from("parts").update(changes).eq("id", existing.id);
           if (error) throw error;
           results.push({
             row: rowNumber,
@@ -636,13 +692,14 @@ export const POST = withTenant(
           });
           updated++;
         } else {
+          const id = uuid();
           const { error } = await db.from("parts").insert({
-            id: uuid(),
+            id,
             tenantId: tenantUser.tenantId,
             partNumber: parsed.partNumber,
             name: parsed.name,
             description: parsed.description,
-            category: parsed.category,
+            category: parsed.category ?? "MANUFACTURED",
             revision: parsed.revision || "A",
             lifecycleState: parsed.lifecycleState || "WIP",
             material: parsed.material,
@@ -657,6 +714,9 @@ export const POST = withTenant(
             updatedAt: now,
           });
           if (error) throw error;
+          // The same part number further down the file is now an update to
+          // this row, not a second insert that fails on the unique index.
+          existingById.set(parsed.partNumber, { id });
           results.push({
             row: rowNumber,
             partNumber: parsed.partNumber,
