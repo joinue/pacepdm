@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { buildPartPackage, partZipFilename } from "./part-package";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { unzipSync, strFromU8, strToU8 } from "fflate";
+import { buildPartPackage, buildPartZipStream, partZipFilename } from "./part-package";
+import { createFakeVault, readAll, type FakeVault } from "./__mocks__/fake-vault";
 
 /**
  * The lifecycle filter is the safety-critical part of a part share: it is
@@ -157,6 +159,45 @@ describe("buildPartPackage lifecycle filter", () => {
     // The released file is broken, not suppressed — reporting it as withheld
     // would tell the sender to go release something that already is.
     expect(pkg!.filesWithheld).toBe(1);
+  });
+});
+
+describe("buildPartZipStream", () => {
+  let vault: FakeVault;
+
+  beforeEach(() => {
+    vault = createFakeVault();
+    vi.stubGlobal("fetch", vault.fetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function unzip(stream: ReadableStream<Uint8Array>) {
+    const files = unzipSync(await readAll(stream));
+    return Object.fromEntries(Object.entries(files).map(([k, v]) => [k, strFromU8(v)]));
+  }
+
+  it("names a file it could not fetch in MISSING.txt, and marks it not included", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const pkg = await buildPartPackage(makeDb(fixture()), TENANT, "part-1", { includeWip: true });
+    vault.blobs.set("vault/dwg-001.pdf", strToU8("drawing"));
+    // vault/model-001.step is gone from storage.
+
+    const files = await unzip(buildPartZipStream(pkg!, vault.client));
+
+    expect(Object.keys(files)).toEqual([
+      "DWG-001.pdf",
+      "MISSING.txt",
+      "READ-ME-FIRST.txt",
+      "manifest.json",
+    ]);
+    expect(files["MISSING.txt"]).toContain("PRELIMINARY-MODEL-001.step");
+    const manifest = JSON.parse(files["manifest.json"]);
+    expect(manifest.unavailable).toEqual(["MODEL-001.step"]);
+    expect(manifest.files.map((f: { included: boolean }) => f.included)).toEqual([true, false]);
   });
 });
 

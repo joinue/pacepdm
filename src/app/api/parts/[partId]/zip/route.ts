@@ -14,6 +14,10 @@ import { buildPartPackage, buildPartZipStream, partZipFilename } from "@/lib/par
  * uses the share token as its auth instead.
  */
 
+// Next reads segment config statically; keep in step with
+// ZIP_MAX_DURATION_SECONDS in src/lib/vault-zip.ts.
+export const maxDuration = 300;
+
 const ParamsSchema = z.object({ partId: uuid });
 
 // `?includeWip=true` mirrors the share toggle, so an internal user emailing
@@ -41,10 +45,8 @@ export const GET = withTenant(
     );
     if (!pkg) throw notFound("Part not found");
 
-    const stream = buildPartZipStream(
-      pkg,
-      db.unscoped("streaming signed storage URLs for the package resolved above")
-    );
+    // Storage only: the package above is already resolved under the tenant.
+    const stream = buildPartZipStream(pkg, db);
 
     return new Response(stream, {
       headers: {

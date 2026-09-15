@@ -1,74 +1,34 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
-import { z, parseBody, nonEmptyString } from "@/lib/validation";
+import { withTenant, ApiFailure } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
+import { z, nonEmptyString } from "@/lib/validation";
 import { getFolderAccessScope } from "@/lib/folder-access";
-import { resolveFilesToEntries, signDownloadToken, MAX_DOWNLOAD_BYTES } from "@/lib/vault-zip";
+import { planVaultZip } from "@/lib/vault-zip";
+
+/**
+ * POST /api/files/bulk-download/prepare
+ *
+ * Checks a selection before the browser commits to downloading it, so an empty,
+ * forbidden or oversized selection becomes a toast with a reason instead of a
+ * failed download. Answers with what the zip will hold; the download itself is
+ * a form POST of the same selection to /api/files/bulk-download/zip, which
+ * plans it again under the caller's access at that moment.
+ */
 
 const PrepareSchema = z.object({
-  // No upper bound on count — the server-side stream is memory-bounded.
-  // Total byte size is what we actually guard against, downstream.
   fileIds: z.array(nonEmptyString).min(1, "No files specified"),
 });
 
-export async function POST(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const parsed = await parseBody(request, PrepareSchema);
-    if (!parsed.ok) return parsed.response;
-    const { fileIds } = parsed.data;
-
-    const db = getServiceClient();
-    const scope = await getFolderAccessScope(tenantUser);
-    const { entries, totalBytes } = await resolveFilesToEntries(
-      db,
+export const POST = withTenant(
+  { permission: PERMISSIONS.FILE_VIEW, body: PrepareSchema },
+  async ({ db, tenantUser, body }) => {
+    const plan = await planVaultZip(
+      db.unscoped("planVaultZip scopes every query by the tenantId passed in"),
       tenantUser.tenantId,
-      fileIds,
-      scope
+      await getFolderAccessScope(tenantUser),
+      { kind: "files", fileIds: body.fileIds }
     );
+    if (!plan.ok) throw new ApiFailure(plan.message, plan.status, plan.details);
 
-    if (entries.length === 0) {
-      return NextResponse.json({ error: "No accessible files in selection" }, { status: 404 });
-    }
-
-    if (totalBytes > MAX_DOWNLOAD_BYTES) {
-      return NextResponse.json(
-        {
-          error: "Download too large",
-          totalBytes,
-          maxBytes: MAX_DOWNLOAD_BYTES,
-        },
-        { status: 413 }
-      );
-    }
-
-    const token = signDownloadToken({
-      tenantId: tenantUser.tenantId,
-      userId: tenantUser.id,
-      entries,
-      zipName: `vault-${new Date().toISOString().slice(0, 10)}`,
-    });
-
-    await logAudit({
-      tenantId: tenantUser.tenantId,
-      userId: tenantUser.id,
-      action: "file.bulk_download_prepare",
-      entityType: "file",
-      entityId: fileIds.slice(0, 20).join(","),
-      details: { count: entries.length, totalBytes },
-    });
-
-    return NextResponse.json({
-      token,
-      count: entries.length,
-      totalBytes,
-    });
-  } catch (err) {
-    console.error("Failed to prepare bulk download:", err);
-    const message = err instanceof Error ? err.message : "Failed to prepare download";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { count: plan.entries.length, totalBytes: plan.totalBytes, skipped: plan.skipped };
   }
-}
+);

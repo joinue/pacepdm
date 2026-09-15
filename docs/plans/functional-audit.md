@@ -845,9 +845,44 @@ first real upload after deploy is the check: a 60 MB file should show progress
 and arrive. If storage refuses with a CORS error, the signed-upload path needs
 the storage CORS settings checked.
 
-**Still to do in Stage 2:** the SolidWorks preview scan itself (VLT-2 — the
-quadratic `inflateSync` loop in `src/lib/thumbnail.ts`), zip manifests
-server-side (VLT-5), CSV into an existing BOM, LOCKED cost source, AUTO
+**The SolidWorks preview scan — done 2026-09-15.** VLT-2. The zlib pass handed
+the rest of the file to fflate's raw-DEFLATE decoder at every `78 xx` pair: it
+could not decode a zlib stream at all, and took 51 s and 824 MB on 50 MB of
+noise. It now uses `node:zlib`, which reads the header and Adler-32 and stops at
+the stream's end; a cheap header check in JS rejects most offsets before any
+native call, a small probe classifies a stream from its first 44 output bytes,
+and only an image is fully inflated (capped at 32 MB). The raw pass had the same
+quadratic shape on crafted input and now reuses end markers. Every expensive step
+has a cap that reports itself in the extraction report. 50 MB: 0.54 s, 197 MB;
+100 MB: 1.0 s. Worth knowing: fflate's `unzlibSync` looked like the obvious fix
+and is not — it cannot stop at an output size and accepted 8.5K of 32.7K random
+offsets as valid streams.
+
+**Zip downloads — done 2026-09-15.** VLT-5, plus paging in the folder zip.
+
+- The download is a hidden form POST (`/api/files/bulk-download/zip`,
+  `/api/folders/[folderId]/download/zip`) carrying the selection in the body.
+  The old GET put a signed token listing every storage key in the URL and failed
+  past about fifty files. The prepare step still validates and reports the size;
+  the zip route re-authorises from the session and folder access at download
+  time, refuses a request whose `Sec-Fetch-Site` says it came from another site,
+  and requires `file.view`.
+- All four zip builders share one pull-based stream in `src/lib/vault-zip.ts`:
+  nothing is fetched until the body is read, links are signed fifty at a time,
+  and a disconnect closes the storage read.
+- Honest limits. fflate 0.8.3 has no Zip64 writer, so a vault zip is capped at
+  1 GiB and 1,000 files (what can stream in 300 s at a realistic office link)
+  and prepare says so with a way forward. Every zip route exports
+  `maxDuration = 300`, and the stream stops starting new files near the time or
+  format limit rather than producing a corrupt archive.
+- A file that cannot be signed or fetched is named in `MISSING.txt` (and in the
+  release or part manifest's `unavailable`) instead of silently vanishing.
+- Rough edge: if the zip POST itself fails after prepare succeeded (a session
+  expiring in between), the browser shows the JSON error page.
+- Release and part zips have no prepare step, so they rely on the in-stream
+  limits. Their folder-ACL gap is ACL-1, Stage 3.
+
+**Still to do in Stage 2:** CSV into an existing BOM, LOCKED cost source, AUTO
 numbering (BOM-1, 2, 7), unsaved panel edits and record links (UI-2, UI-3).
 
 ### Stages 3–4 — not started

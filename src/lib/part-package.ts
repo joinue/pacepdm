@@ -36,7 +36,14 @@
 // must.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Zip, ZipPassThrough } from "fflate";
+import {
+  buildStorageZipStream,
+  MISSING_ENTRY_NAME,
+  type StorageSource,
+  type ZipEntry,
+  type ZipOutcome,
+  type ZipTextEntry,
+} from "@/lib/vault-zip";
 
 /** Lifecycle states whose files are safe to put in front of a supplier. */
 const SHAREABLE_STATES = ["Released"];
@@ -239,149 +246,127 @@ export async function buildPartPackage(
 /**
  * Stream the package as a zip: every released file plus a manifest.json.
  *
- * Same streaming shape as `buildReleaseZipStream` — fflate's Zip with one
- * ZipPassThrough per entry, so memory stays bounded no matter how large
- * the models are. A file whose signed URL cannot be issued is skipped
- * rather than failing the whole download; the manifest still lists it, so
- * the recipient can tell something is missing and ask.
+ * Streamed by `buildStorageZipStream` (src/lib/vault-zip.ts), like every
+ * other zip: pull-based, so memory stays bounded no matter how large the
+ * models are. A file that cannot be fetched is left out rather than failing
+ * the whole download, and named in MISSING.txt and in the manifest's
+ * `unavailable`, so the recipient can tell something is missing and ask.
  */
 export function buildPartZipStream(
   pkg: PartPackage,
-  db: SupabaseClient
+  db: StorageSource
 ): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const zip = new Zip((err, data, final) => {
-        if (err) {
-          controller.error(err);
-          return;
-        }
-        if (data && data.length > 0) controller.enqueue(data);
-        if (final) controller.close();
-      });
+  // The archive's own entries are reserved, so a linked file with one of
+  // these names is the one that gets renamed.
+  const usedNames = new Set<string>(["manifest.json", "READ-ME-FIRST.txt", MISSING_ENTRY_NAME]);
+  const claimName = (fileId: string, raw: string): string => {
+    const cleaned = raw.replace(/[\\/]/g, "_").trim() || fileId;
+    if (!usedNames.has(cleaned)) {
+      usedNames.add(cleaned);
+      return cleaned;
+    }
+    const alt = `${fileId}-${cleaned}`;
+    usedNames.add(alt);
+    return alt;
+  };
 
-      try {
-        const usedNames = new Set<string>();
-        const claimName = (fileId: string, raw: string): string => {
-          const cleaned = raw.replace(/[\\/]/g, "_").trim() || fileId;
-          if (!usedNames.has(cleaned)) {
-            usedNames.add(cleaned);
-            return cleaned;
-          }
-          const alt = `${fileId}-${cleaned}`;
-          usedNames.add(alt);
-          return alt;
-        };
-
-        const included: string[] = [];
-        const missing: string[] = [];
-
-        for (const file of pkg.files) {
-          const { data: signed, error: signErr } = await db.storage
-            .from("vault")
-            .createSignedUrl(file.storageKey, 300);
-          if (signErr || !signed) {
-            missing.push(file.fileName);
-            continue;
-          }
-          const response = await fetch(signed.signedUrl);
-          if (!response.ok || !response.body) {
-            missing.push(file.fileName);
-            continue;
-          }
-
-          // A preliminary file gets the warning in its *filename*. Once the
-          // zip is extracted onto someone else's desktop the filename is the
-          // only context that survives — the manifest gets ignored, the web
-          // page is long closed, and the drawing gets emailed onward on its
-          // own. This is the one label that travels with the file.
-          const entryName = file.isPreliminary ? `PRELIMINARY-${file.fileName}` : file.fileName;
-
-          const entry = new ZipPassThrough(claimName(file.fileId, entryName));
-          zip.add(entry);
-          included.push(file.fileName);
-
-          const reader = response.body.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              entry.push(new Uint8Array(0), true);
-              break;
-            }
-            if (value && value.length > 0) entry.push(value, false);
-          }
-        }
-
-        // A plain-text warning for anyone who will never open manifest.json,
-        // which is most people. Only written when it applies.
-        if (pkg.preliminaryCount > 0) {
-          const readme = new ZipPassThrough("READ-ME-FIRST.txt");
-          zip.add(readme);
-          const lines = [
-            `${pkg.partNumber} rev ${pkg.revision} — ${pkg.name}`,
-            "",
-            "THIS PACKAGE CONTAINS PRELIMINARY DOCUMENTS.",
-            "",
-            `${pkg.preliminaryCount} of ${pkg.files.length} document(s) in this archive have NOT been`,
-            "released. Their filenames are prefixed PRELIMINARY-.",
-            "",
-            "Preliminary documents are provided for quotation and planning only.",
-            "They are subject to change and MUST NOT be used for production,",
-            "tooling, or final inspection. Request a released package before",
-            "committing to manufacture.",
-            "",
-            "Released documents in this archive carry no prefix and may be used",
-            "normally.",
-            "",
-            `Generated ${new Date().toISOString()} by PACE PDM.`,
-            "",
-          ];
-          readme.push(new TextEncoder().encode(lines.join("\r\n")), true);
-        }
-
-        // The manifest is what makes the zip self-describing once it has
-        // been extracted onto someone else's desktop and renamed.
-        // `filesWithheld` is deliberately absent — see the module header.
-        const manifestEntry = new ZipPassThrough("manifest.json");
-        zip.add(manifestEntry);
-        const manifestJson = JSON.stringify(
-          {
-            partNumber: pkg.partNumber,
-            name: pkg.name,
-            revision: pkg.revision,
-            description: pkg.description,
-            lifecycleState: pkg.lifecycleState,
-            category: pkg.category,
-            material: pkg.material,
-            unit: pkg.unit,
-            weight: pkg.weight,
-            weightUnit: pkg.weightUnit,
-            generatedAt: new Date().toISOString(),
-            containsPreliminary: pkg.preliminaryCount > 0,
-            files: pkg.files.map((f) => ({
-              fileName: f.isPreliminary ? `PRELIMINARY-${f.fileName}` : f.fileName,
-              fileType: f.fileType,
-              role: f.role,
-              isPrimary: f.isPrimary,
-              revision: f.revision,
-              version: f.version,
-              preliminary: f.isPreliminary,
-              included: included.includes(f.fileName),
-            })),
-            boms: pkg.boms,
-            ...(missing.length > 0 ? { unavailable: missing } : {}),
-          },
-          null,
-          2
-        );
-        manifestEntry.push(new TextEncoder().encode(manifestJson), true);
-
-        zip.end();
-      } catch (err) {
-        controller.error(err);
-      }
-    },
+  const fileByEntry = new Map<ZipEntry, PartPackageFile>();
+  const entries = pkg.files.map((file) => {
+    // A preliminary file gets the warning in its *filename*. Once the zip is
+    // extracted onto someone else's desktop the filename is the only context
+    // that survives — the manifest gets ignored, the web page is long closed,
+    // and the drawing gets emailed onward on its own. This is the one label
+    // that travels with the file.
+    const entryName = file.isPreliminary ? `PRELIMINARY-${file.fileName}` : file.fileName;
+    const entry: ZipEntry = {
+      entryName: claimName(file.fileId, entryName),
+      storageKey: file.storageKey,
+    };
+    fileByEntry.set(entry, file);
+    return entry;
   });
+
+  return buildStorageZipStream(db, {
+    entries,
+    logLabel: `part ${pkg.partId}`,
+    trailer: (outcome) => partTrailer(pkg, outcome, fileByEntry),
+  });
+}
+
+/** READ-ME-FIRST.txt when it applies, then manifest.json. */
+function partTrailer(
+  pkg: PartPackage,
+  outcome: ZipOutcome,
+  fileByEntry: Map<ZipEntry, PartPackageFile>
+): ZipTextEntry[] {
+  const extras: ZipTextEntry[] = [];
+  const included = new Set(outcome.included.map((e) => fileByEntry.get(e)));
+
+  // A plain-text warning for anyone who will never open manifest.json,
+  // which is most people. Only written when it applies.
+  if (pkg.preliminaryCount > 0) {
+    const lines = [
+      `${pkg.partNumber} rev ${pkg.revision} — ${pkg.name}`,
+      "",
+      "THIS PACKAGE CONTAINS PRELIMINARY DOCUMENTS.",
+      "",
+      `${pkg.preliminaryCount} of ${pkg.files.length} document(s) in this archive have NOT been`,
+      "released. Their filenames are prefixed PRELIMINARY-.",
+      "",
+      "Preliminary documents are provided for quotation and planning only.",
+      "They are subject to change and MUST NOT be used for production,",
+      "tooling, or final inspection. Request a released package before",
+      "committing to manufacture.",
+      "",
+      "Released documents in this archive carry no prefix and may be used",
+      "normally.",
+      "",
+      `Generated ${new Date().toISOString()} by PACE PDM.`,
+      "",
+    ];
+    extras.push({ entryName: "READ-ME-FIRST.txt", text: lines.join("\r\n") });
+  }
+
+  // The manifest is what makes the zip self-describing once it has been
+  // extracted onto someone else's desktop and renamed. `filesWithheld` is
+  // deliberately absent — see the module header.
+  extras.push({
+    entryName: "manifest.json",
+    text: JSON.stringify(
+      {
+        partNumber: pkg.partNumber,
+        name: pkg.name,
+        revision: pkg.revision,
+        description: pkg.description,
+        lifecycleState: pkg.lifecycleState,
+        category: pkg.category,
+        material: pkg.material,
+        unit: pkg.unit,
+        weight: pkg.weight,
+        weightUnit: pkg.weightUnit,
+        generatedAt: new Date().toISOString(),
+        containsPreliminary: pkg.preliminaryCount > 0,
+        files: pkg.files.map((f) => ({
+          fileName: f.isPreliminary ? `PRELIMINARY-${f.fileName}` : f.fileName,
+          fileType: f.fileType,
+          role: f.role,
+          isPrimary: f.isPrimary,
+          revision: f.revision,
+          version: f.version,
+          preliminary: f.isPreliminary,
+          included: included.has(f),
+        })),
+        boms: pkg.boms,
+        ...(outcome.missing.length > 0
+          ? { unavailable: outcome.missing.map((m) => fileByEntry.get(m.entry)?.fileName) }
+          : {}),
+      },
+      null,
+      2
+    ),
+  });
+
+  return extras;
 }
 
 /**

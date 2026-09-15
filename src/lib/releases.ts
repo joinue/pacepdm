@@ -352,18 +352,23 @@ export async function getReleaseForEco(
 //
 // Building a zip of a whole release is the single biggest differentiator
 // of this feature — a CM gets one file instead of emailing back and forth
-// asking which rev goes with which drawing. We stream it through fflate's
-// Zip / ZipPassThrough API so memory stays bounded regardless of how
-// many (or how large) the files are. Client-side assembly isn't viable
-// because large selections OOM the browser (see the vault bulk-download
-// gap in project memory).
+// asking which rev goes with which drawing. The archive is streamed by
+// buildStorageZipStream (src/lib/vault-zip.ts): pull-based, one storage
+// read per consumer read, so memory stays bounded however many or however
+// large the files are, with the same limits and MISSING.txt report as
+// every other zip in the app. Client-side assembly isn't viable because
+// large selections OOM the browser.
 //
-// Each file in the manifest is streamed from Supabase storage via a
-// signed URL into its own ZipPassThrough entry. A final manifest.json
-// entry is added so the CM has a record of what was in the bundle —
-// part revisions, BOM headers, release metadata — even after extraction.
+// A final manifest.json entry records what the bundle is — part
+// revisions, BOM headers, release metadata — and which files, if any,
+// could not be included, so the CM has that record even after extraction.
 
-import { Zip, ZipPassThrough } from "fflate";
+import {
+  buildStorageZipStream,
+  MISSING_ENTRY_NAME,
+  type StorageSource,
+  type ZipEntry,
+} from "@/lib/vault-zip";
 
 /**
  * Build a ReadableStream that emits a zip of the release's files plus a
@@ -378,72 +383,42 @@ import { Zip, ZipPassThrough } from "fflate";
  */
 export function buildReleaseZipStream(
   release: ReleaseRow,
-  db: SupabaseClient
+  db: StorageSource
 ): ReadableStream<Uint8Array> {
   const manifest = release.manifest;
 
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      // fflate's streaming Zip fires `ondata` for each chunk of the
-      // compressed output. We forward those chunks to the response
-      // stream; `final=true` closes the stream and finalizes the central
-      // directory.
-      const zip = new Zip((err, data, final) => {
-        if (err) {
-          controller.error(err);
-          return;
-        }
-        if (data && data.length > 0) controller.enqueue(data);
-        if (final) controller.close();
-      });
+  // The archive's own entries are reserved, so a release file that happens
+  // to be called manifest.json is the one that gets renamed.
+  const usedNames = new Set<string>(["manifest.json", MISSING_ENTRY_NAME]);
+  const claimName = (fileId: string, raw: string): string => {
+    const cleaned = raw.replace(/[\\/]/g, "_").trim() || fileId;
+    if (!usedNames.has(cleaned)) {
+      usedNames.add(cleaned);
+      return cleaned;
+    }
+    const alt = `${fileId}-${cleaned}`;
+    usedNames.add(alt);
+    return alt;
+  };
 
-      try {
-        // Track names so we can disambiguate collisions without breaking
-        // the zip on identical entry paths.
-        const usedNames = new Set<string>();
-        const claimName = (fileId: string, raw: string): string => {
-          const cleaned = raw.replace(/[\\/]/g, "_").trim() || fileId;
-          if (!usedNames.has(cleaned)) {
-            usedNames.add(cleaned);
-            return cleaned;
-          }
-          const alt = `${fileId}-${cleaned}`;
-          usedNames.add(alt);
-          return alt;
-        };
+  const fileByEntry = new Map<ZipEntry, ReleaseFile>();
+  const entries = manifest.files.map((file) => {
+    const entry: ZipEntry = {
+      entryName: claimName(file.fileId, file.fileName),
+      storageKey: file.storageKey,
+    };
+    fileByEntry.set(entry, file);
+    return entry;
+  });
 
-        for (const file of manifest.files) {
-          const { data: signed, error: signErr } = await db.storage
-            .from("vault")
-            .createSignedUrl(file.storageKey, 300);
-          if (signErr || !signed) {
-            // A missing file becomes a note in manifest.json at the end;
-            // we skip the zip entry rather than fail the whole download.
-            continue;
-          }
-          const response = await fetch(signed.signedUrl);
-          if (!response.ok || !response.body) continue;
-
-          const entry = new ZipPassThrough(claimName(file.fileId, file.fileName));
-          zip.add(entry);
-
-          const reader = response.body.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              // push an empty final chunk to signal end-of-entry
-              entry.push(new Uint8Array(0), true);
-              break;
-            }
-            if (value && value.length > 0) entry.push(value, false);
-          }
-        }
-
-        // Append a manifest.json with the release metadata — CM gets a
-        // record of what's in the archive without needing to log in.
-        const manifestEntry = new ZipPassThrough("manifest.json");
-        zip.add(manifestEntry);
-        const manifestJson = JSON.stringify(
+  return buildStorageZipStream(db, {
+    entries,
+    logLabel: `release ${release.id}`,
+    // Written last, once it is known which files made it in.
+    trailer: ({ missing }) => [
+      {
+        entryName: "manifest.json",
+        text: JSON.stringify(
           {
             releaseId: release.id,
             releaseName: release.name,
@@ -457,17 +432,15 @@ export function buildReleaseZipStream(
               revision: f.revision,
             })),
             boms: manifest.boms,
+            ...(missing.length > 0
+              ? { unavailable: missing.map((m) => fileByEntry.get(m.entry)?.fileName) }
+              : {}),
           },
           null,
           2
-        );
-        manifestEntry.push(new TextEncoder().encode(manifestJson), true);
-
-        zip.end();
-      } catch (err) {
-        controller.error(err);
-      }
-    },
+        ),
+      },
+    ],
   });
 }
 

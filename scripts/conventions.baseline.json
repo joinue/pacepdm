@@ -107,12 +107,6 @@
   "src/app/api/files/[fileId]/transition/route.ts": {
     "unwrapped-route": 4
   },
-  "src/app/api/files/bulk-download/prepare/route.ts": {
-    "unwrapped-route": 4
-  },
-  "src/app/api/files/bulk-download/zip/[token]/route.ts": {
-    "unwrapped-route": 2
-  },
   "src/app/api/files/bulk-transition/route.ts": {
     "unwrapped-route": 4
   },
@@ -121,9 +115,6 @@
   },
   "src/app/api/folders/[folderId]/access/route.ts": {
     "unwrapped-route": 6
-  },
-  "src/app/api/folders/[folderId]/download/prepare/route.ts": {
-    "unwrapped-route": 4
   },
   "src/app/api/folders/[folderId]/route.ts": {
     "unwrapped-route": 8
@@ -169,12 +160,6 @@
   },
   "src/app/api/public/share/[token]/route.ts": {
     "unwrapped-route": 3
-  },
-  "src/app/api/public/share/[token]/zip/route.ts": {
-    "unwrapped-route": 2
-  },
-  "src/app/api/releases/[releaseId]/zip/route.ts": {
-    "unwrapped-route": 4
   },
   "src/app/api/search/route.ts": {
     "unwrapped-route": 4

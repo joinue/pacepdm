@@ -19,10 +19,11 @@ interface UseBulkActionsOptions {
   removeFile: (fileId: string) => () => void;
 }
 
-// Soft warning when an archive crosses 1 GiB. Just an informational toast —
-// the 10 GiB hard cap lives on the server, so this is purely a heads-up so
-// engineers don't get surprised by a multi-minute download.
-const WARN_BYTES = 1 * 1024 * 1024 * 1024;
+// A heads-up, not a limit: the server refuses anything over its cap at
+// prepare, with a reason. Past this size the download will take a while.
+const WARN_BYTES = 250 * 1024 * 1024;
+
+export const BULK_ZIP_URL = "/api/files/bulk-download/zip";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -37,13 +38,41 @@ function formatBytes(bytes: number): string {
 }
 
 interface PrepareResponse {
-  token: string;
   count: number;
   totalBytes: number;
+  /** Selected files that no longer exist or are hidden from the caller. */
+  skipped?: number;
 }
 
 interface FolderPrepareResponse extends PrepareResponse {
   rootName: string;
+}
+
+/**
+ * Hand a zip to the browser's download manager.
+ *
+ * Submits a hidden form, so the selection travels in the request body and the
+ * URL is the same for two files or a thousand. It used to be a GET with a
+ * signed token in the path that grew ~260 bytes per file, which failed with a
+ * 414 or 431 at around fifty. The response is `Content-Disposition:
+ * attachment`, so the form navigation becomes a download and the page stays
+ * where it is: native progress, native save, nothing held in JS memory.
+ */
+function submitZipForm(action: string, fields: [name: string, value: string][]) {
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = action;
+  form.hidden = true;
+  for (const [name, value] of fields) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.append(input);
+  }
+  document.body.append(form);
+  form.submit();
+  form.remove();
 }
 
 /**
@@ -53,10 +82,12 @@ interface FolderPrepareResponse extends PrepareResponse {
  * so partial failures are visible (the audit found this was previously
  * a silent for-loop with no error reporting).
  *
- * Zip download uses the server-side streaming endpoint
- * (/api/files/bulk-download/prepare → GET /zip/[token]) so the browser
- * never holds the full archive in memory. The previous client-zip
- * implementation OOMed on selections of any non-trivial size.
+ * Zip download is two steps. `prepare` checks the selection and answers with
+ * its size, or with a reason it cannot be zipped, so the user sees that as a
+ * toast. Then a form POST of the same selection streams the archive from the
+ * server, which checks access again as the bytes go out — the browser never
+ * holds the archive in memory. The previous client-zip implementation OOMed on
+ * selections of any non-trivial size.
  */
 export function useBulkActions({
   selectedFiles,
@@ -81,33 +112,32 @@ export function useBulkActions({
       return;
     }
 
+    const fileIds = [...selectedFiles];
     setBulkDownloading(true);
-    const toastId = toast.loading(`Preparing ${selectedFiles.size} files for download...`);
+    const toastId = toast.loading(`Preparing ${fileIds.length} files for download...`);
     try {
       const prep = await fetchJson<PrepareResponse>("/api/files/bulk-download/prepare", {
         method: "POST",
-        body: { fileIds: [...selectedFiles] },
+        body: { fileIds },
       });
 
-      const sizeLabel = formatBytes(prep.totalBytes);
+      const head = `${prep.count} file${prep.count === 1 ? "" : "s"}, ${formatBytes(prep.totalBytes)}`;
+      const skipped = prep.skipped
+        ? `${prep.skipped} selected file${prep.skipped === 1 ? " is" : "s are"} no longer available and will be left out.`
+        : undefined;
       if (prep.totalBytes >= WARN_BYTES) {
-        toast.message(`Large download: ${sizeLabel}`, {
+        toast.message(`Large download: ${head}`, {
           id: toastId,
-          description: "Your browser will start saving the file shortly.",
+          description: skipped ?? "This may take a few minutes to save.",
         });
       } else {
-        toast.success(`Starting download (${sizeLabel})`, { id: toastId });
+        toast.success(`Starting download — ${head}`, { id: toastId, description: skipped });
       }
 
-      // Native browser download — no JS memory pressure, native progress
-      // bar, native save dialog. The signed token in the URL is the auth.
-      //
-      // no-location-assign-relative-destination is a false positive here:
-      // this is a download, not a navigation. router.push() would try to
-      // client-side route to an API path and never hand off to the
-      // browser's download manager.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = `/api/files/bulk-download/zip/${prep.token}`;
+      submitZipForm(
+        BULK_ZIP_URL,
+        fileIds.map((id) => ["fileId", id])
+      );
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to prepare download", { id: toastId });
     } finally {
@@ -120,25 +150,21 @@ export function useBulkActions({
     setFolderDownloading(true);
     const toastId = toast.loading("Preparing folder for download...");
     try {
-      const prep = await fetchJson<FolderPrepareResponse>(
-        `/api/folders/${currentFolderId}/download/prepare`,
-        { method: "POST" }
-      );
+      const base = `/api/folders/${encodeURIComponent(currentFolderId)}/download`;
+      const prep = await fetchJson<FolderPrepareResponse>(`${base}/prepare`, { method: "POST" });
 
       const sizeLabel = formatBytes(prep.totalBytes);
       const head = `${prep.rootName} — ${prep.count} file${prep.count === 1 ? "" : "s"}, ${sizeLabel}`;
       if (prep.totalBytes >= WARN_BYTES) {
         toast.message(`Large download: ${head}`, {
           id: toastId,
-          description: "Your browser will start saving the file shortly.",
+          description: "This may take a few minutes to save.",
         });
       } else {
         toast.success(`Starting download — ${head}`, { id: toastId });
       }
 
-      // Download, not navigation — see the note in the bulk-download path.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = `/api/files/bulk-download/zip/${prep.token}`;
+      submitZipForm(`${base}/zip`, []);
     } catch (err) {
       toast.error(errorMessage(err) || "Failed to prepare folder download", { id: toastId });
     } finally {

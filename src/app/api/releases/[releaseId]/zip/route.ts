@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
+import { withTenant, notFound } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
+import { z, nonEmptyString } from "@/lib/validation";
 import { getReleaseById, buildReleaseZipStream, releaseZipFilename } from "@/lib/releases";
 
 /**
@@ -10,29 +10,33 @@ import { getReleaseById, buildReleaseZipStream, releaseZipFilename } from "@/lib
  * only — the matching public endpoint lives at
  * /api/public/share/[token]/zip and uses the share token as its auth.
  */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ releaseId: string }> }
-) {
-  const tenantUser = await getApiTenantUser();
-  if (!tenantUser) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const { releaseId } = await params;
-  const db = getServiceClient();
-  const release = await getReleaseById(db, tenantUser.tenantId, releaseId);
-  if (!release) {
-    return NextResponse.json({ error: "Release not found" }, { status: 404 });
-  }
 
-  const stream = buildReleaseZipStream(release, db);
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${releaseZipFilename(release)}"`,
-      // Zip streams have no reliable length up front and we can't reuse
-      // the response, so disable caching. Each download is fresh.
-      "Cache-Control": "no-store",
-    },
-  });
-}
+// Next reads segment config statically; keep in step with
+// ZIP_MAX_DURATION_SECONDS in src/lib/vault-zip.ts.
+export const maxDuration = 300;
+
+const ParamsSchema = z.object({ releaseId: nonEmptyString });
+
+export const GET = withTenant(
+  { permission: PERMISSIONS.FILE_VIEW, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
+    const release = await getReleaseById(
+      // getReleaseById takes a raw client and filters by the tenantId it is
+      // handed — the caller's own.
+      db.unscoped("getReleaseById takes a raw client and scopes by the tenantId passed in"),
+      tenantUser.tenantId,
+      params.releaseId
+    );
+    if (!release) throw notFound("Release not found");
+
+    return new Response(buildReleaseZipStream(release, db), {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${releaseZipFilename(release)}"`,
+        // Zip streams have no reliable length up front and we can't reuse
+        // the response, so disable caching. Each download is fresh.
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+);

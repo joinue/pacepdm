@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
+import { NextResponse } from "next/server";
+import { withPublicRoute } from "@/lib/api-route";
 import {
   resolveToken,
   unlockCookieName,
@@ -26,45 +26,41 @@ import { buildPartPackage, buildPartZipStream, partZipFilename } from "@/lib/par
  * File and BOM shares have no zip — a file share already hands over the
  * one file, and a BOM share is a table with no attachments.
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
-) {
+
+// Next reads segment config statically; keep in step with
+// ZIP_MAX_DURATION_SECONDS in src/lib/vault-zip.ts.
+export const maxDuration = 300;
+
+const NO_INDEX = { "X-Robots-Tag": "noindex, nofollow" };
+
+export const GET = withPublicRoute({}, async ({ request, params, db }) => {
   const limited = enforceRateLimit(request, "share-zip");
   if (limited) return limited;
 
-  const { token } = await params;
+  const { token } = params;
   const result = await resolveToken(token);
   if (!result.ok) {
-    return NextResponse.json(
-      { error: result.reason },
-      { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
-    );
+    return NextResponse.json({ error: result.reason }, { status: 404, headers: NO_INDEX });
   }
   const row = result.token;
   if (row.resourceType !== "release" && row.resourceType !== "part") {
     return NextResponse.json(
       { error: "Zip download is only available for release and part share links" },
-      { status: 400, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+      { status: 400, headers: NO_INDEX }
     );
   }
   if (!row.allowDownload) {
     return NextResponse.json(
       { error: "Download not allowed for this share link" },
-      { status: 403, headers: { "X-Robots-Tag": "noindex, nofollow" } }
+      { status: 403, headers: NO_INDEX }
     );
   }
   if (row.passwordHash) {
     const cookie = request.cookies.get(unlockCookieName(token))?.value;
     if (!verifyUnlockCookie(token, cookie)) {
-      return NextResponse.json(
-        { error: "password_required" },
-        { status: 401, headers: { "X-Robots-Tag": "noindex, nofollow" } }
-      );
+      return NextResponse.json({ error: "password_required" }, { status: 401, headers: NO_INDEX });
     }
   }
-
-  const db = getServiceClient();
 
   // Resolve the target first, then log — a 404 should not record a
   // successful zip-download against the token.
@@ -76,20 +72,14 @@ export async function GET(
       includeWip: row.includeWip,
     });
     if (!pkg) {
-      return NextResponse.json(
-        { error: "Part not found" },
-        { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
-      );
+      return NextResponse.json({ error: "Part not found" }, { status: 404, headers: NO_INDEX });
     }
     stream = buildPartZipStream(pkg, db);
     filename = partZipFilename(pkg);
   } else {
     const release = await getReleaseById(db, row.tenantId, row.resourceId);
     if (!release) {
-      return NextResponse.json(
-        { error: "Release not found" },
-        { status: 404, headers: { "X-Robots-Tag": "noindex, nofollow" } }
-      );
+      return NextResponse.json({ error: "Release not found" }, { status: 404, headers: NO_INDEX });
     }
     stream = buildReleaseZipStream(release, db);
     filename = releaseZipFilename(release);
@@ -111,7 +101,7 @@ export async function GET(
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store",
-      "X-Robots-Tag": "noindex, nofollow",
+      ...NO_INDEX,
     },
   });
-}
+});

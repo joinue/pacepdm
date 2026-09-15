@@ -3,14 +3,14 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-06 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 114
-routes-wrapped: 50
-unwrapped-route: 304
+routes-total: 115
+routes-wrapped: 56
+unwrapped-route: 288
 raw-fetch: 35
 generic-error-toast: 5
 swallowed-error: 6
 token-violations: 6
-component-tests: 13-->
+component-tests: 14-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -94,11 +94,11 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **50 / 114**                          | 111                                                   |
+| Routes on `withTenant`                | 0                | **56 / 115**                          | 115                                                   |
 | `raw-fetch` in client components      | 112              | **35**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **5**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
-| Component tests                       | 0                | **11** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
+| Component tests                       | 0                | **14** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
 | Route segments with `error.tsx`       | 0                | **4** + `global-error`                | every segment that fetches                            |
 
 ### How the ratchet works
@@ -148,7 +148,7 @@ console task.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 64 routes
+### 1. Finish the route wrapper — 59 routes
 
 > 70 → 66 → 68 of 110. The count went _up_ because the supplier-access work
 > added three new routes (`GET /api/releases`, `/api/parts/[partId]/zip`,

@@ -1,74 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import { getApiTenantUser } from "@/lib/auth";
-import { logAudit } from "@/lib/audit";
+import { withTenant, ApiFailure } from "@/lib/api-route";
+import { PERMISSIONS } from "@/lib/permissions";
+import { z, nonEmptyString } from "@/lib/validation";
 import { getFolderAccessScope } from "@/lib/folder-access";
-import { resolveFolderToEntries, signDownloadToken, MAX_DOWNLOAD_BYTES } from "@/lib/vault-zip";
+import { planVaultZip } from "@/lib/vault-zip";
 
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ folderId: string }> }
-) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+/**
+ * POST /api/folders/[folderId]/download/prepare
+ *
+ * Checks a folder download before the browser commits to it, so a forbidden,
+ * empty or oversized folder becomes a toast with a reason. The download itself
+ * is a form POST to /api/folders/[folderId]/download/zip, which plans it again
+ * under the caller's access at that moment.
+ */
 
-    const { folderId } = await params;
-    if (!folderId) return NextResponse.json({ error: "Missing folderId" }, { status: 400 });
+const ParamsSchema = z.object({ folderId: nonEmptyString });
 
-    const db = getServiceClient();
-    const scope = await getFolderAccessScope(tenantUser);
-    const result = await resolveFolderToEntries(db, tenantUser.tenantId, folderId, scope);
+export const POST = withTenant(
+  { permission: PERMISSIONS.FILE_VIEW, params: ParamsSchema },
+  async ({ db, tenantUser, params }) => {
+    const plan = await planVaultZip(
+      db.unscoped("planVaultZip scopes every query by the tenantId passed in"),
+      tenantUser.tenantId,
+      await getFolderAccessScope(tenantUser),
+      { kind: "folder", folderId: params.folderId }
+    );
+    if (!plan.ok) throw new ApiFailure(plan.message, plan.status, plan.details);
 
-    if (!result.ok) {
-      const status = result.reason === "not_found" ? 404 : 403;
-      return NextResponse.json({ error: result.reason }, { status });
-    }
-
-    if (result.entries.length === 0) {
-      return NextResponse.json({ error: "Folder has no downloadable files" }, { status: 404 });
-    }
-
-    if (result.totalBytes > MAX_DOWNLOAD_BYTES) {
-      return NextResponse.json(
-        {
-          error: "Download too large",
-          totalBytes: result.totalBytes,
-          maxBytes: MAX_DOWNLOAD_BYTES,
-        },
-        { status: 413 }
-      );
-    }
-
-    const token = signDownloadToken({
-      tenantId: tenantUser.tenantId,
-      userId: tenantUser.id,
-      entries: result.entries,
-      zipName: result.rootName,
-    });
-
-    await logAudit({
-      tenantId: tenantUser.tenantId,
-      userId: tenantUser.id,
-      action: "folder.download_prepare",
-      entityType: "folder",
-      entityId: folderId,
-      details: {
-        count: result.entries.length,
-        totalBytes: result.totalBytes,
-        rootName: result.rootName,
-      },
-    });
-
-    return NextResponse.json({
-      token,
-      count: result.entries.length,
-      totalBytes: result.totalBytes,
-      rootName: result.rootName,
-    });
-  } catch (err) {
-    console.error("Failed to prepare folder download:", err);
-    const message = err instanceof Error ? err.message : "Failed to prepare download";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return {
+      count: plan.entries.length,
+      totalBytes: plan.totalBytes,
+      rootName: plan.zipName,
+    };
   }
-}
+);
