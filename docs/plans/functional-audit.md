@@ -1,6 +1,6 @@
 # Functional audit — what was broken, and what it says about the codebase
 
-**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stage 1 done, migrations 054–055 applied
+**Started:** 2026-08-05 · **Last updated:** 2026-09-15 · **Status:** items 1, 2 and 4–6 closed; item 3 open by nature; second pass items A–G fixed; third pass Stages 1–2 done (Stage 2 not yet verified in a browser); Stages 3–4 queued
 
 <!-- plan-metrics
 unchecked-delete: 0
@@ -786,7 +786,7 @@ unique index), 1 unreachable (`fileSize` INTEGER behind a 100 MB body limit).
    an existing member's, and confirm the 409; download a file and confirm it
    saves under its own name.
 
-### Stage 2 — before loading the real vault. In progress
+### Stage 2 — before loading the real vault. Done in code 2026-09-15
 
 **The upload pipeline — done 2026-09-15.** VLT-1, VLT-4, VLT-6, and the
 listing half of OPS-6.
@@ -890,7 +890,7 @@ offsets as valid streams.
 - **UI-2, unsaved panel edits — done.** A refresh updates only fields the user has not changed (`file-properties-draft.ts`); a concurrent change to a field being edited shows a notice with a reload option. The vault warns before in-vault navigation or closing the tab with unsaved edits. Navigating to another app page from the sidebar still does not warn.
 - **UI-3, record links — done.** Links point at `/ecos/[id]` and `/boms/[id]`; the list pages redirect old `?ecoId=` / `?bomId=` links. The vault accepts `?file=` — which existing notification rows store — as well as `?fileId=`, and follows query-string changes it did not make. ECO notifications still link to `/ecos` with no id (a one-line fix each in the ECO routes).
 
-**Stage 2 is done in code.** Nothing from the Stage 2 list is left.
+**Stage 2 is done in code.** Nothing from the Stage 2 list is left. Before loading the real vault, check in a browser: a 60 MB upload shows progress and arrives; a drop of a folder with subfolders recreates them; a 70-file folder zips; a CSV imports into an existing BOM.
 
 ### Stages 3–4 — not started
 
