@@ -109,8 +109,14 @@ shared file stamped by the app instead.
   there is more than one — but it refused with `RAISE NOTICE`, which the
   Supabase editor shows as a grey line under a green "Success", so with the
   E2E workspace also in the database 059 created nothing and looked fine.
-  Migration 062 does the same seeding and raises an exception instead. A
-  migration that decides to do nothing has to stop the person running it.
+  Migration 062 does the same seeding and raises an exception instead — which
+  is how the second tenant came to light. Migration 063 then dropped the
+  guessing altogether and seeds every tenant in this database: both belong to
+  the same owner, and the roles are still absent from `DEFAULT_ROLES`, so no
+  other deployment gets them. Two migrations were spent protecting against a
+  problem nobody had. A migration that decides to do nothing has to stop the
+  person running it — and one that asks the person to identify a row by hand
+  should first ask whether it needs to.
 - Flagged machines join the "needs attention" filter, above stale ones.
 
 **Still worth doing:** everyone hears about every change. For this team that
