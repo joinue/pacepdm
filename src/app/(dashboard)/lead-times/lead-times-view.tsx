@@ -42,7 +42,7 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { History, Loader2, Plus, Search, Clock } from "lucide-react";
+import { History, Loader2, Plus, Search, Clock, Download } from "lucide-react";
 import { useFetch } from "@/hooks/use-fetch";
 import { usePermissions } from "@/hooks/use-permissions";
 import { fetchJson, errorMessage } from "@/lib/api-client";
@@ -89,6 +89,48 @@ function personName(who: LeadTimeRow["updatedBy"]): string | null {
   return one?.fullName ?? null;
 }
 
+/**
+ * The list as a CSV, for the quote someone is building right now.
+ *
+ * Sales still works in spreadsheets, and a page they cannot get a copy out of
+ * sends them back to emailing engineering for one. Exports what is on screen,
+ * filters included, with the two stamped columns the old sheet asked people to
+ * type.
+ */
+function exportCsv(rows: LeadTimeRow[]) {
+  const cell = (value: string | null) => `"${(value ?? "").replace(/"/g, '""')}"`;
+  const header = [
+    "Model",
+    "Description",
+    "Typical Lead Time",
+    "Current Lead Time",
+    "Notes",
+    "Last updated",
+    "Updated by",
+  ];
+  const lines = rows.map((r) =>
+    [
+      r.model,
+      r.description,
+      r.typicalLeadTime,
+      r.currentLeadTime,
+      r.notes,
+      describeFreshness(r),
+      personName(r.updatedBy),
+    ]
+      .map(cell)
+      .join(",")
+  );
+
+  const csv = [header.map(cell).join(","), ...lines].join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `lead-times-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 /** "Not set yet" / "Updated 3 days ago", plus the tone that goes with it. */
 function FreshnessBadge({ row }: { row: LeadTimeRow }) {
   const freshness = leadTimeFreshness(row);
@@ -111,23 +153,27 @@ export function LeadTimesView() {
   const rows = useMemo(() => data?.leadTimes ?? [], [data]);
 
   const [query, setQuery] = useState("");
+  const [needsAttention, setNeedsAttention] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [historyFor, setHistoryFor] = useState<LeadTimeRow | null>(null);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (needsAttention && leadTimeFreshness(r) === "fresh") return false;
+      if (!q) return true;
+      return (
         r.model.toLowerCase().includes(q) ||
         (r.description ?? "").toLowerCase().includes(q) ||
         (r.notes ?? "").toLowerCase().includes(q)
-    );
-  }, [rows, query]);
+      );
+    });
+  }, [rows, query, needsAttention]);
 
   const staleCount = rows.filter((r) => leadTimeFreshness(r) === "stale").length;
   const unsetCount = rows.filter((r) => leadTimeFreshness(r) === "unset").length;
+  const attentionCount = staleCount + unsetCount;
 
   /** Row-scoped optimistic patch, rolled back on failure. */
   function patchRow(id: string, patch: Partial<LeadTimeRow>) {
@@ -181,14 +227,29 @@ export function LeadTimesView() {
             className="pl-8"
           />
         </div>
-        {(staleCount > 0 || unsetCount > 0) && (
-          <p className="text-xs text-muted-foreground">
-            {staleCount > 0 && `${staleCount} older than ${LEAD_TIME_STALE_DAYS} days`}
-            {staleCount > 0 && unsetCount > 0 && " · "}
-            {unsetCount > 0 && `${unsetCount} not set yet`}
-          </p>
+        {attentionCount > 0 && (
+          <Button
+            variant={needsAttention ? "default" : "outline"}
+            size="sm"
+            aria-pressed={needsAttention}
+            onClick={() => setNeedsAttention((on) => !on)}
+          >
+            {`${attentionCount} need${attentionCount === 1 ? "s" : ""} attention`}
+          </Button>
         )}
+        <Button variant="outline" size="sm" onClick={() => exportCsv(shown)}>
+          <Download className="w-4 h-4 mr-2" />
+          Export
+        </Button>
       </div>
+
+      {attentionCount > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {staleCount > 0 && `${staleCount} older than ${LEAD_TIME_STALE_DAYS} days`}
+          {staleCount > 0 && unsetCount > 0 && " · "}
+          {unsetCount > 0 && `${unsetCount} never set`}
+        </p>
+      )}
 
       {loading ? (
         <div className="space-y-2">
@@ -205,11 +266,19 @@ export function LeadTimesView() {
       ) : shown.length === 0 ? (
         <EmptyState
           icon={Clock}
-          title={query ? "No equipment matches that" : "No equipment yet"}
+          title={
+            needsAttention
+              ? "Every lead time is current"
+              : query
+                ? "No equipment matches that"
+                : "No equipment yet"
+          }
           description={
-            query
-              ? "Try a different model or description."
-              : "Add the machines sales quotes, and their lead times."
+            needsAttention
+              ? `Nothing is unset or older than ${LEAD_TIME_STALE_DAYS} days.`
+              : query
+                ? "Try a different model or description."
+                : "Add the machines sales quotes, and their lead times."
           }
         />
       ) : (
