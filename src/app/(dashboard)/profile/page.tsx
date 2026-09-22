@@ -15,14 +15,13 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
+import type { EmailType } from "@/lib/email/templates";
 
-type EmailPrefs = {
-  approval: boolean;
-  transition: boolean;
-  checkout: boolean;
-  eco: boolean;
-  system: boolean;
-};
+// One entry per email type, from the same list the sender uses. This page
+// used to declare its own copy, so a type added on the server was simply
+// missing here — the checkbox for it never appeared. Type-only import, so no
+// server code reaches the bundle.
+type EmailPrefs = Record<EmailType, boolean>;
 
 const DEFAULT_PREFS: EmailPrefs = {
   approval: true,
@@ -30,6 +29,7 @@ const DEFAULT_PREFS: EmailPrefs = {
   checkout: true,
   eco: true,
   system: false,
+  leadtime: true,
 };
 
 const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }> = [
@@ -39,6 +39,11 @@ const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }>
     hint: "You're asked to approve, or a request you made is decided",
   },
   { key: "eco", label: "ECOs", hint: "An ECO you're involved in changes state" },
+  {
+    key: "leadtime",
+    label: "Lead times",
+    hint: "Someone changes the lead time quoted for a machine",
+  },
   {
     key: "transition",
     label: "File lifecycle",

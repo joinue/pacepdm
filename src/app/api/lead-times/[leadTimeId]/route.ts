@@ -2,16 +2,18 @@ import { v4 as newId } from "uuid";
 import { withTenant, badRequest, notFound } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
+import { notify, sideEffect } from "@/lib/notifications";
 import { LEAD_TIME_OPTIONS, isLeadTime } from "@/lib/lead-times";
 import { z, optionalString, uuid } from "@/lib/validation";
 
 /**
  * Stating what a machine's lead time is today.
  *
- * The write does three things at once, and all three are the reason this is
- * not a spreadsheet: it stamps who said it and when, it keeps what the value
- * was in `equipment_lead_time_changes`, and it writes an audit row. A sheet
- * overwrites, and "who told sales six weeks" has no answer.
+ * The write does four things at once, and all four are the reason this is not
+ * a spreadsheet: it stamps who said it and when, it keeps what the value was
+ * in `equipment_lead_time_changes`, it writes an audit row, and it tells the
+ * workspace. A sheet overwrites, "who told sales six weeks" has no answer, and
+ * nobody hears about a change until they open it.
  */
 
 const UpdateSchema = z
@@ -91,6 +93,38 @@ export const PUT = withTenant(
       if (historyError) {
         console.error(`[lead-times/${row.id}] history insert failed:`, historyError);
       }
+    }
+
+    // Sales asked to hear about this; engineering hears it too, and anyone
+    // can turn the email off by type on their profile. Only the quoted number
+    // is announced — a tidied note is not news (AUD: sales-visibility.md).
+    if (leadTimeChanged) {
+      const { data: people, error: peopleError } = await db
+        .from("tenant_users")
+        .select("id")
+        .eq("isActive", true);
+      if (peopleError) {
+        console.error(`[lead-times/${row.id}] could not list recipients:`, peopleError);
+      }
+
+      const was = row.currentLeadTime ?? "not set";
+      const now2 = updated.currentLeadTime ?? "not set";
+      await sideEffect(
+        notify({
+          tenantId: tenantUser.tenantId,
+          userIds: (people ?? []).map((person: { id: string }) => person.id),
+          title: `${row.model}: ${now2}`,
+          message:
+            `${tenantUser.fullName ?? "Someone"} changed the ${row.model} lead time from ` +
+            `${was} to ${now2}.` +
+            (typeof body.notes === "string" && body.notes.trim() ? ` "${body.notes.trim()}"` : ""),
+          type: "leadtime",
+          link: "/lead-times",
+          refId: row.id,
+          actorId: tenantUser.id,
+        }),
+        `notify lead time change for ${row.model}`
+      );
     }
 
     await logAudit({

@@ -29,6 +29,7 @@ export const DEFAULT_EMAIL_PREFS: EmailPrefs = {
   checkout: true,
   eco: true,
   system: false,
+  leadtime: true,
 };
 
 interface SendNotificationEmailParams {

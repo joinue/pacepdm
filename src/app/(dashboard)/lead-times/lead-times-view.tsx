@@ -45,6 +45,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { History, Loader2, Plus, Search, Clock, Download } from "lucide-react";
 import { useFetch } from "@/hooks/use-fetch";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useRealtimeTable } from "@/hooks/use-realtime-table";
+import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
+import { useTenantUser } from "@/components/providers/tenant-provider";
 import { fetchJson, errorMessage } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
@@ -57,10 +60,11 @@ import {
 /**
  * What sales quotes, and when engineering last said it.
  *
- * Replaces a shared spreadsheet. The two things it does that the sheet could
- * not: who changed a value and when is stamped rather than typed, and a value
+ * Replaces a shared spreadsheet. The three things it does that the sheet could
+ * not: who changed a value and when is stamped rather than typed, a value
  * nobody has touched for a month is marked stale instead of being quoted as
- * though it were current.
+ * though it were current, and a change someone else makes appears here without
+ * a refresh — sales leaves this page open while quoting.
  */
 
 interface LeadTimeRow {
@@ -146,6 +150,7 @@ function FreshnessBadge({ row }: { row: LeadTimeRow }) {
 export function LeadTimesView() {
   const { can } = usePermissions();
   const canEdit = can(PERMISSIONS.LEAD_TIME_EDIT);
+  const user = useTenantUser();
 
   const { data, loading, error, setData, refetch } = useFetch<{ leadTimes: LeadTimeRow[] }>(
     "/api/lead-times"
@@ -175,6 +180,18 @@ export function LeadTimesView() {
   const unsetCount = rows.filter((r) => leadTimeFreshness(r) === "unset").length;
   const attentionCount = staleCount + unsetCount;
 
+  // Someone else's change lands here. The guard keeps our own write from
+  // costing a second fetch, since `save` already patches the row it changed.
+  const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+  useRealtimeTable({
+    table: "equipment_lead_times",
+    filter: `tenantId=eq.${user.tenantId}`,
+    onChange: () => {
+      if (isEcho()) return;
+      void refetch();
+    },
+  });
+
   /** Row-scoped optimistic patch, rolled back on failure. */
   function patchRow(id: string, patch: Partial<LeadTimeRow>) {
     setData((prev) =>
@@ -186,6 +203,7 @@ export function LeadTimesView() {
 
   async function save(row: LeadTimeRow, patch: Partial<LeadTimeRow>) {
     const before = { ...row };
+    markLocalWrite();
     setSavingId(row.id);
     patchRow(row.id, patch);
     try {
@@ -384,7 +402,14 @@ export function LeadTimesView() {
         </div>
       )}
 
-      <AddEquipmentDialog open={showAdd} onOpenChange={setShowAdd} onAdded={() => void refetch()} />
+      <AddEquipmentDialog
+        open={showAdd}
+        onOpenChange={setShowAdd}
+        onAdded={() => {
+          markLocalWrite();
+          void refetch();
+        }}
+      />
       <HistorySheet row={historyFor} onClose={() => setHistoryFor(null)} />
     </PageContainer>
   );

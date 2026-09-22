@@ -62,9 +62,29 @@ shared file stamped by the app instead.
   to work before the part library is complete, which is the whole reason sales
   asked for a spreadsheet.
 
-**Still worth doing:** nobody is notified when a lead time changes — sales has
-to open the page. A weekly digest of what moved, or a notification on the
-models someone follows, is the obvious next step and is not built.
+**Notifications and live updates — added 2026-09-22, migration 058.**
+
+- A change to the quoted lead time notifies everyone active in the workspace,
+  in-app and by email, through the same `notify()` path everything else uses.
+  A change to a note or a description says nothing: it is not news.
+- `leadtime` is a notification and email type of its own (migration 058 widens
+  the `notifications.type` CHECK from migration 028). That is what lets one
+  person turn these emails off on their profile without also losing everything
+  filed under `system`. Default on, because sales asked for them and an opt-in
+  nobody finds is the spreadsheet again.
+- The profile page's email preferences used to declare their own copy of the
+  type list, so a type added on the server had no checkbox. It now derives
+  from `EmailType`.
+- The page subscribes to `equipment_lead_times` and refetches when someone
+  else changes a row, with the usual echo guard so our own write does not cost
+  a second fetch. Migration 058 adds the table to the `supabase_realtime`
+  publication — without that, the subscription succeeds and silently never
+  fires.
+
+**Still worth doing:** everyone hears about every change. For this team that
+is right — it is one page and a handful of changes a week — but if it turns
+noisy, the next step is either a daily digest or letting people follow the
+models they quote, rather than telling people to switch the emails off.
 
 ## 2. The change log — designed, not built
 

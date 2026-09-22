@@ -16,10 +16,15 @@ const state = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({ getServiceClient: () => state.fake.client }));
 vi.mock("@/lib/auth", () => ({ getApiTenantUser: () => Promise.resolve(state.user) }));
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/lib/notifications", () => ({
+  notify: vi.fn().mockResolvedValue(undefined),
+  sideEffect: (p: Promise<unknown>) => p,
+}));
 
 import { GET, POST } from "./route";
 import { PUT, GET as HISTORY } from "./[leadTimeId]/route";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
 const TENANT = "tenant-1";
 const ROW_ID = "11111111-1111-4111-8111-111111111111";
@@ -69,6 +74,12 @@ beforeEach(() => {
       },
     ],
     equipment_lead_time_changes: [],
+    tenant_users: [
+      { id: "user-1", tenantId: TENANT, fullName: "Alice", isActive: true },
+      { id: "user-2", tenantId: TENANT, fullName: "Sam", isActive: true },
+      { id: "user-3", tenantId: TENANT, fullName: "Gone", isActive: false },
+      { id: "user-9", tenantId: "tenant-OTHER", fullName: "Someone else", isActive: true },
+    ],
   });
 });
 
@@ -145,6 +156,26 @@ describe("PUT /api/lead-times/[leadTimeId]", () => {
   it("404s equipment in another workspace", async () => {
     state.fake.tables.equipment_lead_times[0].tenantId = "tenant-OTHER";
     expect((await PUT(req("PUT", { currentLeadTime: "In Stock" }), params)).status).toBe(404);
+  });
+
+  it("tells the workspace, which is what sales asked for", async () => {
+    await PUT(req("PUT", { currentLeadTime: "6-8 weeks", notes: "Casting delay" }), params);
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    const sent = vi.mocked(notify).mock.calls[0][0];
+    // Active people in this workspace. notify() drops the actor itself.
+    expect(sent.userIds.sort()).toEqual(["user-1", "user-2"]);
+    expect(sent).toMatchObject({ type: "leadtime", link: "/lead-times", actorId: "user-1" });
+    expect(sent.title).toBe("MEGA-T300A: 6-8 weeks");
+    expect(sent.message).toMatch(
+      /Alice changed the MEGA-T300A lead time from not set to 6-8 weeks/
+    );
+    expect(sent.message).toMatch(/Casting delay/);
+  });
+
+  it("says nothing when only a note changed", async () => {
+    await PUT(req("PUT", { notes: "Ask the shop" }), params);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("records the change in the audit log", async () => {
