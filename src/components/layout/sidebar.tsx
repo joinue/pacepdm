@@ -26,6 +26,7 @@ import {
   Workflow,
   Palette,
   Rocket,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -57,6 +58,10 @@ const navGroups: NavGroup[] = [
       { name: "Vendors", href: "/vendors", icon: Building2 },
       { name: "BOMs", href: "/boms", icon: Package, badge: "boms" },
     ],
+  },
+  {
+    label: "Sales",
+    items: [{ name: "Lead Times", href: "/lead-times", icon: Clock }],
   },
   {
     label: "Change",

@@ -164,6 +164,22 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
         filters.push((r) => (r[column] ?? null) === value);
         return query;
       },
+      /** Case-insensitive match. `%` at either end is the only wildcard callers use here. */
+      ilike(column: string, pattern: string) {
+        const needle = pattern.replace(/%/g, "").toLowerCase();
+        const anchoredStart = !pattern.startsWith("%");
+        const anchoredEnd = !pattern.endsWith("%");
+        filters.push((r) => {
+          const value = r[column];
+          if (typeof value !== "string") return false;
+          const haystack = value.toLowerCase();
+          if (anchoredStart && anchoredEnd) return haystack === needle;
+          if (anchoredStart) return haystack.startsWith(needle);
+          if (anchoredEnd) return haystack.endsWith(needle);
+          return haystack.includes(needle);
+        });
+        return query;
+      },
       in(column: string, list: unknown[]) {
         if (list.length > 200) {
           throw new Error(`.in() with ${list.length} values would exceed the URL limit`);

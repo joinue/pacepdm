@@ -40,6 +40,8 @@ export const TENANT_SCOPED_TABLES = new Set([
   "bom_snapshots",
   "boms",
   "ecos",
+  "equipment_lead_time_changes",
+  "equipment_lead_times",
   "files",
   "folder_access",
   "folders",

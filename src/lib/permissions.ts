@@ -44,6 +44,10 @@ export const PERMISSIONS = {
   // able to mint external-facing URLs even though they can open the
   // file internally.
   SHARE_CREATE: "share.create",
+  // State the lead time sales quotes for a machine. Separate from file.edit
+  // because it is an operations fact, not engineering data, and because sales
+  // reads the page with no permission at all — a Viewer sees lead times.
+  LEAD_TIME_EDIT: "leadtime.edit",
 } as const;
 
 export function hasPermission(userPermissions: string[], required: string): boolean {
@@ -185,6 +189,11 @@ export const PERMISSION_INFO: Record<string, { label: string; description: strin
     label: "Create share links",
     description: "Mint public, external-facing URLs for files and BOMs.",
   },
+  [PERMISSIONS.LEAD_TIME_EDIT]: {
+    label: "Update equipment lead times",
+    description:
+      "Set the lead time sales quotes for a machine, and add models to the list. Everyone can read the lead-time page.",
+  },
 };
 
 const ENGINEER_PERMISSIONS: string[] = [
@@ -199,6 +208,7 @@ const ENGINEER_PERMISSIONS: string[] = [
   PERMISSIONS.ECO_CREATE,
   PERMISSIONS.ECO_EDIT,
   PERMISSIONS.SHARE_CREATE,
+  PERMISSIONS.LEAD_TIME_EDIT,
 ];
 
 export const DEFAULT_ROLES = {

@@ -112,6 +112,11 @@ const METRICS = {
     countFiles(join(ROOT, "src/app/api/boms"), (p) =>
       p.replace(/\\/g, "/").endsWith("/import/route.ts")
     ),
+  /** Lead-time route files (docs/plans/sales-visibility.md). The page sales reads. */
+  "lead-time-routes": () =>
+    countFiles(join(ROOT, "src/app/api/lead-times"), (p) =>
+      p.replace(/\\/g, "/").endsWith("/route.ts")
+    ),
   /** Migrations declaring an ERP `externalId` column. 0 until we add one. */
   "erp-external-id": () =>
     grepCountFiles(join(ROOT, "supabase/migrations"), /\bexternalId\b/, isMigration),

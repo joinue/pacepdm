@@ -51,6 +51,8 @@ const LOCKED_TABLES = [
   "comment_mentions",
   "eco_items",
   "ecos",
+  "equipment_lead_time_changes",
+  "equipment_lead_times",
   "file_references",
   "file_versions",
   "files",

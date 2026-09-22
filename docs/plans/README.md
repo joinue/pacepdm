@@ -34,4 +34,5 @@ Available metrics live in `METRICS` at the top of [`../../scripts/lint-plans.mjs
 | [`codebase-hardening.md`](codebase-hardening.md)   | In progress — the route wrapper, `useFetch` adoption, and the `src/features/` move |
 | [`cad-erp-integration.md`](cad-erp-integration.md) | In progress — decisions settled; the item-master import gates the rest             |
 | [`change-control.md`](change-control.md)           | In progress — one item: effectivity is stored and nothing reads it                 |
+| [`sales-visibility.md`](sales-visibility.md)       | Lead times built; the change log designed, not built                               |
 | [`functional-audit.md`](functional-audit.md)       | Third pass: Stages 1–2 done in code; Stage 3 in progress                           |
