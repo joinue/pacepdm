@@ -42,7 +42,18 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { History, Loader2, Plus, Search, Clock, Download, Flag, Check } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  History,
+  Loader2,
+  Plus,
+  Search,
+  Clock,
+  Download,
+  Flag,
+  Check,
+  StickyNote,
+} from "lucide-react";
 import { useFetch } from "@/hooks/use-fetch";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
@@ -55,6 +66,8 @@ import {
   LEAD_TIME_STALE_DAYS,
   describeFreshness,
   leadTimeFreshness,
+  noteLines,
+  noteSummary,
 } from "@/lib/lead-times";
 
 /**
@@ -181,6 +194,80 @@ function LeadTimePicker({
   );
 }
 
+/**
+ * A note's reasons, as a list.
+ *
+ * Notes began as a phrase beside a lead time and became where the backlog is
+ * explained — "castings 10 weeks", "boards on allocation", "paint booth
+ * down". One line is a sentence; several are a list, because that is how they
+ * are written and how they are read.
+ */
+function NoteBody({ note }: { note: string | null }) {
+  const lines = noteLines(note);
+  if (lines.length === 0) {
+    return <p className="text-sm text-muted-foreground">No note yet.</p>;
+  }
+  if (lines.length === 1) return <p className="text-sm">{lines[0]}</p>;
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-sm">
+      {lines.map((line, i) => (
+        <li key={i}>{line}</li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The note in a table cell: the first reason, and how many more there are.
+ *
+ * A single-line input here could hold a phrase and nothing else, so a note of
+ * four reasons was unreadable and unwritable in the row. The cell is now a way
+ * into the note rather than the note itself.
+ */
+function NoteCell({
+  row,
+  canNote,
+  onOpen,
+}: {
+  row: LeadTimeRow;
+  canNote: boolean;
+  onOpen: () => void;
+}) {
+  const { first, more } = noteSummary(row.notes);
+
+  if (!first) {
+    if (!canNote) return <span className="text-xs text-muted-foreground">—</span>;
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 justify-start px-2 text-xs text-muted-foreground"
+        onClick={onOpen}
+      >
+        <StickyNote className="w-3.5 h-3.5 mr-1.5" />
+        Add note
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-auto w-full justify-start whitespace-normal px-2 py-1.5 text-left text-xs"
+      aria-label={`Note for ${row.model}`}
+      onClick={onOpen}
+    >
+      <span className="line-clamp-2">{first}</span>
+      {more > 0 && (
+        <Badge variant="muted" className="ml-1.5 shrink-0">
+          +{more}
+        </Badge>
+      )}
+    </Button>
+  );
+}
+
 /** "Not set yet" / "Updated 3 days ago", plus the tone that goes with it. */
 function FreshnessBadge({ row }: { row: LeadTimeRow }) {
   const freshness = leadTimeFreshness(row);
@@ -211,6 +298,7 @@ export function LeadTimesView() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [historyFor, setHistoryFor] = useState<LeadTimeRow | null>(null);
+  const [notesFor, setNotesFor] = useState<LeadTimeRow | null>(null);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -432,20 +520,8 @@ export function LeadTimesView() {
                         <span className="text-sm font-medium">{row.currentLeadTime ?? "—"}</span>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-56">
-                      {canNote ? (
-                        <Input
-                          defaultValue={row.notes ?? ""}
-                          placeholder="Backorder, special build..."
-                          className="h-8 text-xs"
-                          onBlur={(e) => {
-                            const next = e.target.value.trim();
-                            if (next !== (row.notes ?? "")) void save(row, { notes: next || null });
-                          }}
-                        />
-                      ) : (
-                        <span className="text-xs text-muted-foreground">{row.notes}</span>
-                      )}
+                    <TableCell className="max-w-64">
+                      <NoteCell row={row} canNote={canNote} onOpen={() => setNotesFor(row)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
@@ -526,6 +602,16 @@ export function LeadTimesView() {
           markLocalWrite();
           void refetch();
         }}
+      />
+      <NotesSheet
+        row={notesFor ? (rows.find((r) => r.id === notesFor.id) ?? notesFor) : null}
+        canNote={canNote}
+        saving={savingId === notesFor?.id}
+        onSave={async (note) => {
+          if (!notesFor) return;
+          await save(notesFor, { notes: note });
+        }}
+        onClose={() => setNotesFor(null)}
       />
       <HistorySheet row={historyFor} onClose={() => setHistoryFor(null)} />
     </PageContainer>
@@ -637,6 +723,91 @@ function AddEquipmentDialog({
   );
 }
 
+/**
+ * The note, in full, with room to write it.
+ *
+ * Read first, edit on request: this is a shared page, and a textarea that is
+ * always live invites an accidental keystroke into a note three people rely
+ * on.
+ */
+function NotesSheet({
+  row,
+  canNote,
+  saving,
+  onSave,
+  onClose,
+}: {
+  row: LeadTimeRow | null;
+  canNote: boolean;
+  saving: boolean;
+  onSave: (note: string | null) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const editing = draft !== null;
+
+  function close() {
+    setDraft(null);
+    onClose();
+  }
+
+  return (
+    <Sheet open={!!row} onOpenChange={(open) => !open && close()}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle>{row?.model}</SheetTitle>
+          <SheetDescription>
+            Why this lead time is what it is — a backorder, an allocation, a special build.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="space-y-3 px-4 pb-4">
+          {editing ? (
+            <>
+              <Textarea
+                value={draft}
+                rows={8}
+                autoFocus
+                placeholder={
+                  "One reason per line:\ncastings out to 10 weeks\ncontrol boards on allocation"
+                }
+                onChange={(e) => setDraft(e.target.value)}
+              />
+              <p className="text-2xs text-muted-foreground">
+                Each line shows as its own point on the list.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={saving}
+                  onClick={async () => {
+                    await onSave(draft.trim() || null);
+                    setDraft(null);
+                  }}
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+                  Save note
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setDraft(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <NoteBody note={row?.notes ?? null} />
+              {canNote && (
+                <Button size="sm" variant="outline" onClick={() => setDraft(row?.notes ?? "")}>
+                  {row?.notes ? "Edit note" : "Write a note"}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function HistorySheet({ row, onClose }: { row: LeadTimeRow | null; onClose: () => void }) {
   const { data, loading } = useFetch<{ changes: Change[] }>(
     row ? `/api/lead-times/${row.id}` : null
@@ -670,7 +841,11 @@ function HistorySheet({ row, onClose }: { row: LeadTimeRow | null; onClose: () =
                   {personName(change.changedBy) ?? "Someone"} ·{" "}
                   <FormattedDate date={change.changedAt} variant="datetime" />
                 </p>
-                {change.note && <p className="text-xs mt-1.5">{change.note}</p>}
+                {change.note && (
+                  <div className="mt-1.5">
+                    <NoteBody note={change.note} />
+                  </div>
+                )}
               </div>
             ))
           )}
