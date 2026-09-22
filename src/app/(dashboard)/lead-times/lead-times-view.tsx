@@ -42,7 +42,7 @@ import { FormattedDate } from "@/components/ui/formatted-date";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { History, Loader2, Plus, Search, Clock, Download } from "lucide-react";
+import { History, Loader2, Plus, Search, Clock, Download, Flag, Check } from "lucide-react";
 import { useFetch } from "@/hooks/use-fetch";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useRealtimeTable } from "@/hooks/use-realtime-table";
@@ -67,6 +67,8 @@ import {
  * a refresh — sales leaves this page open while quoting.
  */
 
+type Person = { fullName: string | null } | { fullName: string | null }[] | null;
+
 interface LeadTimeRow {
   id: string;
   model: string;
@@ -75,8 +77,12 @@ interface LeadTimeRow {
   currentLeadTime: string | null;
   notes: string | null;
   updatedAt: string | null;
+  /** Set when someone has asked for this lead time to be confirmed. */
+  flaggedAt?: string | null;
+  flagReason?: string | null;
   // A to-one join, which the Supabase client types as an array.
-  updatedBy: { fullName: string | null } | { fullName: string | null }[] | null;
+  updatedBy: Person;
+  flaggedBy?: Person;
 }
 
 interface Change {
@@ -88,7 +94,7 @@ interface Change {
   changedBy: { fullName: string | null } | { fullName: string | null }[] | null;
 }
 
-function personName(who: LeadTimeRow["updatedBy"]): string | null {
+function personName(who: Person | undefined): string | null {
   const one = Array.isArray(who) ? who[0] : who;
   return one?.fullName ?? null;
 }
@@ -190,6 +196,9 @@ function FreshnessBadge({ row }: { row: LeadTimeRow }) {
 export function LeadTimesView() {
   const { can } = usePermissions();
   const canEdit = can(PERMISSIONS.LEAD_TIME_EDIT);
+  // Sales asks; a sales manager also writes the note beside the answer.
+  const canFlag = can(PERMISSIONS.LEAD_TIME_FLAG);
+  const canNote = canEdit || can(PERMISSIONS.LEAD_TIME_NOTE);
   const user = useTenantUser();
 
   const { data, loading, error, setData, refetch } = useFetch<{ leadTimes: LeadTimeRow[] }>(
@@ -206,7 +215,7 @@ export function LeadTimesView() {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
-      if (needsAttention && leadTimeFreshness(r) === "fresh") return false;
+      if (needsAttention && leadTimeFreshness(r) === "fresh" && !r.flaggedAt) return false;
       if (!q) return true;
       return (
         r.model.toLowerCase().includes(q) ||
@@ -218,7 +227,10 @@ export function LeadTimesView() {
 
   const staleCount = rows.filter((r) => leadTimeFreshness(r) === "stale").length;
   const unsetCount = rows.filter((r) => leadTimeFreshness(r) === "unset").length;
-  const attentionCount = staleCount + unsetCount;
+  const flaggedCount = rows.filter((r) => !!r.flaggedAt).length;
+  const attentionCount = rows.filter(
+    (r) => leadTimeFreshness(r) !== "fresh" || !!r.flaggedAt
+  ).length;
 
   // Someone else's change lands here. The guard keeps our own write from
   // costing a second fetch, since `save` already patches the row it changed.
@@ -254,6 +266,33 @@ export function LeadTimesView() {
       patchRow(row.id, updated);
     } catch (err) {
       patchRow(row.id, before);
+      toast.error(errorMessage(err));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  /** Ask for a lead time to be confirmed, or drop the ask once it is. */
+  async function toggleFlag(row: LeadTimeRow) {
+    const flagged = !!row.flaggedAt;
+    const reason = flagged
+      ? null
+      : (window.prompt(`Why does ${row.model} need checking? (optional)`) ?? "");
+    // A cancelled prompt on an unflagged row means "never mind".
+    if (!flagged && reason === null) return;
+
+    markLocalWrite();
+    setSavingId(row.id);
+    try {
+      const updated = await fetchJson<LeadTimeRow>(`/api/lead-times/${row.id}/flag`, {
+        method: flagged ? "DELETE" : "POST",
+        body: flagged ? undefined : { reason: reason || null },
+      });
+      patchRow(row.id, updated);
+      toast.success(
+        flagged ? `${row.model} is no longer flagged` : `Asked for ${row.model} to be confirmed`
+      );
+    } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setSavingId(null);
@@ -303,9 +342,13 @@ export function LeadTimesView() {
 
       {attentionCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {staleCount > 0 && `${staleCount} older than ${LEAD_TIME_STALE_DAYS} days`}
-          {staleCount > 0 && unsetCount > 0 && " · "}
-          {unsetCount > 0 && `${unsetCount} never set`}
+          {[
+            flaggedCount > 0 && `${flaggedCount} flagged for a check`,
+            staleCount > 0 && `${staleCount} older than ${LEAD_TIME_STALE_DAYS} days`,
+            unsetCount > 0 && `${unsetCount} never set`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
       )}
 
@@ -390,7 +433,7 @@ export function LeadTimesView() {
                       )}
                     </TableCell>
                     <TableCell className="max-w-56">
-                      {canEdit ? (
+                      {canNote ? (
                         <Input
                           defaultValue={row.notes ?? ""}
                           placeholder="Backorder, special build..."
@@ -406,6 +449,13 @@ export function LeadTimesView() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-0.5">
+                        {row.flaggedAt && (
+                          <Badge variant="warning" className="w-fit">
+                            <Flag className="w-3 h-3" />
+                            {personName(row.flaggedBy) ?? "Someone"} asked for a check
+                          </Badge>
+                        )}
+                        {row.flagReason && <span className="text-2xs">{row.flagReason}</span>}
                         <FreshnessBadge row={row} />
                         {who && (
                           <span className="text-2xs text-muted-foreground">
@@ -424,15 +474,41 @@ export function LeadTimesView() {
                       {savingId === row.id ? (
                         <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                       ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          aria-label={`History for ${row.model}`}
-                          onClick={() => setHistoryFor(row)}
-                        >
-                          <History className="w-4 h-4" />
-                        </Button>
+                        <div className="flex items-center gap-0.5">
+                          {(canFlag || (canEdit && row.flaggedAt)) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              aria-label={
+                                row.flaggedAt
+                                  ? `Clear the flag on ${row.model}`
+                                  : `Ask for ${row.model} to be confirmed`
+                              }
+                              title={
+                                row.flaggedAt
+                                  ? "Checked — clear the flag"
+                                  : "Ask for this lead time to be confirmed"
+                              }
+                              onClick={() => void toggleFlag(row)}
+                            >
+                              {row.flaggedAt ? (
+                                <Check className="w-4 h-4" />
+                              ) : (
+                                <Flag className="w-4 h-4" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            aria-label={`History for ${row.model}`}
+                            onClick={() => setHistoryFor(row)}
+                          >
+                            <History className="w-4 h-4" />
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>

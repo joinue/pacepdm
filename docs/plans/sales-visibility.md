@@ -4,8 +4,7 @@
 built; the change log is designed and not built
 
 <!-- plan-metrics
-lead-time-routes: 2
--->
+lead-time-routes: 3-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them
 > from the codebase and fails the build if this plan has drifted.
@@ -84,6 +83,30 @@ shared file stamped by the app instead.
   a second fetch. Migration 058 adds the table to the `supabase_realtime`
   publication — without that, the subscription succeeds and silently never
   fires.
+
+**Flagging, and two sales roles — added 2026-09-22, migration 059.**
+
+- **Sales can ask, without being able to answer.** `leadtime.flag` marks a
+  machine as needing a check, with an optional reason ("quoting Acme Friday"),
+  and notifies everyone who holds `leadtime.edit` — found by reading the
+  roles' permissions, never by role name (`docs/decisions/system-roles.md`).
+  Setting the lead time clears the flag, because that is the answer; someone
+  who can edit can also clear it by hand ("checked, still six weeks"). Sales
+  cannot clear their own flag — an ask that the asker can tidy away is not an
+  ask.
+- **`leadtime.note`** writes the note beside a lead time without setting the
+  lead time. The PUT route declares no permission of its own and checks per
+  field, because what the write needs depends on which field it touches: the
+  documented exception to declaring permissions in the wrapper.
+- **The two roles are custom, in this workspace only.** Not in
+  `DEFAULT_ROLES` — every other tenant would get "Sales" and "Sales Manager"
+  whether or not they sell anything. Migration 059 seeds them as ordinary
+  `isSystem = false` roles, so the Roles page can edit or delete them:
+  Sales is `file.view` + `leadtime.flag`, Sales Manager adds `leadtime.note`.
+  Read-only everywhere else, which is what `file.view` alone means. The
+  migration targets the only tenant in the database and refuses to guess if
+  there is more than one.
+- Flagged machines join the "needs attention" filter, above stale ones.
 
 **Still worth doing:** everyone hears about every change. For this team that
 is right — it is one page and a handful of changes a week — but if it turns

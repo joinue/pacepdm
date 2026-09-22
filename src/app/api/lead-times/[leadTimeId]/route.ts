@@ -1,6 +1,6 @@
 import { v4 as newId } from "uuid";
-import { withTenant, badRequest, notFound } from "@/lib/api-route";
-import { PERMISSIONS } from "@/lib/permissions";
+import { withTenant, badRequest, forbidden, notFound } from "@/lib/api-route";
+import { PERMISSIONS, hasPermission } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { LEAD_TIME_OPTIONS, isLeadTime } from "@/lib/lead-times";
@@ -30,7 +30,12 @@ const ParamsSchema = z.object({ leadTimeId: uuid });
 
 const COLUMNS =
   "id, model, description, typicalLeadTime, currentLeadTime, notes, updatedAt, " +
-  "updatedBy:tenant_users!equipment_lead_times_updatedById_fkey(fullName)";
+  "flaggedAt, flagReason, " +
+  "updatedBy:tenant_users!equipment_lead_times_updatedById_fkey(fullName), " +
+  "flaggedBy:tenant_users!equipment_lead_times_flaggedById_fkey(fullName)";
+
+/** Everything but the note. Writing one of these is stating a lead time. */
+const EDITOR_FIELDS = ["currentLeadTime", "typicalLeadTime", "description"] as const;
 
 function checkOption(value: string | null | undefined, field: string) {
   if (value === null || value === undefined) return;
@@ -43,14 +48,33 @@ function checkOption(value: string | null | undefined, field: string) {
 }
 
 export const PUT = withTenant(
-  { permission: PERMISSIONS.LEAD_TIME_EDIT, body: UpdateSchema, params: ParamsSchema },
-  async ({ db, tenantUser, params, body }) => {
+  // No permission declared here: what this needs depends on which field is
+  // being written, which the wrapper cannot see. A sales manager writes the
+  // note beside a lead time without being able to set the lead time, so the
+  // two are checked separately below — the documented exception, not a
+  // hand-rolled gate.
+  { body: UpdateSchema, params: ParamsSchema },
+  async ({ db, tenantUser, params, body, permissions }) => {
+    const setsLeadTime = EDITOR_FIELDS.some((field) => body[field] !== undefined);
+    const canEdit = hasPermission(permissions, PERMISSIONS.LEAD_TIME_EDIT);
+    const canNote = hasPermission(permissions, PERMISSIONS.LEAD_TIME_NOTE);
+
+    if (setsLeadTime && !canEdit) {
+      throw forbidden(
+        `Setting a lead time needs the "Update equipment lead times" permission. ` +
+          `You can flag the machine instead, which asks whoever can.`
+      );
+    }
+    if (!setsLeadTime && !canEdit && !canNote) {
+      throw forbidden(`Writing a lead-time note needs the "Write lead-time notes" permission.`);
+    }
+
     checkOption(body.currentLeadTime, "currentLeadTime");
     checkOption(body.typicalLeadTime, "typicalLeadTime");
 
     const { data: row, error: readError } = await db
       .from("equipment_lead_times")
-      .select("id, model, currentLeadTime, typicalLeadTime, description, notes")
+      .select("id, model, currentLeadTime, typicalLeadTime, description, notes, flaggedAt")
       .eq("id", params.leadTimeId)
       .is("deletedAt", null)
       .maybeSingle();
@@ -61,6 +85,14 @@ export const PUT = withTenant(
     const updates: Record<string, unknown> = { updatedAt: now, updatedById: tenantUser.id };
     for (const field of ["currentLeadTime", "typicalLeadTime", "description", "notes"] as const) {
       if (body[field] !== undefined) updates[field] = body[field];
+    }
+
+    // Setting the quoted lead time answers whatever was asked, so the flag
+    // goes with it rather than waiting for someone to tidy up.
+    if (body.currentLeadTime !== undefined && row.flaggedAt) {
+      updates.flaggedAt = null;
+      updates.flaggedById = null;
+      updates.flagReason = null;
     }
 
     const { data: updated, error } = await db

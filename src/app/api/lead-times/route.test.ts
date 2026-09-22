@@ -23,6 +23,7 @@ vi.mock("@/lib/notifications", () => ({
 
 import { GET, POST } from "./route";
 import { PUT, GET as HISTORY } from "./[leadTimeId]/route";
+import { POST as FLAG, DELETE as UNFLAG } from "./[leadTimeId]/flag/route";
 import { logAudit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
 
@@ -37,11 +38,21 @@ const engineer = {
   roleId: "role-eng",
   role: { permissions: ["leadtime.edit"] },
 };
+/** Read-only everywhere, and can ask for a lead time to be confirmed. */
 const salesperson = {
   ...engineer,
   id: "user-2",
   fullName: "Sam",
-  role: { permissions: ["file.view"] },
+  roleId: "role-sales",
+  role: { permissions: ["file.view", "leadtime.flag"] },
+};
+/** Sales, plus the note beside the answer. */
+const salesManager = {
+  ...salesperson,
+  id: "user-4",
+  fullName: "Dana",
+  roleId: "role-sales-manager",
+  role: { permissions: ["file.view", "leadtime.flag", "leadtime.note"] },
 };
 
 function req(method: string, body?: unknown) {
@@ -75,10 +86,28 @@ beforeEach(() => {
     ],
     equipment_lead_time_changes: [],
     tenant_users: [
-      { id: "user-1", tenantId: TENANT, fullName: "Alice", isActive: true },
-      { id: "user-2", tenantId: TENANT, fullName: "Sam", isActive: true },
-      { id: "user-3", tenantId: TENANT, fullName: "Gone", isActive: false },
-      { id: "user-9", tenantId: "tenant-OTHER", fullName: "Someone else", isActive: true },
+      { id: "user-1", tenantId: TENANT, fullName: "Alice", roleId: "role-eng", isActive: true },
+      { id: "user-2", tenantId: TENANT, fullName: "Sam", roleId: "role-sales", isActive: true },
+      { id: "user-3", tenantId: TENANT, fullName: "Gone", roleId: "role-eng", isActive: false },
+      { id: "user-5", tenantId: TENANT, fullName: "Ada", roleId: "role-admin", isActive: true },
+      {
+        id: "user-9",
+        tenantId: "tenant-OTHER",
+        fullName: "Someone else",
+        roleId: "role-eng",
+        isActive: true,
+      },
+    ],
+    roles: [
+      { id: "role-eng", tenantId: TENANT, name: "Engineer", permissions: ["leadtime.edit"] },
+      { id: "role-admin", tenantId: TENANT, name: "Admin", permissions: ["*"] },
+      { id: "role-sales", tenantId: TENANT, name: "Sales", permissions: ["leadtime.flag"] },
+      {
+        id: "role-sales-manager",
+        tenantId: TENANT,
+        name: "Sales Manager",
+        permissions: ["leadtime.flag", "leadtime.note"],
+      },
     ],
   });
 });
@@ -163,8 +192,9 @@ describe("PUT /api/lead-times/[leadTimeId]", () => {
 
     expect(notify).toHaveBeenCalledTimes(1);
     const sent = vi.mocked(notify).mock.calls[0][0];
-    // Active people in this workspace. notify() drops the actor itself.
-    expect(sent.userIds.sort()).toEqual(["user-1", "user-2"]);
+    // Every active person in this workspace, whatever their role — sales hears
+    // it, and so does everyone else. notify() drops the actor itself.
+    expect(sent.userIds.sort()).toEqual(["user-1", "user-2", "user-5"]);
     expect(sent).toMatchObject({ type: "leadtime", link: "/lead-times", actorId: "user-1" });
     expect(sent.title).toBe("MEGA-T300A: 6-8 weeks");
     expect(sent.message).toMatch(
@@ -245,5 +275,88 @@ describe("GET /api/lead-times/[leadTimeId]", () => {
     expect(body.model).toBe("MEGA-T300A");
     expect(body.changes).toHaveLength(1);
     expect(body.changes[0]).toMatchObject({ fromLeadTime: "4 weeks", toLeadTime: "6-8 weeks" });
+  });
+});
+
+/**
+ * Sales can read the page and not change it, so asking "is six weeks still
+ * right?" had to happen by email — the habit this page replaces.
+ */
+describe("flagging a lead time for a check", () => {
+  it("marks the machine and tells everyone who can answer", async () => {
+    state.user = salesperson;
+
+    const res = await FLAG(req("POST", { reason: "Quoting Acme Friday" }), params);
+
+    expect(res.status).toBe(200);
+    expect(rows()[0]).toMatchObject({ flaggedById: "user-2", flagReason: "Quoting Acme Friday" });
+    expect(rows()[0].flaggedAt).toBeTruthy();
+
+    const sent = vi.mocked(notify).mock.calls[0][0];
+    // The engineer and the admin — not the other salesperson, and not the
+    // deactivated user.
+    expect(sent.userIds.sort()).toEqual(["user-1", "user-5"]);
+    expect(sent.message).toMatch(/Sam asked for the MEGA-T300A lead time to be confirmed/);
+    expect(sent.message).toMatch(/Quoting Acme Friday/);
+  });
+
+  it("refuses someone with no flag permission", async () => {
+    state.user = { ...salesperson, role: { permissions: ["file.view"] } };
+    expect((await FLAG(req("POST", {}), params)).status).toBe(403);
+    expect(rows()[0].flaggedAt).toBeFalsy();
+  });
+
+  it("will not flag the same machine twice", async () => {
+    state.user = salesperson;
+    await FLAG(req("POST", {}), params);
+    const again = await FLAG(req("POST", {}), params);
+    expect(again.status).toBe(409);
+  });
+
+  it("clears the flag when the lead time is set, since that is the answer", async () => {
+    state.fake.tables.equipment_lead_times[0].flaggedAt = "2026-09-20T00:00:00Z";
+    state.fake.tables.equipment_lead_times[0].flaggedById = "user-2";
+    state.fake.tables.equipment_lead_times[0].flagReason = "Quoting Acme";
+
+    await PUT(req("PUT", { currentLeadTime: "6-8 weeks" }), params);
+
+    expect(rows()[0].flaggedAt).toBeNull();
+    expect(rows()[0].flagReason).toBeNull();
+  });
+
+  it("lets someone who can answer drop the flag without changing the number", async () => {
+    state.fake.tables.equipment_lead_times[0].flaggedAt = "2026-09-20T00:00:00Z";
+    const res = await UNFLAG(req("DELETE"), params);
+    expect(res.status).toBe(200);
+    expect(rows()[0].flaggedAt).toBeNull();
+  });
+
+  it("does not let sales clear their own flag — the point is that it is answered", async () => {
+    state.fake.tables.equipment_lead_times[0].flaggedAt = "2026-09-20T00:00:00Z";
+    state.user = salesperson;
+    expect((await UNFLAG(req("DELETE"), params)).status).toBe(403);
+    expect(rows()[0].flaggedAt).toBeTruthy();
+  });
+});
+
+describe("a sales manager's note", () => {
+  it("writes the note beside a lead time", async () => {
+    state.user = salesManager;
+    const res = await PUT(req("PUT", { notes: "Acme asked for a firm date" }), params);
+    expect(res.status).toBe(200);
+    expect(rows()[0].notes).toBe("Acme asked for a firm date");
+  });
+
+  it("still cannot set the lead time itself", async () => {
+    state.user = salesManager;
+    const res = await PUT(req("PUT", { currentLeadTime: "In Stock" }), params);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/flag the machine instead/);
+    expect(rows()[0].currentLeadTime).toBeNull();
+  });
+
+  it("refuses a note from plain sales", async () => {
+    state.user = salesperson;
+    expect((await PUT(req("PUT", { notes: "nope" }), params)).status).toBe(403);
   });
 });

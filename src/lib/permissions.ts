@@ -48,6 +48,13 @@ export const PERMISSIONS = {
   // because it is an operations fact, not engineering data, and because sales
   // reads the page with no permission at all — a Viewer sees lead times.
   LEAD_TIME_EDIT: "leadtime.edit",
+  // Ask for a machine's lead time to be checked. The people who can answer
+  // are told; the asker cannot change the number themselves. This is what a
+  // sales role holds, and why it is separate from LEAD_TIME_EDIT.
+  LEAD_TIME_FLAG: "leadtime.flag",
+  // Write the note beside a lead time — a backorder, a special build, what a
+  // customer was told — without setting the lead time itself.
+  LEAD_TIME_NOTE: "leadtime.note",
 } as const;
 
 export function hasPermission(userPermissions: string[], required: string): boolean {
@@ -193,6 +200,16 @@ export const PERMISSION_INFO: Record<string, { label: string; description: strin
     label: "Update equipment lead times",
     description:
       "Set the lead time sales quotes for a machine, and add models to the list. Everyone can read the lead-time page.",
+  },
+  [PERMISSIONS.LEAD_TIME_FLAG]: {
+    label: "Flag a lead time for review",
+    description:
+      "Ask for a machine's lead time to be confirmed. Everyone who can update lead times is notified.",
+  },
+  [PERMISSIONS.LEAD_TIME_NOTE]: {
+    label: "Write lead-time notes",
+    description:
+      "Add the note beside a lead time — a backorder, a special build — without setting the lead time itself.",
   },
 };
 
