@@ -6,6 +6,8 @@ import {
   describeFreshness,
   isLeadTime,
   leadTimeFreshness,
+  noteLines,
+  noteSummary,
 } from "./lead-times";
 
 /**
@@ -89,5 +91,49 @@ describe("isLeadTime", () => {
     expect(LEAD_TIME_OPTIONS[0]).toBe("In Stock");
     expect(LEAD_TIME_OPTIONS).toContain("12+ weeks");
     expect(LEAD_TIME_OPTIONS.at(-1)).toBe("Confirm");
+  });
+});
+
+/**
+ * A note began as a phrase beside a lead time and became where people explain
+ * a backlog — several reasons, typed as a list.
+ */
+describe("noteLines", () => {
+  it("reads each line as its own reason", () => {
+    expect(noteLines("Casting delay\nControl boards on 12-week allocation")).toEqual([
+      "Casting delay",
+      "Control boards on 12-week allocation",
+    ]);
+  });
+
+  it("strips the bullets people type out of habit", () => {
+    expect(noteLines("- Casting delay\n* Boards allocated\n• Paint booth down")).toEqual([
+      "Casting delay",
+      "Boards allocated",
+      "Paint booth down",
+    ]);
+  });
+
+  it("drops blank lines and whitespace, and handles Windows line endings", () => {
+    expect(noteLines("  Casting delay  \r\n\r\n   \r\nBoards allocated")).toEqual([
+      "Casting delay",
+      "Boards allocated",
+    ]);
+  });
+
+  it("is empty for an empty note", () => {
+    expect(noteLines(null)).toEqual([]);
+    expect(noteLines("   ")).toEqual([]);
+  });
+});
+
+describe("noteSummary", () => {
+  it("gives the first reason and the count of the rest", () => {
+    expect(noteSummary("Casting delay\nBoards allocated\nPaint booth down")).toEqual({
+      first: "Casting delay",
+      more: 2,
+    });
+    expect(noteSummary("Casting delay")).toEqual({ first: "Casting delay", more: 0 });
+    expect(noteSummary(null)).toEqual({ first: null, more: 0 });
   });
 });

@@ -56,7 +56,7 @@ export async function notify({
   userIds: string[];
   title: string;
   message: string;
-  type: "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime";
+  type: "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime" | "changelog";
   link?: string;
   refId?: string;
   /** The user whose action triggered this notification. Omit for system events. */

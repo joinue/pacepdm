@@ -30,6 +30,7 @@ const DEFAULT_PREFS: EmailPrefs = {
   eco: true,
   system: false,
   leadtime: true,
+  changelog: true,
 };
 
 const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }> = [
@@ -39,6 +40,11 @@ const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }>
     hint: "You're asked to approve, or a request you made is decided",
   },
   { key: "eco", label: "ECOs", hint: "An ECO you're involved in changes state" },
+  {
+    key: "changelog",
+    label: "Change log",
+    hint: "Engineering posts a change the team should know about",
+  },
   {
     key: "leadtime",
     label: "Lead times",

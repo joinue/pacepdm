@@ -55,6 +55,9 @@ export const PERMISSIONS = {
   // Write the note beside a lead time — a backorder, a special build, what a
   // customer was told — without setting the lead time itself.
   LEAD_TIME_NOTE: "leadtime.note",
+  // Post to the change log — the feed sales reads to find out what
+  // engineering changed. Reading it needs nothing beyond a session.
+  CHANGELOG_POST: "changelog.post",
 } as const;
 
 export function hasPermission(userPermissions: string[], required: string): boolean {
@@ -211,6 +214,11 @@ export const PERMISSION_INFO: Record<string, { label: string; description: strin
     description:
       "Add the note beside a lead time — a backorder, a special build — without setting the lead time itself.",
   },
+  [PERMISSIONS.CHANGELOG_POST]: {
+    label: "Post to the change log",
+    description:
+      "Tell the workspace what changed, with a file attached if there is one. Everyone can read the change log and mark a post as read.",
+  },
 };
 
 const ENGINEER_PERMISSIONS: string[] = [
@@ -226,6 +234,7 @@ const ENGINEER_PERMISSIONS: string[] = [
   PERMISSIONS.ECO_EDIT,
   PERMISSIONS.SHARE_CREATE,
   PERMISSIONS.LEAD_TIME_EDIT,
+  PERMISSIONS.CHANGELOG_POST,
 ];
 
 export const DEFAULT_ROLES = {

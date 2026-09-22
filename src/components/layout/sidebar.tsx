@@ -27,6 +27,7 @@ import {
   Palette,
   Rocket,
   Clock,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 
@@ -61,7 +62,10 @@ const navGroups: NavGroup[] = [
   },
   {
     label: "Sales",
-    items: [{ name: "Lead Times", href: "/lead-times", icon: Clock }],
+    items: [
+      { name: "Change Log", href: "/change-log", icon: Megaphone },
+      { name: "Lead Times", href: "/lead-times", icon: Clock },
+    ],
   },
   {
     label: "Change",

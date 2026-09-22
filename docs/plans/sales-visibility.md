@@ -1,10 +1,11 @@
 # Sales visibility — what engineering changed, and what we can promise
 
-**Started:** 2026-09-22 · **Last updated:** 2026-09-22 · **Status:** lead times
-built; the change log is designed and not built
+**Started:** 2026-09-22 · **Last updated:** 2026-09-22 · **Status:** lead times and the
+change log built; releases still come only from an implemented ECO
 
 <!-- plan-metrics
-lead-time-routes: 3-->
+lead-time-routes: 3
+change-log-routes: 5-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them
 > from the codebase and fails the build if this plan has drifted.
@@ -113,32 +114,42 @@ is right — it is one page and a handful of changes a week — but if it turns
 noisy, the next step is either a daily digest or letting people follow the
 models they quote, rather than telling people to switch the emails off.
 
-## 2. The change log — designed, not built
+## 2. The change log — built 2026-09-22
 
-A feed engineers post to when something changes that sales should know: plain
-words, optionally a PDF, optionally pointing at the part, file, ECO or release
-it is about.
+Migration 060. A feed engineers post to, that sales reads.
 
-What decides whether it works, in order:
+- **`change_log_posts`** — plain words, a category (design, lead time,
+  pricing, documentation, general) and optional links to the part, file, ECO
+  or release it is about. A post carries no status and gates nothing: the
+  moment it can hold something up it is a second ECO, and the two records
+  start disagreeing.
+- **It pushes.** Every post notifies everyone active, in-app and by email,
+  under a `changelog` type people can mute on their own. A feed nobody is
+  told about is the wall this replaces.
+- **`change_log_reads`** — the read receipt, and the half a group chat cannot
+  do: engineering sees a change landed, sales can show they were told. Marking
+  a post read needs no permission; anyone signed in can.
+- **Edits are marked, withdrawals are soft.** `editedAt` shows beside a post;
+  withdrawing sets `deletedAt` and stops the feed showing it without
+  destroying what was said. Only the author edits; an author or an admin
+  withdraws.
+- **`change_log_files`** — attachments in the vault bucket under a
+  `change-log/` prefix, tracked in their own table, NOT in `files`. They are
+  snapshots of what was sent, not controlled documents; in the library they
+  could reach a release package, which is what the ECO process exists to
+  prevent. PDFs, images, CSV, Word and Excel, 25 MB each; downloads go through
+  a short-lived signed URL.
+- Posting needs `changelog.post` (Engineer and above). Reading needs a
+  session — sales holds a read-only role.
+- The feed subscribes to the table, so a post appears without a refresh.
 
-1. **It pushes.** A post lands in the notification bell and a daily email
-   digest. A feed sales has to remember to visit is the wall nobody reads, and
-   six months in the complaint becomes "it was in the change log".
-2. **Sales can acknowledge a post**, and engineering can see who has. That read
-   receipt is the accountability both sides are missing today, and the reason
-   this beats a group chat.
-3. **A post is a notice, never an approval.** No status, no gate, nothing
-   waiting on it. The moment a post can hold something up it becomes a second
-   ECO, and the two records start disagreeing.
-4. **Edits are marked, deletes are not silent.** People argue from this feed.
-5. **Attachments live outside the vault** — snapshots of a PDF someone sent,
-   not controlled documents. Keeping them in `files` would put uncontrolled
-   copies in the library the ECO process depends on.
-
-Open questions for the team before building: whether a post notifies all of
-sales or a chosen audience, and whether sales can reply on a post or only
-acknowledge it.
+**Not built, and deliberate:** no digest (every post notifies immediately, as
+lead-time changes do), no comments on a post — sales acknowledges rather than
+replies, and a thread on a notice is how a notice becomes a negotiation. If
+the team wants to discuss a post, the answer is probably a comment thread with
+the same read receipts, not a chat.
 
 **Later, when ECOs are routine:** "post to the change log" becomes a checkbox
-when a release is created, pre-filled from the ECO. The feed stays the same
-table; what changes is who types the post.
+when a release is created, pre-filled from the ECO — the post's `releaseId`
+and `ecoId` columns are there for exactly that. The table does not change;
+what changes is who types the post.

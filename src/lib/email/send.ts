@@ -30,6 +30,7 @@ export const DEFAULT_EMAIL_PREFS: EmailPrefs = {
   eco: true,
   system: false,
   leadtime: true,
+  changelog: true,
 };
 
 interface SendNotificationEmailParams {

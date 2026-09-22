@@ -92,3 +92,30 @@ export function describeFreshness(row: LeadTimeRow, now: Date = new Date()): str
   if (days === 1) return "Updated yesterday";
   return `Updated ${days} days ago`;
 }
+
+/**
+ * A note as the reasons it holds, one per line.
+ *
+ * Notes started as a phrase beside a lead time ("casting delay") and became
+ * the place people explain a backlog — three or four reasons, typed as a
+ * list. Splitting here rather than in the page means the table, the side
+ * panel and the history all read a note the same way.
+ *
+ * Leading bullets and dashes are stripped: people type them out of habit, and
+ * rendering the list would otherwise show two.
+ */
+export function noteLines(note: string | null | undefined): string[] {
+  return (note ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*•]\s*/, "").trim())
+    .filter((line) => line.length > 0);
+}
+
+/** The first reason, for a table cell, and how many more there are. */
+export function noteSummary(note: string | null | undefined): {
+  first: string | null;
+  more: number;
+} {
+  const lines = noteLines(note);
+  return { first: lines[0] ?? null, more: Math.max(0, lines.length - 1) };
+}

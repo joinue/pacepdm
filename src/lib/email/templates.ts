@@ -6,7 +6,8 @@
  * we can swap the body for React Email without touching callers.
  */
 
-export type EmailType = "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime";
+export type EmailType =
+  "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime" | "changelog";
 
 interface RenderParams {
   type: EmailType;
@@ -30,6 +31,7 @@ const SUBJECT_PREFIX: Record<EmailType, string> = {
   eco: "ECO update",
   system: "Notice",
   leadtime: "Lead time update",
+  changelog: "Change log",
 };
 
 const CTA_LABEL: Record<EmailType, string> = {
@@ -39,6 +41,7 @@ const CTA_LABEL: Record<EmailType, string> = {
   eco: "Open ECO",
   system: "Open",
   leadtime: "Open lead times",
+  changelog: "Open the change log",
 };
 
 export function renderNotificationEmail(p: RenderParams): Rendered {

@@ -66,19 +66,20 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
   }
 
   function from(table: string) {
-    let op: "select" | "insert" | "update" | "delete" = "select";
+    let op: "select" | "insert" | "upsert" | "update" | "delete" = "select";
     let values: Row | Row[] | undefined;
     let returning = false;
     let rangeFrom: number | null = null;
     let rangeTo: number | null = null;
     let limit: number | null = null;
     const filters: ((row: Row) => boolean)[] = [];
+    let conflictColumns: string[] = ["id"];
 
     const exec = async (): Promise<{ data: unknown; error: DbError | null }> => {
-      if (op === "insert" || op === "update") {
-        const hook = beforeNext[op][table];
+      if (op === "insert" || op === "update" || op === "upsert") {
+        const hook = beforeNext[op === "upsert" ? "insert" : op][table];
         if (hook) {
-          delete beforeNext[op][table];
+          delete beforeNext[op === "upsert" ? "insert" : op][table];
           hook();
         }
       }
@@ -104,6 +105,24 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
           rows.push({ ...row });
         }
         return { data: returning ? list.map((r) => ({ ...r })) : null, error: null };
+      }
+
+      if (op === "upsert") {
+        const list = (Array.isArray(values) ? values : [values]) as Row[];
+        const written: Row[] = [];
+        for (const row of list) {
+          const existing = rows.find((candidate) =>
+            conflictColumns.every((column) => candidate[column] === row[column])
+          );
+          if (existing) {
+            Object.assign(existing, row);
+            written.push({ ...existing });
+          } else {
+            rows.push({ ...row });
+            written.push({ ...row });
+          }
+        }
+        return { data: returning ? written : null, error: null };
       }
 
       const matched = rows.filter((row) => filters.every((f) => f(row)));
@@ -141,6 +160,13 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
       insert(v: Row | Row[]) {
         op = "insert";
         values = v;
+        return query;
+      },
+      /** Insert, or merge into the row matching `onConflict`'s columns. */
+      upsert(v: Row | Row[], options?: { onConflict?: string }) {
+        op = "upsert";
+        values = v;
+        conflictColumns = (options?.onConflict ?? "id").split(",").map((c) => c.trim());
         return query;
       },
       update(v: Row) {
