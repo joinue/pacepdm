@@ -106,7 +106,11 @@ shared file stamped by the app instead.
   Sales is `file.view` + `leadtime.flag`, Sales Manager adds `leadtime.note`.
   Read-only everywhere else, which is what `file.view` alone means. The
   migration targets the only tenant in the database and refuses to guess if
-  there is more than one.
+  there is more than one — but it refused with `RAISE NOTICE`, which the
+  Supabase editor shows as a grey line under a green "Success", so with the
+  E2E workspace also in the database 059 created nothing and looked fine.
+  Migration 062 does the same seeding and raises an exception instead. A
+  migration that decides to do nothing has to stop the person running it.
 - Flagged machines join the "needs attention" filter, above stale ones.
 
 **Still worth doing:** everyone hears about every change. For this team that

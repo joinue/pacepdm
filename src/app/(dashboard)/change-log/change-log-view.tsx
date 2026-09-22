@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +26,7 @@ import { useRealtimeTable } from "@/hooks/use-realtime-table";
 import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { fetchJson, uploadFile, errorMessage } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
 import { PERMISSIONS } from "@/lib/permissions";
 import {
   CHANGE_LOG_CATEGORIES,
@@ -69,13 +71,67 @@ function personName(who: Person | undefined): string | null {
   return one?.fullName ?? null;
 }
 
-const CATEGORY_TONE: Record<string, "info" | "warning" | "purple" | "orange" | "muted"> = {
-  DESIGN: "info",
-  LEAD_TIME: "warning",
-  PRICING: "purple",
-  DOCUMENTATION: "orange",
-  GENERAL: "muted",
+/**
+ * A dot per category rather than a filled pill.
+ *
+ * Five saturated badges down a feed read as five warnings; the dot says which
+ * kind at a glance and leaves the words to carry the post.
+ */
+const CATEGORY_DOT: Record<string, string> = {
+  DESIGN: "bg-info",
+  LEAD_TIME: "bg-warning",
+  PRICING: "bg-chart-4",
+  DOCUMENTATION: "bg-chart-3",
+  GENERAL: "bg-neutral",
 };
+
+function CategoryMark({ category }: { category: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+      <span
+        aria-hidden
+        className={cn("size-2 rounded-full", CATEGORY_DOT[category] ?? "bg-neutral")}
+      />
+      {categoryLabel(category)}
+    </span>
+  );
+}
+
+/** Two letters for an avatar, from whatever name we have. */
+function initials(name: string | null): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+/**
+ * The day a post belongs to, as a person would say it.
+ *
+ * The feed is read by someone catching up, and "what landed today" is the
+ * question they are asking — so the days are the structure, and the timestamp
+ * on each post is the detail.
+ */
+function dayLabel(iso: string): string {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+/** Posts in the order given, grouped into the day each was written. */
+function byDay(posts: Post[]): { day: string; posts: Post[] }[] {
+  const days: { day: string; posts: Post[] }[] = [];
+  for (const post of posts) {
+    const day = dayLabel(post.createdAt);
+    const last = days[days.length - 1];
+    if (last && last.day === day) last.posts.push(post);
+    else days.push({ day, posts: [post] });
+  }
+  return days;
+}
 
 function fileSize(bytes: number | null): string {
   if (!bytes) return "";
@@ -204,7 +260,9 @@ export function ChangeLogView() {
               {(v) => (v === "all" ? "Everything" : categoryLabel(String(v)))}
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          {/* Menu-style: aligned to the trigger, not to the selected item, which
+              opened the list upwards whenever a later category was chosen. */}
+          <SelectContent alignItemWithTrigger={false} align="start">
             <SelectItem value="all">Everything</SelectItem>
             {CHANGE_LOG_CATEGORIES.map((c) => (
               <SelectItem key={c.value} value={c.value}>
@@ -213,9 +271,7 @@ export function ChangeLogView() {
             ))}
           </SelectContent>
         </Select>
-        {unread > 0 && (
-          <p className="text-xs text-muted-foreground">{unread} you have not marked as read</p>
-        )}
+        {unread > 0 && <Badge variant="info">{unread} unread</Badge>}
       </div>
 
       {loading ? (
@@ -241,117 +297,155 @@ export function ChangeLogView() {
           }
         />
       ) : (
-        <div className="space-y-3">
-          {shown.map((post) => {
-            const author = personName(post.author) ?? "Someone";
-            const isEditing = editing?.id === post.id;
-            return (
-              <Card key={post.id} className={post.readByMe ? undefined : "border-primary/30"}>
-                <CardContent className="space-y-3 py-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={CATEGORY_TONE[post.category] ?? "muted"}>
-                      {categoryLabel(post.category)}
-                    </Badge>
-                    <span className="text-sm font-medium">{author}</span>
-                    <span className="text-xs text-muted-foreground">
-                      <FormattedDate date={post.createdAt} variant="datetime" />
-                    </span>
-                    {post.editedAt && (
-                      <span className="text-2xs text-muted-foreground italic">edited</span>
-                    )}
-                  </div>
+        <div className="space-y-6">
+          {byDay(shown).map(({ day, posts: ofDay }) => (
+            <section key={day} className="space-y-3">
+              <div className="flex items-center gap-3">
+                <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  {day}
+                </h2>
+                <span aria-hidden className="h-px flex-1 bg-border" />
+              </div>
 
-                  {isEditing ? (
-                    <div className="space-y-2">
-                      <Textarea
-                        value={editing.body}
-                        rows={5}
-                        onChange={(e) => setEditing({ id: post.id, body: e.target.value })}
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => void saveEdit()}
-                          disabled={busyId === post.id}
-                        >
-                          Save
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <PostBody body={post.body} />
-                  )}
-
-                  {post.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {post.attachments.map((file) => (
-                        <a
-                          key={file.id}
-                          href={`/api/change-log/attachments/${file.id}`}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
-                        >
-                          <Paperclip className="w-3 h-3" />
-                          {file.fileName}
-                          {file.sizeBytes ? (
-                            <span className="text-muted-foreground">
-                              {fileSize(file.sizeBytes)}
-                            </span>
-                          ) : null}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Users className="w-3.5 h-3.5" />
-                      {post.readBy.length === 0
-                        ? "Nobody has marked this read"
-                        : `Read by ${post.readBy
-                            .map((r) => personName(r.reader) ?? "someone")
-                            .join(", ")}`}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {post.authorId === user.id && !isEditing && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            aria-label="Edit this post"
-                            onClick={() => setEditing({ id: post.id, body: post.body })}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
-                            aria-label="Withdraw this post"
-                            onClick={() => void withdraw(post)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                      {post.readByMe ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Check className="w-3.5 h-3.5" /> Read
+              {ofDay.map((post) => {
+                const author = personName(post.author) ?? "Someone";
+                const isEditing = editing?.id === post.id;
+                return (
+                  <Card key={post.id} className={post.readByMe ? undefined : "border-info/40"}>
+                    <CardContent className="space-y-3 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Avatar size="sm">
+                          <AvatarFallback className="text-2xs">{initials(author)}</AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium">{author}</span>
+                        <CategoryMark category={post.category} />
+                        <span className="text-xs text-muted-foreground">
+                          <FormattedDate date={post.createdAt} variant="datetime" />
                         </span>
+                        {post.editedAt && (
+                          <span className="text-2xs text-muted-foreground italic">edited</span>
+                        )}
+                        {!post.readByMe && (
+                          <Badge variant="info" className="ml-auto">
+                            New
+                          </Badge>
+                        )}
+                      </div>
+
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={editing.body}
+                            rows={5}
+                            onChange={(e) => setEditing({ id: post.id, body: e.target.value })}
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => void saveEdit()}
+                              disabled={busyId === post.id}
+                            >
+                              Save
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setEditing(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
                       ) : (
-                        <Button size="sm" variant="outline" onClick={() => void markRead(post)}>
-                          Mark as read
-                        </Button>
+                        <PostBody body={post.body} />
                       )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+
+                      {post.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {post.attachments.map((file) => (
+                            <a
+                              key={file.id}
+                              href={`/api/change-log/attachments/${file.id}`}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+                            >
+                              <Paperclip className="w-3 h-3" />
+                              {file.fileName}
+                              {file.sizeBytes ? (
+                                <span className="text-muted-foreground">
+                                  {fileSize(file.sizeBytes)}
+                                </span>
+                              ) : null}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Users className="w-3.5 h-3.5 shrink-0" />
+                          {post.readBy.length === 0 ? (
+                            "Nobody has marked this read"
+                          ) : (
+                            <>
+                              <span className="flex -space-x-1.5">
+                                {post.readBy.slice(0, 5).map((r) => (
+                                  <Avatar
+                                    key={r.userId}
+                                    size="sm"
+                                    title={personName(r.reader) ?? ""}
+                                  >
+                                    <AvatarFallback className="text-2xs">
+                                      {initials(personName(r.reader))}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                ))}
+                              </span>
+                              <span>
+                                Read by {post.readBy.length}
+                                {post.readBy.length <= 3 &&
+                                  ` — ${post.readBy
+                                    .map((r) => personName(r.reader) ?? "someone")
+                                    .join(", ")}`}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {post.authorId === user.id && !isEditing && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                aria-label="Edit this post"
+                                onClick={() => setEditing({ id: post.id, body: post.body })}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-destructive hover:text-destructive/80"
+                                aria-label="Withdraw this post"
+                                onClick={() => void withdraw(post)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                          {post.readByMe ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                              <Check className="w-3.5 h-3.5" /> Read
+                            </span>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => void markRead(post)}>
+                              Mark as read
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </section>
+          ))}
         </div>
       )}
     </PageContainer>
@@ -407,6 +501,7 @@ function Composer({ onPosted }: { onPosted: () => void }) {
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={3}
+            className="resize-y border-0 px-0 shadow-none focus-visible:ring-0"
             placeholder="What changed, and what it means for a quote or an order in flight? One reason per line reads as a list."
           />
           <div className="flex flex-wrap items-center gap-2">
@@ -414,7 +509,10 @@ function Composer({ onPosted }: { onPosted: () => void }) {
               <SelectTrigger className="w-48">
                 <SelectValue>{(v) => categoryLabel(String(v))}</SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              {/* The default category is the last in the list, and aligning the
+                  popup to the selected item opened it upwards over the page
+                  header. A composer's menu drops down. */}
+              <SelectContent alignItemWithTrigger={false} align="start">
                 {CHANGE_LOG_CATEGORIES.map((c) => (
                   <SelectItem key={c.value} value={c.value}>
                     {c.label}
