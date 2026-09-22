@@ -45,6 +45,10 @@ shared file stamped by the app instead.
 - **`equipment_lead_time_changes`** keeps what a value was before each change,
   with who changed it. A spreadsheet overwrites, so "what did we tell them in
   July" had no answer. Shown per model in a side panel.
+- **Typical is the baseline, current is what is quoted.** Both are set from
+  the same dropdown on the list, and both were seeded at four weeks. Only
+  current writes history and notifies: correcting a baseline should not email
+  the team, and nothing is quoted from it.
 - **Stale values say so.** A lead time nobody has touched in
   `LEAD_TIME_STALE_DAYS` (30) is badged "confirm" rather than quoted as
   current, and one never set reads "Not set yet". The sheet had a `Confirm`

@@ -173,6 +173,15 @@ describe("PUT /api/lead-times/[leadTimeId]", () => {
     expect(sent.message).toMatch(/Casting delay/);
   });
 
+  it("changes the baseline quietly — nothing is quoted from it", async () => {
+    const res = await PUT(req("PUT", { typicalLeadTime: "6-8 weeks" }), params);
+
+    expect(res.status).toBe(200);
+    expect(rows()[0].typicalLeadTime).toBe("6-8 weeks");
+    expect(changes()).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("says nothing when only a note changed", async () => {
     await PUT(req("PUT", { notes: "Ask the shop" }), params);
     expect(notify).not.toHaveBeenCalled();

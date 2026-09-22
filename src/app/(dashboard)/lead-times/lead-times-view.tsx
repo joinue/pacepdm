@@ -135,6 +135,46 @@ function exportCsv(rows: LeadTimeRow[]) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * The lead-time dropdown, in the sheet's own words.
+ *
+ * Used for both columns. Typical is the baseline for a machine and changes
+ * rarely; current is what sales quotes today, and is the one that writes
+ * history and tells the workspace — see the PUT route.
+ */
+function LeadTimePicker({
+  value,
+  disabled,
+  subdued,
+  label,
+  onChange,
+}: {
+  value: string | null;
+  disabled: boolean;
+  subdued?: boolean;
+  label: string;
+  onChange: (next: string | null) => void;
+}) {
+  return (
+    <Select value={value ?? ""} onValueChange={(v) => onChange(v ?? null)}>
+      <SelectTrigger
+        aria-label={label}
+        disabled={disabled}
+        className={subdued ? "w-32 text-muted-foreground" : "w-36"}
+      >
+        <SelectValue placeholder="Not set">{(v) => (v ? String(v) : "Not set")}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {LEAD_TIME_OPTIONS.map((option) => (
+          <SelectItem key={option} value={option}>
+            {option}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** "Not set yet" / "Updated 3 days ago", plus the tone that goes with it. */
 function FreshnessBadge({ row }: { row: LeadTimeRow }) {
   const freshness = leadTimeFreshness(row);
@@ -307,7 +347,7 @@ export function LeadTimesView() {
                 <TableHead>Model</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Typical</TableHead>
-                <TableHead>Current</TableHead>
+                <TableHead>Current (quoted)</TableHead>
                 <TableHead>Notes</TableHead>
                 <TableHead>Last updated</TableHead>
                 <TableHead className="w-10" />
@@ -322,28 +362,29 @@ export function LeadTimesView() {
                     <TableCell className="text-sm text-muted-foreground">
                       {row.description}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {row.typicalLeadTime ?? "—"}
+                    <TableCell>
+                      {canEdit ? (
+                        <LeadTimePicker
+                          subdued
+                          label={`Typical lead time for ${row.model}`}
+                          value={row.typicalLeadTime}
+                          disabled={savingId === row.id}
+                          onChange={(v) => void save(row, { typicalLeadTime: v })}
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          {row.typicalLeadTime ?? "—"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {canEdit ? (
-                        <Select
-                          value={row.currentLeadTime ?? ""}
-                          onValueChange={(v) => void save(row, { currentLeadTime: v ?? null })}
-                        >
-                          <SelectTrigger className="w-36" disabled={savingId === row.id}>
-                            <SelectValue placeholder="Not set">
-                              {(v) => (v ? String(v) : "Not set")}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {LEAD_TIME_OPTIONS.map((option) => (
-                              <SelectItem key={option} value={option}>
-                                {option}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <LeadTimePicker
+                          label={`Current lead time for ${row.model}`}
+                          value={row.currentLeadTime}
+                          disabled={savingId === row.id}
+                          onChange={(v) => void save(row, { currentLeadTime: v })}
+                        />
                       ) : (
                         <span className="text-sm font-medium">{row.currentLeadTime ?? "—"}</span>
                       )}
