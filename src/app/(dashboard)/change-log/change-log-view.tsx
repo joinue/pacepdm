@@ -34,6 +34,8 @@ import {
   categoryLabel,
   postLines,
   readsAsList,
+  ATTACHMENT_ACCEPT,
+  ATTACHMENTS_PER_POST,
 } from "@/lib/change-log";
 import { CommentThread, type Comment } from "./comment-thread";
 import { initials, personName, type Person } from "./people";
@@ -477,13 +479,23 @@ export function ChangeLogView() {
   );
 }
 
-/** Write a post, with a file if there is one. */
+/** Write a post, with up to five files. */
 function Composer({ onPosted }: { onPosted: () => void }) {
   const [body, setBody] = useState("");
   const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [files, setFiles] = useState<File[]>([]);
   const [posting, setPosting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  /** Add to what is already picked, rather than replace it, up to the cap. */
+  function pickFiles(picked: File[]) {
+    const fresh = picked.filter((file) => !files.some((f) => f.name === file.name));
+    const room = ATTACHMENTS_PER_POST - files.length;
+    if (fresh.length > room) {
+      toast.error(`A post can carry ${ATTACHMENTS_PER_POST} files — the rest were left off.`);
+    }
+    setFiles([...files, ...fresh.slice(0, Math.max(0, room))]);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -508,7 +520,6 @@ function Composer({ onPosted }: { onPosted: () => void }) {
       setBody("");
       setFiles([]);
       setCategory(DEFAULT_CATEGORY);
-      if (fileInput.current) fileInput.current.value = "";
       toast.success("Posted — everyone has been told");
       onPosted();
     } catch (err) {
@@ -552,10 +563,24 @@ function Composer({ onPosted }: { onPosted: () => void }) {
               type="file"
               multiple
               className="hidden"
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx,.docx"
-              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+              accept={ATTACHMENT_ACCEPT}
+              onChange={(e) => {
+                pickFiles(Array.from(e.target.files ?? []));
+                // Cleared so picking the same file again after removing it fires.
+                e.target.value = "";
+              }}
             />
-            <Button type="button" variant="outline" onClick={() => fileInput.current?.click()}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={files.length >= ATTACHMENTS_PER_POST}
+              title={
+                files.length >= ATTACHMENTS_PER_POST
+                  ? `A post can carry ${ATTACHMENTS_PER_POST} files`
+                  : undefined
+              }
+              onClick={() => fileInput.current?.click()}
+            >
               <Paperclip className="w-4 h-4 mr-2" />
               Attach
             </Button>

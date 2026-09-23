@@ -153,8 +153,11 @@ Migration 060. A feed engineers post to, that sales reads.
   `change-log/` prefix, tracked in their own table, NOT in `files`. They are
   snapshots of what was sent, not controlled documents; in the library they
   could reach a release package, which is what the ECO process exists to
-  prevent. PDFs, images, CSV, Word and Excel, 25 MB each; downloads go through
-  a short-lived signed URL.
+  prevent. PDFs, images, text, CSV, Excel (.xlsx/.xlsm/.xls), Word and
+  PowerPoint, 25 MB each and five per post; downloads go through a short-lived
+  signed URL. The type is judged by extension (`ATTACHMENT_TYPES` in
+  `lib/change-log.ts`), not the browser's MIME: Windows reports a .csv as
+  `application/vnd.ms-excel`, and legacy Office files often arrive untyped.
 - Posting needs `changelog.post` (Engineer and above). Reading needs a
   session — sales holds a read-only role.
 - The feed subscribes to the table, so a post appears without a refresh.

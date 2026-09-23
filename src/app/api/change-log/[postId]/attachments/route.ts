@@ -2,11 +2,17 @@ import { v4 as newId } from "uuid";
 import { withTenant, badRequest, forbidden, notFound, unprocessable } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { ATTACHMENT_MAX_BYTES, ATTACHMENT_MIME, attachmentKey } from "@/lib/change-log";
+import {
+  ATTACHMENT_MAX_BYTES,
+  ATTACHMENTS_PER_POST,
+  attachmentContentType,
+  attachmentKey,
+} from "@/lib/change-log";
 import { z, uuid } from "@/lib/validation";
 
 /**
- * The PDF that comes with a change — a revised spec sheet, a supplier letter.
+ * The files that come with a change — a revised spec sheet, a supplier
+ * letter, a price sheet. Up to five per post.
  *
  * Stored in the vault bucket under a `change-log/` prefix, and tracked in
  * `change_log_files` rather than `files`. These are snapshots of what was
@@ -47,10 +53,23 @@ export const POST = withTenant(
           `Something bigger belongs in the vault, with a link to it in the post.`
       );
     }
-    if (!(file.type in ATTACHMENT_MIME)) {
+    const contentType = attachmentContentType(file.name);
+    if (!contentType) {
       throw unprocessable(
-        `${file.type || "That file type"} cannot be attached here — PDFs, images, CSV, ` +
-          `Word and Excel can.`
+        `${file.name} cannot be attached here — PDFs, images, text, CSV, ` +
+          `Excel, Word and PowerPoint files can.`
+      );
+    }
+
+    const { count, error: countError } = await db
+      .from("change_log_files")
+      .select("id", { count: "exact", head: true })
+      .eq("postId", post.id);
+    if (countError) throw new Error(`Could not count attachments: ${countError.message}`);
+    if ((count ?? 0) >= ATTACHMENTS_PER_POST) {
+      throw unprocessable(
+        `A post can carry ${ATTACHMENTS_PER_POST} files. ` +
+          `More than that belongs in the vault, with a link to it in the post.`
       );
     }
 
@@ -59,7 +78,7 @@ export const POST = withTenant(
 
     const { error: uploadError } = await db.storage
       .from(BUCKET)
-      .upload(key, file, { contentType: file.type, upsert: false });
+      .upload(key, file, { contentType, upsert: false });
     if (uploadError) throw new Error(`Could not store ${file.name}: ${uploadError.message}`);
 
     const { data: row, error } = await db
@@ -69,7 +88,7 @@ export const POST = withTenant(
         postId: post.id,
         storageKey: key,
         fileName: file.name,
-        contentType: file.type,
+        contentType,
         sizeBytes: file.size,
         uploadedById: tenantUser.id,
         createdAt: new Date().toISOString(),

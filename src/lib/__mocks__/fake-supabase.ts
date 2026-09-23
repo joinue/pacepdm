@@ -92,8 +92,10 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
     let limit: number | null = null;
     const filters: ((row: Row) => boolean)[] = [];
     let conflictColumns: string[] = ["id"];
+    /** `select(cols, { count: "exact", head: true })`: the count, no rows. */
+    let countOnly = false;
 
-    const exec = async (): Promise<{ data: unknown; error: DbError | null }> => {
+    const exec = async (): Promise<{ data: unknown; error: DbError | null; count?: number }> => {
       if (op === "insert" || op === "update" || op === "upsert") {
         const hook = beforeNext[op === "upsert" ? "insert" : op][table];
         if (hook) {
@@ -160,6 +162,8 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
         return { data: null, error: null };
       }
 
+      if (countOnly) return { data: null, error: null, count: matched.length };
+
       let out = matched;
       if (rangeFrom !== null && rangeTo !== null) {
         out = out.slice(rangeFrom, Math.min(rangeTo, rangeFrom + maxRows - 1) + 1);
@@ -171,8 +175,9 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
     };
 
     const query = {
-      select() {
+      select(_columns?: string, options?: { count?: string; head?: boolean }) {
         if (op !== "select") returning = true;
+        else if (options?.count && options.head) countOnly = true;
         return query;
       },
       insert(v: Row | Row[]) {
@@ -254,7 +259,7 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
             };
       },
       then<T>(
-        resolve: (v: { data: unknown; error: DbError | null }) => T,
+        resolve: (v: { data: unknown; error: DbError | null; count?: number }) => T,
         reject?: (e: unknown) => T
       ) {
         return exec().then(resolve, reject);
@@ -297,10 +302,11 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
       },
       async upload(
         key: string,
-        data: ArrayBuffer | Uint8Array,
+        data: ArrayBuffer | Uint8Array | Blob,
         options?: { contentType?: string }
       ) {
-        objects.set(key, { size: data.byteLength, contentType: options?.contentType });
+        const size = data instanceof Blob ? data.size : data.byteLength;
+        objects.set(key, { size, contentType: options?.contentType });
         return { data: { path: key }, error: null };
       },
       async createSignedUrls(keys: string[]) {
