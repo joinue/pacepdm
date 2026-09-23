@@ -32,6 +32,17 @@ export function categoryLabel(value: string): string {
 /** A post's own length limit. Long enough for a real explanation, short of an essay. */
 export const POST_MAX_LENGTH = 5000;
 
+/** A reply is a clarification, not a second post. */
+export const COMMENT_MAX_LENGTH = 2000;
+
+/**
+ * The columns a reply is read with, wherever it is read: the feed, the
+ * reply route and the edit route all return the same shape.
+ */
+export const COMMENT_COLUMNS =
+  "id, postId, body, createdAt, editedAt, authorId, " +
+  "author:tenant_users!change_log_comments_authorId_fkey(fullName)";
+
 /** What can be attached: the things people actually send about a change. */
 export const ATTACHMENT_MIME: Record<string, string> = {
   "application/pdf": "pdf",

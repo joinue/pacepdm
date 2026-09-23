@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { notify, sideEffect } from "@/lib/notifications";
 import { selectAll, selectAllIn } from "@/lib/paged-query";
 import {
+  COMMENT_COLUMNS,
   DEFAULT_CATEGORY,
   POST_MAX_LENGTH,
   categoryLabel,
@@ -53,10 +54,12 @@ export const GET = withTenant({}, async ({ db, tenantUser }) => {
   const ids = (posts ?? []).map((post: { id: string }) => post.id);
   if (ids.length === 0) return { posts: [] };
 
-  // Attachments and read receipts for the page of posts being shown.
+  // Attachments, read receipts and replies for the page of posts being
+  // shown. The whole thread comes with the post: replies are short and few,
+  // and a thread that loads on a click is one nobody opens.
   // lint-conventions-allow: child-table-direct-query — keyed by the ids of
   // posts just read through the scoped client.
-  const [attachments, reads] = await Promise.all([
+  const [attachments, reads, comments] = await Promise.all([
     selectAllIn<{ id: string; postId: string; fileName: string; sizeBytes: number | null }>(
       ids,
       (chunk, from, to) =>
@@ -75,6 +78,15 @@ export const GET = withTenant({}, async ({ db, tenantUser }) => {
         .order("postId")
         .range(from, to)
     ),
+    selectAllIn<{ id: string; postId: string; createdAt: string }>(ids, (chunk, from, to) =>
+      db
+        .from("change_log_comments")
+        .select(COMMENT_COLUMNS)
+        .in("postId", chunk)
+        .is("deletedAt", null)
+        .order("createdAt")
+        .range(from, to)
+    ),
   ]);
 
   const filesByPost = new Map<string, typeof attachments>();
@@ -85,6 +97,14 @@ export const GET = withTenant({}, async ({ db, tenantUser }) => {
   for (const read of reads) {
     readsByPost.set(read.postId, [...(readsByPost.get(read.postId) ?? []), read]);
   }
+  // Oldest first within a thread, whatever order the pages came back in.
+  const commentsByPost = new Map<string, typeof comments>();
+  for (const comment of comments) {
+    commentsByPost.set(comment.postId, [...(commentsByPost.get(comment.postId) ?? []), comment]);
+  }
+  for (const thread of commentsByPost.values()) {
+    thread.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
 
   return {
     posts: (posts ?? []).map((post: Record<string, unknown>) => {
@@ -92,6 +112,7 @@ export const GET = withTenant({}, async ({ db, tenantUser }) => {
       return {
         ...post,
         attachments: filesByPost.get(post.id as string) ?? [],
+        comments: commentsByPost.get(post.id as string) ?? [],
         readBy: seen.map((r) => ({ userId: r.userId, reader: r.reader })),
         readByMe: seen.some((r) => r.userId === tenantUser.id),
       };
@@ -157,6 +178,6 @@ export const POST = withTenant(
       details: { category, told: people.length },
     });
 
-    return { ...post, attachments: [], readBy: [], readByMe: false };
+    return { ...post, attachments: [], comments: [], readBy: [], readByMe: false };
   }
 );

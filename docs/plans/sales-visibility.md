@@ -5,7 +5,7 @@ change log built; releases still come only from an implemented ECO
 
 <!-- plan-metrics
 lead-time-routes: 3
-change-log-routes: 5-->
+change-log-routes: 7-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them
 > from the codebase and fails the build if this plan has drifted.
@@ -153,11 +153,23 @@ Migration 060. A feed engineers post to, that sales reads.
   session — sales holds a read-only role.
 - The feed subscribes to the table, so a post appears without a refresh.
 
+- **Replies, since 2026-09-23** (migration 065, `change_log_comments`). The
+  post stayed a notice, but the question it raises — "does this affect the
+  order we have in flight?" — was being asked by replying to the notification
+  email, which put the answer in one inbox. A thread under each post keeps it
+  with the change. Anyone with a session can reply; a reply tells the post's
+  author and everyone already in the thread, not the workspace, and an
+  @mention is told as a mention on top (`comment_mentions`, entity type
+  `change_log_comment`). Edited replies are marked and withdrawals are soft,
+  as for the post; the author edits, the author or an admin withdraws. The
+  thread is always open under the post — a thread behind a click is one
+  nobody reads — and the feed subscribes to the table too. A reply's
+  notification links to `/change-log?post=<id>`, which the feed scrolls to.
+
 **Not built, and deliberate:** no digest (every post notifies immediately, as
-lead-time changes do), no comments on a post — sales acknowledges rather than
-replies, and a thread on a notice is how a notice becomes a negotiation. If
-the team wants to discuss a post, the answer is probably a comment thread with
-the same read receipts, not a chat.
+lead-time changes do), and no read receipts on replies — the post's receipt
+says the change was seen; a reply is a conversation, and "who has read my
+reply" is the chat this is not.
 
 **Later, when ECOs are routine:** "post to the change log" becomes a checkbox
 when a release is created, pre-filled from the ECO — the post's `releaseId`

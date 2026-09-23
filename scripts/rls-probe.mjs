@@ -47,6 +47,7 @@ const LOCKED_TABLES = [
   "audit_logs",
   "bom_items",
   "bom_snapshots",
+  "change_log_comments",
   "change_log_files",
   "change_log_posts",
   "change_log_reads",

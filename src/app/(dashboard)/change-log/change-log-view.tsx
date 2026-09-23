@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,8 @@ import {
   postLines,
   readsAsList,
 } from "@/lib/change-log";
+import { CommentThread, type Comment } from "./comment-thread";
+import { initials, personName, type Person } from "./people";
 
 /**
  * The change log: what engineering changed, for the people who answer
@@ -44,8 +46,6 @@ import {
  * and because "who has seen this" only means something per post. Nothing here
  * approves anything — see the route for why that matters.
  */
-
-type Person = { fullName: string | null } | { fullName: string | null }[] | null;
 
 interface Attachment {
   id: string;
@@ -62,13 +62,9 @@ interface Post {
   authorId: string | null;
   author: Person;
   attachments: Attachment[];
+  comments: Comment[];
   readBy: { userId: string; reader: Person }[];
   readByMe: boolean;
-}
-
-function personName(who: Person | undefined): string | null {
-  const one = Array.isArray(who) ? who[0] : who;
-  return one?.fullName ?? null;
 }
 
 /**
@@ -95,13 +91,6 @@ function CategoryMark({ category }: { category: string }) {
       {categoryLabel(category)}
     </span>
   );
-}
-
-/** Two letters for an avatar, from whatever name we have. */
-function initials(name: string | null): string {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 /**
@@ -155,6 +144,7 @@ function PostBody({ body }: { body: string }) {
 export function ChangeLogView() {
   const { can } = usePermissions();
   const canPost = can(PERMISSIONS.CHANGELOG_POST);
+  const isAdmin = can("*");
   const user = useTenantUser();
 
   const { data, loading, error, setData, refetch } = useFetch<{ posts: Post[] }>("/api/change-log");
@@ -165,14 +155,32 @@ export function ChangeLogView() {
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
 
   const { markLocalWrite, isEcho } = useRealtimeEchoGuard();
+  const onRemoteChange = () => {
+    if (isEcho()) return;
+    void refetch();
+  };
   useRealtimeTable({
     table: "change_log_posts",
     filter: `tenantId=eq.${user.tenantId}`,
-    onChange: () => {
-      if (isEcho()) return;
-      void refetch();
-    },
+    onChange: onRemoteChange,
   });
+  useRealtimeTable({
+    table: "change_log_comments",
+    filter: `tenantId=eq.${user.tenantId}`,
+    onChange: onRemoteChange,
+  });
+
+  // A notification about a reply links to its post: `/change-log?post=<id>`.
+  // Read once on the client rather than through useSearchParams, which would
+  // put a Suspense boundary around the whole feed for one optional value.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect(() => {
+    setFocusId(new URLSearchParams(window.location.search).get("post"));
+  }, []);
+  useEffect(() => {
+    if (!focusId || loading) return;
+    document.getElementById(`post-${focusId}`)?.scrollIntoView({ block: "center" });
+  }, [focusId, loading]);
 
   const shown = useMemo(
     () => (category === "all" ? posts : posts.filter((p) => p.category === category)),
@@ -311,7 +319,14 @@ export function ChangeLogView() {
                 const author = personName(post.author) ?? "Someone";
                 const isEditing = editing?.id === post.id;
                 return (
-                  <Card key={post.id} className={post.readByMe ? undefined : "border-info/40"}>
+                  <Card
+                    key={post.id}
+                    id={`post-${post.id}`}
+                    className={cn(
+                      post.readByMe ? undefined : "border-info/40",
+                      post.id === focusId && "ring-2 ring-ring/40"
+                    )}
+                  >
                     <CardContent className="space-y-3 py-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Avatar size="sm">
@@ -440,6 +455,16 @@ export function ChangeLogView() {
                           )}
                         </div>
                       </div>
+
+                      <CommentThread
+                        postId={post.id}
+                        comments={post.comments}
+                        currentUserId={user.id}
+                        currentUserName={user.fullName}
+                        isAdmin={isAdmin}
+                        onChange={(comments) => patchPost(post.id, { comments })}
+                        onLocalWrite={markLocalWrite}
+                      />
                     </CardContent>
                   </Card>
                 );

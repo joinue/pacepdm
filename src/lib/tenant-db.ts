@@ -39,6 +39,7 @@ export const TENANT_SCOPED_TABLES = new Set([
   "audit_logs",
   "bom_snapshots",
   "boms",
+  "change_log_comments",
   "change_log_files",
   "change_log_posts",
   "change_log_reads",

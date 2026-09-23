@@ -6,7 +6,7 @@ interface MentionContext {
   tenantId: string;
   mentionedById: string;
   mentionedByName: string;
-  entityType: "approval_decision" | "file_version";
+  entityType: "approval_decision" | "file_version" | "change_log_comment";
   entityId: string;
   comment: string;
   link?: string;
