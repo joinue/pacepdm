@@ -4,8 +4,8 @@
 
 <!-- plan-metrics
 routes-total: 129
-routes-wrapped: 73
-unwrapped-route: 269
+routes-wrapped: 74
+unwrapped-route: 267
 raw-fetch: 31
 generic-error-toast: 4
 swallowed-error: 6
@@ -94,7 +94,7 @@ npm run probe:rls                                      # live RLS posture
 | Token violations                      | 373              | **6**                                 | 0 (the 6 are marketing gradient blobs; arguably done) |
 | Pages on `PageContainer`/`PageHeader` | 0                | **18**                                | — done                                                |
 | `StatusBadge` call sites              | 0                | **31**                                | — done, 0 hand-rolled status maps remain              |
-| Routes on `withTenant`                | 0                | **66 / 123**                          | 123                                                   |
+| Routes on `withTenant`                | 0                | **67 / 123**                          | 123                                                   |
 | `raw-fetch` in client components      | 112              | **34**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **4**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
@@ -148,7 +148,7 @@ console task.
 
 ## The work queue
 
-### 1. Finish the route wrapper — 57 routes
+### 1. Finish the route wrapper — 56 routes
 
 > 70 → 66 → 68 of 110. The count went _up_ because the supplier-access work
 > added three new routes (`GET /api/releases`, `/api/parts/[partId]/zip`,

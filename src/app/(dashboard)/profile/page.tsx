@@ -15,53 +15,18 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
-import type { EmailType } from "@/lib/email/templates";
+import {
+  DEFAULT_EMAIL_PREFS as DEFAULT_PREFS,
+  NOTIFICATION_TYPES,
+  NOTIFICATION_TYPE_INFO,
+  type EmailPrefs,
+} from "@/lib/notification-types";
 
-// One entry per email type, from the same list the sender uses. This page
-// used to declare its own copy, so a type added on the server was simply
-// missing here — the checkbox for it never appeared. Type-only import, so no
-// server code reaches the bundle.
-type EmailPrefs = Record<EmailType, boolean>;
-
-const DEFAULT_PREFS: EmailPrefs = {
-  approval: true,
-  transition: true,
-  checkout: true,
-  eco: true,
-  system: false,
-  leadtime: true,
-  changelog: true,
-};
-
-const PREF_LABELS: Array<{ key: keyof EmailPrefs; label: string; hint: string }> = [
-  {
-    key: "approval",
-    label: "Approvals",
-    hint: "You're asked to approve, or a request you made is decided",
-  },
-  { key: "eco", label: "ECOs", hint: "An ECO you're involved in changes state" },
-  {
-    key: "changelog",
-    label: "Change log",
-    hint: "Engineering posts a change the team should know about",
-  },
-  {
-    key: "leadtime",
-    label: "Lead times",
-    hint: "Someone changes the lead time quoted for a machine",
-  },
-  {
-    key: "transition",
-    label: "File lifecycle",
-    hint: "Files you own move between lifecycle states",
-  },
-  { key: "checkout", label: "Checkouts", hint: "A file you own is checked out or checked back in" },
-  {
-    key: "system",
-    label: "System notices",
-    hint: "Low-priority announcements from this workspace",
-  },
-];
+// One checkbox per notification type, in the order the shared list gives
+// them, with the label and hint the type declares for itself. This page
+// used to keep its own copy of both, so a type added on the server was
+// missing here, or described here as something it was not.
+const PREF_ROWS = NOTIFICATION_TYPES.map((key) => ({ key, ...NOTIFICATION_TYPE_INFO[key] }));
 
 export default function ProfilePage() {
   const user = useTenantUser();
@@ -167,7 +132,7 @@ export default function ProfilePage() {
             <p className="text-sm text-destructive">{errorMessage(prefsError)}</p>
           ) : (
             <>
-              {PREF_LABELS.map((p, i) => (
+              {PREF_ROWS.map((p, i) => (
                 <div key={p.key}>
                   {i > 0 && <Separator className="my-3" />}
                   <label className="flex items-start gap-3 cursor-pointer">

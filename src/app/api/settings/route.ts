@@ -1,15 +1,20 @@
-import { withTenant } from "@/lib/api-route";
+import { withTenant, badRequest } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
 import { logAudit } from "@/lib/audit";
-import { z, nonEmptyString } from "@/lib/validation";
+import { z, nonEmptyString, formatZodError } from "@/lib/validation";
 
 const SETTINGS_KEYS = [
   "maxUploadSizeMb",
   "allowedExtensions",
   "revisionScheme",
   "requireCheckoutComment",
+  // The two the email sender reads (src/lib/email/send.ts). `emailReplyTo`
+  // was read there but never allow-listed here, and a save replaces the
+  // whole settings object — so a value set any other way was wiped on the
+  // next visit to this page. `digestFrequency` is gone from the list: it was
+  // shown, saved, and read by nothing; every email goes out immediately.
   "emailNotifications",
-  "digestFrequency",
+  "emailReplyTo",
   "autoReleasePrefix",
   "partNumberMode",
   "partNumberPrefix",
@@ -27,6 +32,14 @@ const SETTINGS_KEYS = [
 const UpdateSettingsSchema = z.object({
   name: nonEmptyString,
   settings: z.record(z.string(), z.unknown()).optional(),
+});
+
+// The sender checks `emailNotifications === false` and passes `emailReplyTo`
+// straight to the provider, so each has to be the shape it expects: a real
+// boolean, not the string "false", and an address or nothing.
+const EmailSettingsSchema = z.object({
+  emailNotifications: z.boolean().optional(),
+  emailReplyTo: z.string().trim().email().or(z.literal("")).optional(),
 });
 
 export const GET = withTenant({}, async ({ db }) => {
@@ -51,6 +64,13 @@ export const PUT = withTenant(
       for (const key of SETTINGS_KEYS) {
         if (key in body.settings) sanitized[key] = body.settings[key];
       }
+      const email = EmailSettingsSchema.safeParse(sanitized);
+      if (!email.success) {
+        throw badRequest("Check the email settings", formatZodError(email.error));
+      }
+      // An empty reply-to is "none"; keep the row clean rather than storing "".
+      if (email.data.emailReplyTo === "") delete sanitized.emailReplyTo;
+      else if (email.data.emailReplyTo) sanitized.emailReplyTo = email.data.emailReplyTo;
     }
 
     // `blockSelfApproval` lives in here, so a discarded failure means an

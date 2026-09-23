@@ -62,9 +62,6 @@
   "src/app/api/boms/compare/route.ts": {
     "unwrapped-route": 4
   },
-  "src/app/api/cron/approval-reminders/route.ts": {
-    "unwrapped-route": 2
-  },
   "src/app/api/ecos/[ecoId]/bom-impact/route.ts": {
     "unwrapped-route": 4
   },

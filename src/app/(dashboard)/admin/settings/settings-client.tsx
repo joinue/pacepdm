@@ -26,7 +26,8 @@ export interface TenantSettings {
   revisionScheme: "ALPHA" | "NUMERIC";
   requireCheckoutComment: boolean;
   emailNotifications: boolean;
-  digestFrequency: "REALTIME" | "DAILY" | "WEEKLY";
+  /** Where a reply to a notification email lands. Empty means no Reply-To. */
+  emailReplyTo: string;
   autoReleasePrefix: string;
   partNumberMode: "AUTO" | "MANUAL";
   partNumberPrefix: string;
@@ -41,7 +42,7 @@ const DEFAULT_SETTINGS: TenantSettings = {
   revisionScheme: "ALPHA",
   requireCheckoutComment: false,
   emailNotifications: true,
-  digestFrequency: "DAILY",
+  emailReplyTo: "",
   autoReleasePrefix: "REL-",
   partNumberMode: "AUTO",
   partNumberPrefix: "PRT-",
@@ -350,30 +351,24 @@ export function SettingsClient({
               <div>
                 <p className="text-sm font-medium">Email notifications</p>
                 <p className="text-xs text-muted-foreground">
-                  Send email alerts for approvals, check-ins, and ECO updates
+                  Email members about approvals, ECOs, mentions and file changes. Each member picks
+                  which kinds they receive on their profile.
                 </p>
               </div>
             </label>
             <Separator />
             <div className="space-y-2">
-              <Label>Digest Frequency</Label>
-              <Select
-                value={settings.digestFrequency}
-                onValueChange={(v) =>
-                  updateSetting("digestFrequency", v as "REALTIME" | "DAILY" | "WEEKLY")
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="REALTIME">Real-time</SelectItem>
-                  <SelectItem value="DAILY">Daily digest</SelectItem>
-                  <SelectItem value="WEEKLY">Weekly digest</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="emailReplyTo">Reply-to address</Label>
+              <Input
+                id="emailReplyTo"
+                type="email"
+                value={settings.emailReplyTo}
+                onChange={(e) => updateSetting("emailReplyTo", e.target.value)}
+                placeholder="engineering@yourcompany.com"
+              />
               <p className="text-xs text-muted-foreground">
-                How often to batch non-critical notifications. Approvals always send immediately.
+                Where a reply to a notification or invitation email goes. Leave empty and replies go
+                nowhere.
               </p>
             </div>
           </CardContent>

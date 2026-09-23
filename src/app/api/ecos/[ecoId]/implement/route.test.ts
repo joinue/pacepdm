@@ -30,12 +30,11 @@ vi.mock("@/lib/releases", () => ({
 }));
 vi.mock("@/lib/notifications", () => ({
   notify: vi.fn().mockResolvedValue(undefined),
-  notifyFileTransition: vi.fn().mockResolvedValue(undefined),
   sideEffect: (p: Promise<unknown>) => p,
 }));
 
 import { POST } from "./route";
-import { notifyFileTransition } from "@/lib/notifications";
+import { notify } from "@/lib/notifications";
 
 const TENANT = "tenant-a";
 const ECO_ID = "e0e0e0e0-1111-4111-8111-000000000001";
@@ -87,6 +86,12 @@ beforeEach(() => {
       { id: "i-2", ecoId: ECO_ID, fileId: "released-already", partId: null, toRevision: null },
     ],
     files: [file("bracket"), file("released-already", { lifecycleState: "Released" })],
+    tenant_users: [
+      { id: "user-1", tenantId: TENANT, isActive: true },
+      { id: "user-9", tenantId: TENANT, isActive: true },
+      { id: "user-gone", tenantId: TENANT, isActive: false },
+      { id: "user-other", tenantId: "tenant-b", isActive: true },
+    ],
   });
   state.fake.rpcResults.implement_eco = {
     data: { success: true, filesTransitioned: 1, partsReleased: 0, bomsReleased: 0 },
@@ -95,7 +100,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/ecos/[ecoId]/implement", () => {
-  it("implements, and announces only the file that actually moved to Released", async () => {
+  it("implements, and tells the workspace once, counting only the files that moved", async () => {
     const res = await implement();
 
     expect(res.status).toBe(200);
@@ -103,9 +108,19 @@ describe("POST /api/ecos/[ecoId]/implement", () => {
     expect(state.fake.rpcCalls).toEqual([
       { fn: "implement_eco", args: { p_eco_id: ECO_ID, p_user_id: "user-1" } },
     ]);
-    expect(notifyFileTransition).toHaveBeenCalledTimes(1);
-    expect(notifyFileTransition).toHaveBeenCalledWith(
-      expect.objectContaining({ fileId: "bracket", toStateName: "Released" })
+    // One notification for the whole implementation, not one per released
+    // file through the Released broadcast. Active members of this tenant
+    // only; notify() drops the actor itself.
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "eco",
+        userIds: ["user-1", "user-9"],
+        actorId: "user-1",
+        refId: ECO_ID,
+        link: `/ecos/${ECO_ID}`,
+        message: "Alice implemented ECO-0042: Bracket change — 1 file released",
+      })
     );
   });
 

@@ -19,6 +19,7 @@
  */
 
 import { getServiceClient } from "@/lib/db";
+import { DEFAULT_EMAIL_PREFS, type EmailPrefs } from "@/lib/notification-types";
 import {
   renderInviteEmail,
   renderNotificationEmail,
@@ -26,17 +27,9 @@ import {
   type EmailType,
 } from "./templates";
 
-export type EmailPrefs = Record<EmailType, boolean>;
-
-export const DEFAULT_EMAIL_PREFS: EmailPrefs = {
-  approval: true,
-  transition: true,
-  checkout: true,
-  eco: true,
-  system: false,
-  leadtime: true,
-  changelog: true,
-};
+// Re-exported so the callers that already import them from here keep
+// working; the values are defined once, in notification-types.ts.
+export { DEFAULT_EMAIL_PREFS, type EmailPrefs };
 
 interface SendNotificationEmailParams {
   notificationId: string;

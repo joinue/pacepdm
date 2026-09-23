@@ -15,6 +15,12 @@ import { fetchJson, errorMessage } from "@/lib/api-client";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
+import {
+  NOTIFICATION_TYPES,
+  NOTIFICATION_TYPE_INFO,
+  zeroByType,
+  type NotificationType,
+} from "@/lib/notification-types";
 
 function initialsOf(name: string): string {
   return name
@@ -29,8 +35,6 @@ interface NotificationActor {
   id: string;
   fullName: string;
 }
-
-type NotificationType = "approval" | "transition" | "checkout" | "eco" | "system";
 
 interface Notification {
   id: string;
@@ -53,25 +57,15 @@ const PAGE_SIZE = 50;
 
 type FilterKey = "all" | NotificationType | "unread";
 
+// "All" and "Unread" first, then one tab per type in the shared order. The
+// tabs were a hand-written list here, so a new type had no tab and its
+// count bucket started undefined — and undefined + 1 is NaN.
 const FILTER_LABELS: Record<FilterKey, string> = {
   all: "All",
   unread: "Unread",
-  approval: "Approvals",
-  transition: "Transitions",
-  eco: "ECOs",
-  checkout: "Checkouts",
-  system: "Mentions",
-};
-
-const typeBadgeVariant: Record<
-  NotificationType,
-  "info" | "purple" | "orange" | "warning" | "muted"
-> = {
-  approval: "purple",
-  transition: "info",
-  eco: "orange",
-  checkout: "warning",
-  system: "muted",
+  ...(Object.fromEntries(
+    NOTIFICATION_TYPES.map((t) => [t, NOTIFICATION_TYPE_INFO[t].label])
+  ) as Record<NotificationType, string>),
 };
 
 // Bucket a notification into a coarse date group. We compare against
@@ -170,15 +164,11 @@ export default function NotificationsPage() {
     const c: Record<FilterKey, number> = {
       all: notifications.length,
       unread: 0,
-      approval: 0,
-      transition: 0,
-      eco: 0,
-      checkout: 0,
-      system: 0,
+      ...zeroByType(),
     };
     for (const n of notifications) {
       if (!n.isRead) c.unread += 1;
-      c[n.type] += 1;
+      if (n.type in c) c[n.type] += 1;
     }
     return c;
   }, [notifications]);
@@ -334,10 +324,10 @@ export default function NotificationsPage() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium">{notif.title}</span>
                                 <Badge
-                                  variant={typeBadgeVariant[notif.type] || "muted"}
+                                  variant={NOTIFICATION_TYPE_INFO[notif.type]?.tone ?? "muted"}
                                   className="text-3xs px-1.5"
                                 >
-                                  {notif.type}
+                                  {NOTIFICATION_TYPE_INFO[notif.type]?.label ?? notif.type}
                                 </Badge>
                               </div>
                               <p className="text-sm text-muted-foreground mt-0.5">

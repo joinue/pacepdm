@@ -1,54 +1,84 @@
 import { describe, it, expect } from "vitest";
-import { parseMentionNames } from "./mentions";
+import { findMentionedUsers } from "./mentions";
 
-describe("parseMentionNames", () => {
-  it("extracts a single @FirstName LastName mention", () => {
-    expect(parseMentionNames("Hey @John Smith please review")).toEqual(["John Smith"]);
+const john = { id: "u-john", fullName: "John Smith" };
+const alice = { id: "u-alice", fullName: "Alice Johnson" };
+const bob = { id: "u-bob", fullName: "Bob Williams" };
+const mary = { id: "u-mary", fullName: "Mary Jane Watson" };
+const ann = { id: "u-ann", fullName: "Ann" };
+const annLee = { id: "u-annlee", fullName: "Ann Lee" };
+const jean = { id: "u-jean", fullName: "Jean-Luc O'Neill" };
+const zoe = { id: "u-zoe", fullName: "Zoë Müller" };
+
+const team = [john, alice, bob, mary, ann, annLee, jean, zoe];
+
+const ids = (text: string, users = team) => findMentionedUsers(text, users).map((u) => u.id);
+
+/**
+ * Mentions are read against the workspace's names, not guessed from the
+ * text. The old parser took "@ then two or three capitalised words", so
+ * "@John Smith Please review" looked up "John Smith Please" and matched
+ * nobody — silently.
+ */
+describe("findMentionedUsers", () => {
+  it("finds a mention followed by more capitalised words", () => {
+    expect(ids("Hey @John Smith Please review this")).toEqual(["u-john"]);
   });
 
-  it("extracts multiple mentions", () => {
-    expect(parseMentionNames("@Alice Johnson and @Bob Williams need to approve")).toEqual([
-      "Alice Johnson",
-      "Bob Williams",
-    ]);
+  it("finds several mentions, in order", () => {
+    expect(ids("@Alice Johnson and @Bob Williams need to approve")).toEqual(["u-alice", "u-bob"]);
   });
 
   it("handles three-word names", () => {
-    expect(parseMentionNames("CC @Mary Jane Watson on this")).toEqual(["Mary Jane Watson"]);
+    expect(ids("CC @Mary Jane Watson on this")).toEqual(["u-mary"]);
   });
 
-  it("deduplicates repeated mentions", () => {
-    expect(parseMentionNames("@John Smith mentioned @John Smith again")).toEqual(["John Smith"]);
+  it("reports each person once", () => {
+    expect(ids("@John Smith mentioned @John Smith again")).toEqual(["u-john"]);
   });
 
-  it("returns empty array when no mentions", () => {
-    expect(parseMentionNames("No mentions here")).toEqual([]);
+  it("finds nothing without an @", () => {
+    expect(ids("No mentions here")).toEqual([]);
+    expect(ids("")).toEqual([]);
   });
 
-  it("ignores lowercase names after @", () => {
-    expect(parseMentionNames("email me at @john smith")).toEqual([]);
+  it("does not care how the name was typed", () => {
+    expect(ids("email @john smith")).toEqual(["u-john"]);
+    expect(ids("@JOHN SMITH")).toEqual(["u-john"]);
   });
 
-  it("ignores single-word @ references", () => {
-    expect(parseMentionNames("@Admin please check")).toEqual([]);
+  it("does not match a name that is only a prefix of what was typed", () => {
+    // "Johnson" is not "John", and nobody is called "John Smithson".
+    expect(ids("@Johnson please")).toEqual([]);
+    expect(ids("@John Smithson")).toEqual([]);
   });
 
-  it("handles mentions at start of text", () => {
-    expect(parseMentionNames("@Jane Doe approved this")).toEqual(["Jane Doe"]);
+  it("does not match a partial name", () => {
+    expect(ids("@John please")).toEqual([]);
   });
 
-  it("handles mentions at end of text", () => {
-    expect(parseMentionNames("Assigned to @Jane Doe")).toEqual(["Jane Doe"]);
+  it("prefers the longest name at the same @", () => {
+    expect(ids("@Ann Lee, thoughts?")).toEqual(["u-annlee"]);
+    expect(ids("@Ann, thoughts?")).toEqual(["u-ann"]);
   });
 
-  it("handles empty string", () => {
-    expect(parseMentionNames("")).toEqual([]);
+  it("handles single names, hyphens, apostrophes and accents", () => {
+    expect(ids("ping @Ann")).toEqual(["u-ann"]);
+    expect(ids("@Jean-Luc O'Neill can you check")).toEqual(["u-jean"]);
+    expect(ids("@Zoë Müller?")).toEqual(["u-zoe"]);
   });
 
-  it("requires capitalized first letter of each name part", () => {
-    // First part capitalized, second lowercase → no match
-    expect(parseMentionNames("@John smith")).toEqual([]);
-    // Both capitalized → match
-    expect(parseMentionNames("@John Smith")).toEqual(["John Smith"]);
+  it("finds mentions at the start and end of the text, and before punctuation", () => {
+    expect(ids("@Alice Johnson approved this")).toEqual(["u-alice"]);
+    expect(ids("Assigned to @Alice Johnson")).toEqual(["u-alice"]);
+    expect(ids("(@Alice Johnson).")).toEqual(["u-alice"]);
+  });
+
+  it("ignores an email address", () => {
+    expect(ids("mail me at john@smith.com")).toEqual([]);
+  });
+
+  it("ignores users with no name", () => {
+    expect(ids("@ hello", [{ id: "u-blank", fullName: "  " }])).toEqual([]);
   });
 });

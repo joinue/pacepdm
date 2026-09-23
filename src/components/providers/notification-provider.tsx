@@ -11,6 +11,13 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchJson, errorMessage } from "@/lib/api-client";
+import {
+  categoryOfLink,
+  zeroByCategory,
+  zeroByType,
+  type NotificationCategory,
+  type NotificationType,
+} from "@/lib/notification-types";
 import { useTenantUser } from "./tenant-provider";
 
 interface NotificationActor {
@@ -22,7 +29,7 @@ interface Notification {
   id: string;
   title: string;
   message: string;
-  type: "approval" | "transition" | "checkout" | "eco" | "system";
+  type: NotificationType;
   link: string | null;
   isRead: boolean;
   createdAt: string;
@@ -37,14 +44,14 @@ interface NotificationListResponse {
 
 interface NotificationCounts {
   total: number;
-  byType: Record<"approval" | "transition" | "checkout" | "eco" | "system", number>;
-  byCategory: Record<"vault" | "boms" | "ecos" | "parts" | "vendors", number>;
+  byType: Record<NotificationType, number>;
+  byCategory: Record<NotificationCategory, number>;
 }
 
 const emptyCounts: NotificationCounts = {
   total: 0,
-  byType: { approval: 0, transition: 0, checkout: 0, eco: 0, system: 0 },
-  byCategory: { vault: 0, boms: 0, ecos: 0, parts: 0, vendors: 0 },
+  byType: zeroByType(),
+  byCategory: zeroByCategory(),
 };
 
 interface NotificationContextValue {
@@ -244,17 +251,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             nextByType[notif.type] = Math.max(0, nextByType[notif.type] - 1);
           }
           const nextByCategory = { ...prev.byCategory };
-          const link = notif.link || "";
-          if (link.startsWith("/vault"))
-            nextByCategory.vault = Math.max(0, nextByCategory.vault - 1);
-          else if (link.startsWith("/boms"))
-            nextByCategory.boms = Math.max(0, nextByCategory.boms - 1);
-          else if (link.startsWith("/ecos"))
-            nextByCategory.ecos = Math.max(0, nextByCategory.ecos - 1);
-          else if (link.startsWith("/parts"))
-            nextByCategory.parts = Math.max(0, nextByCategory.parts - 1);
-          else if (link.startsWith("/vendors"))
-            nextByCategory.vendors = Math.max(0, nextByCategory.vendors - 1);
+          const category = categoryOfLink(notif.link);
+          if (category) nextByCategory[category] = Math.max(0, nextByCategory[category] - 1);
           return {
             total: Math.max(0, prev.total - 1),
             byType: nextByType,

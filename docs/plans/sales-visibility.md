@@ -77,8 +77,14 @@ shared file stamped by the app instead.
   filed under `system`. Default on, because sales asked for them and an opt-in
   nobody finds is the spreadsheet again.
 - The profile page's email preferences used to declare their own copy of the
-  type list, so a type added on the server had no checkbox. It now derives
-  from `EmailType`.
+  type list, so a type added on the server had no checkbox. Every consumer of
+  the type list — the profile checkboxes and their copy, the email defaults,
+  the `PATCH /api/profile/email-prefs` schema, the bell badge, the page tabs,
+  the count buckets — now reads `src/lib/notification-types.ts`. The PATCH
+  schema was the one that mattered: it enumerated the types by hand, Zod
+  strips unknown keys, so unticking "Lead times" saved with a success toast
+  and changed nothing. Adding a type is one entry there plus the CHECK
+  constraint in a migration.
 - The page subscribes to `equipment_lead_times` and refetches when someone
   else changes a row, with the usual echo guard so our own write does not cost
   a second fetch. Migration 058 adds the table to the `supabase_realtime`

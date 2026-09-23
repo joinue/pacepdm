@@ -6,8 +6,11 @@
  * we can swap the body for React Email without touching callers.
  */
 
-export type EmailType =
-  "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime" | "changelog";
+import type { NotificationType } from "@/lib/notification-types";
+
+// Every notification type can go out as an email; the list lives with the
+// rest of what a type means, in notification-types.ts.
+export type EmailType = NotificationType;
 
 interface RenderParams {
   type: EmailType;
@@ -30,6 +33,7 @@ const SUBJECT_PREFIX: Record<EmailType, string> = {
   checkout: "Checkout update",
   eco: "ECO update",
   system: "Notice",
+  mention: "You were mentioned",
   leadtime: "Lead time update",
   changelog: "Change log",
 };
@@ -40,6 +44,7 @@ const CTA_LABEL: Record<EmailType, string> = {
   checkout: "Open checkout",
   eco: "Open ECO",
   system: "Open",
+  mention: "Open the comment",
   leadtime: "Open lead times",
   changelog: "Open the change log",
 };

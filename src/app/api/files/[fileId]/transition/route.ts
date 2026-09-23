@@ -199,6 +199,7 @@ export async function POST(
         tenantId: tenantUser.tenantId,
         fileId,
         fileName: file.name,
+        folderId: file.folderId ?? null,
         toStateName,
         actorId: tenantUser.id,
         actorFullName: tenantUser.fullName,

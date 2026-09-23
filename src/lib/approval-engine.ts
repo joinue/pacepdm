@@ -5,6 +5,7 @@ import {
   notifyApprovalGroupMembers,
   notifyFileTransition,
   markNotificationsReadByRef,
+  clearNotificationsByRef,
 } from "@/lib/notifications";
 import { v4 as uuid } from "uuid";
 import { blocksSelfApproval, selfApprovalRefusal } from "@/lib/self-approval";
@@ -151,7 +152,14 @@ export async function startWorkflow(params: StartWorkflowParams) {
         .from("approval_group_members")
         .select("userId")
         .eq("groupId", step.groupId);
-      seats = (members ?? []).length;
+      // Only members who can still sign. A deactivated member kept a seat,
+      // and in ALL mode that seat could never be filled — the request sat
+      // PENDING with one approval it could not get.
+      seats = await countActive(
+        db,
+        params.tenantId,
+        (members ?? []).map((m) => m.userId)
+      );
 
       // An empty group cannot satisfy either mode. Failing here beats
       // creating a request that can never complete — and the file or ECO
@@ -548,8 +556,10 @@ export async function processDecision({
     if (!rejected.won) return settledElsewhere(requestId);
 
     // Nothing on a rejected request is waiting any more — neither this step's
-    // other seats nor the steps that will now never start.
+    // other seats nor the steps that will now never start. Nor is anyone
+    // else's "Approval Required" for it.
     await closeOpenSeats({ requestId }, ["PENDING", "WAITING"]);
+    await clearNotificationsByRef({ tenantId, refId: requestId });
 
     await addHistory(
       requestId,
@@ -626,7 +636,10 @@ export async function processDecision({
 
     // This step is done. Its remaining seats would otherwise sit PENDING in
     // someone's inbox, and approving one used to complete the whole request.
+    // The step's "Approval Required" rows go the same way: the next step's
+    // group is told afresh below, and nobody on this step is still needed.
     await closeOpenSeats({ requestId, stepId }, ["PENDING"]);
+    await clearNotificationsByRef({ tenantId, refId: requestId });
 
     // Activate next step's decisions. The deadline is already set on the
     // decision row when the workflow was started, so we only need to flip
@@ -723,6 +736,7 @@ export async function processDecision({
   if (!completed.won) return settledElsewhere(requestId);
 
   await closeOpenSeats({ requestId }, ["PENDING", "WAITING"]);
+  await clearNotificationsByRef({ tenantId, refId: requestId });
 
   await addHistory(requestId, "COMPLETED", userId, "All approval steps completed — approved");
 
@@ -815,6 +829,10 @@ export async function recallRequest({
   );
   if (clearFailed) return { error: clearFailed };
 
+  // The approvers were asked; the ask is withdrawn. Their "Approval
+  // Required" rows used to stay unread with nothing left to act on.
+  await clearNotificationsByRef({ tenantId, refId: requestId });
+
   void userFullName; // UI renders actor from user.fullName — don't double it
   await addHistory(requestId, "RECALLED", userId, `Request recalled`);
 
@@ -896,9 +914,13 @@ export async function rejectForRework({
   );
   if (markFailed) return { error: markFailed };
 
-  // Clear the decider's own "Approval Required" notification now that
-  // they've acted on this request.
-  await markNotificationsReadByRef({ tenantId, userId, refId: request.id });
+  // The request is going back to its author, so nobody else on this step
+  // is needed until it is resubmitted. Their seats used to stay PENDING —
+  // chased by the reminder cron for a request the approvals page no longer
+  // showed — and their "Approval Required" stayed unread. Resubmitting
+  // resets every seat regardless of status, so closing them here is safe.
+  await closeOpenSeats({ requestId: request.id }, ["PENDING"]);
+  await clearNotificationsByRef({ tenantId, refId: request.id });
 
   // Set request to REWORK status
   const statusFailed = await applied(
@@ -1063,7 +1085,12 @@ export async function resubmitAfterRework({
  * moved looks, from every screen, exactly like one that did.
  */
 async function handleRequestCompletion(
-  request: { entityType: string; entityId: string; transitionId: string | null },
+  request: {
+    entityType: string;
+    entityId: string;
+    transitionId: string | null;
+    requestedById?: string | null;
+  },
   status: "APPROVED" | "REJECTED",
   tenantId: string,
   userId: string
@@ -1094,7 +1121,7 @@ async function handleRequestCompletion(
       const { data: file } = await db
         .from("files")
         .select(
-          "name, revision, createdById, lifecycleState, isCheckedOut, deletedAt, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)"
+          "name, revision, createdById, folderId, lifecycleState, isCheckedOut, deletedAt, checkedOutBy:tenant_users!files_checkedOutById_fkey(fullName)"
         )
         .eq("id", request.entityId)
         .eq("tenantId", tenantId)
@@ -1169,14 +1196,18 @@ async function handleRequestCompletion(
           .select("fullName")
           .eq("id", userId)
           .single();
+        // The requester was just told "Approval Complete" for this same
+        // event; a second row saying the file moved is the same news twice.
         await notifyFileTransition({
           tenantId,
           fileId: request.entityId,
           fileName: file.name,
+          folderId: file.folderId ?? null,
           toStateName: transition.toState.name,
           actorId: userId,
           actorFullName: actor?.fullName || "A reviewer",
           createdById: file.createdById ?? null,
+          excludeUserIds: request.requestedById ? [request.requestedById] : [],
         });
       }
 
@@ -1396,6 +1427,31 @@ async function closeOpenSeats(scope: { requestId: string; stepId?: string }, sta
       error.message
     );
   }
+}
+
+/**
+ * How many of these users are active members of the tenant. Falls back to
+ * counting everyone if the read fails, which is the old behaviour rather
+ * than a request that cannot start.
+ */
+async function countActive(
+  db: ReturnType<typeof getServiceClient>,
+  tenantId: string,
+  userIds: string[]
+): Promise<number> {
+  const unique = [...new Set(userIds)];
+  if (unique.length === 0) return 0;
+  const { data, error } = await db
+    .from("tenant_users")
+    .select("id")
+    .eq("tenantId", tenantId)
+    .eq("isActive", true)
+    .in("id", unique);
+  if (error) {
+    console.warn(`[approvals] could not check group members for ${tenantId}:`, error.message);
+    return unique.length;
+  }
+  return (data ?? []).length;
 }
 
 /**

@@ -1,4 +1,10 @@
 import { withTenant } from "@/lib/api-route";
+import {
+  categoryOfLink,
+  isNotificationType,
+  zeroByCategory,
+  zeroByType,
+} from "@/lib/notification-types";
 
 // Unread-notification counts sliced two ways: by `type` (used to colour
 // tabs on the /notifications page) and by "category" — a coarser
@@ -9,6 +15,9 @@ import { withTenant } from "@/lib/api-route";
 //
 // We return one object so the client makes a single request instead of
 // fanning out. The query is a simple indexed scan on (userId, isRead).
+//
+// Both bucket lists come from notification-types.ts. They were spelled out
+// here, so a type added there was counted toward `total` and nothing else.
 
 export const GET = withTenant({}, async ({ db, tenantUser }) => {
   const { data, error } = await db
@@ -19,27 +28,16 @@ export const GET = withTenant({}, async ({ db, tenantUser }) => {
 
   if (error) throw new Error(error.message);
 
-  const byType: Record<string, number> = {
-    approval: 0,
-    transition: 0,
-    checkout: 0,
-    eco: 0,
-    system: 0,
-  };
-  const byCategory = { vault: 0, boms: 0, ecos: 0, parts: 0, vendors: 0 };
+  const byType = zeroByType();
+  const byCategory = zeroByCategory();
   let total = 0;
 
-  for (const row of data || []) {
+  for (const row of (data || []) as Array<{ type: unknown; link: string | null }>) {
     total += 1;
-    if (row.type in byType) byType[row.type] += 1;
-    const link: string | null = row.link;
-    if (link) {
-      if (link.startsWith("/vault")) byCategory.vault += 1;
-      else if (link.startsWith("/boms")) byCategory.boms += 1;
-      else if (link.startsWith("/ecos")) byCategory.ecos += 1;
-      else if (link.startsWith("/parts")) byCategory.parts += 1;
-      else if (link.startsWith("/vendors")) byCategory.vendors += 1;
-    }
+    const type = row.type;
+    if (isNotificationType(type)) byType[type] += 1;
+    const category = categoryOfLink(row.link);
+    if (category) byCategory[category] += 1;
   }
 
   return { total, byType, byCategory };

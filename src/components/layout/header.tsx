@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTenantUser } from "@/components/providers/tenant-provider";
 import { useNotifications } from "@/components/providers/notification-provider";
+import { NOTIFICATION_TYPE_INFO, isNotificationType } from "@/lib/notification-types";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -59,12 +60,11 @@ const breadcrumbLabels: Record<string, string> = {
   sso: "SSO",
 };
 
-const typeBadgeVariant: Record<string, "info" | "purple" | "orange" | "warning" | "muted"> = {
-  approval: "purple",
-  transition: "info",
-  eco: "orange",
-  checkout: "warning",
-  system: "muted",
+// Badge colour and label per type come from the shared list, so a type
+// added there shows up here without a second edit.
+const typeBadge = (type: string) => {
+  const info = isNotificationType(type) ? NOTIFICATION_TYPE_INFO[type] : null;
+  return { tone: info?.tone ?? "muted", label: info?.label ?? type };
 };
 
 function formatRelativeTime(dateStr: string): string {
@@ -364,10 +364,10 @@ export function Header({
                           <div className="flex items-center gap-2 mb-0.5">
                             <span className="text-sm font-medium truncate">{notif.title}</span>
                             <Badge
-                              variant={typeBadgeVariant[notif.type] || "muted"}
+                              variant={typeBadge(notif.type).tone}
                               className="text-3xs h-4 px-1.5 shrink-0"
                             >
-                              {notif.type}
+                              {typeBadge(notif.type).label}
                             </Badge>
                           </div>
                           <p className="text-xs text-muted-foreground line-clamp-2">

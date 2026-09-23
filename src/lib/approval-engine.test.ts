@@ -52,7 +52,9 @@ const { tableResults, insertCalls, updateCalls, deleteCalls, claimResult, insert
 
       for (const m of ["select", "eq", "in", "neq", "is", "order", "limit", "match"] as const) {
         chain[m] = (...args: unknown[]) => {
-          if (m === "eq" && args.length === 2) filters[args[0] as string] = args[1];
+          if ((m === "eq" || m === "in") && args.length === 2) {
+            filters[args[0] as string] = args[1];
+          }
           return chain;
         };
       }
@@ -133,6 +135,7 @@ vi.mock("@/lib/notifications", () => ({
   notifyApprovalGroupMembers: vi.fn().mockResolvedValue(undefined),
   notifyFileTransition: vi.fn().mockResolvedValue(undefined),
   markNotificationsReadByRef: vi.fn().mockResolvedValue(undefined),
+  clearNotificationsByRef: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("uuid", () => ({ v4: () => "mock-uuid" }));
@@ -152,6 +155,7 @@ import {
   notifyApprovalGroupMembers,
   notifyFileTransition,
   markNotificationsReadByRef,
+  clearNotificationsByRef,
 } from "./notifications";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -165,6 +169,21 @@ function resetMockState() {
   insertError.current = null;
   insertError.table = "approval_requests";
   for (const key of Object.keys(tableResults)) delete tableResults[key];
+  // Seats are counted over the group's *active* members. Unless a test says
+  // otherwise, everyone the engine asks about is one.
+  tableResults["tenant_users"] = activeMembers();
+}
+
+/** Answer the active-member check with these ids — all of them by default. */
+function activeMembers(active?: string[]) {
+  return (filters: Record<string, unknown>) => {
+    if (filters.isActive === true && Array.isArray(filters.id)) {
+      const asked = filters.id as string[];
+      const ids = active ? asked.filter((id) => active.includes(id)) : asked;
+      return { data: ids.map((id) => ({ id })), error: null };
+    }
+    return { data: null, error: null };
+  };
 }
 
 const baseParams = {
@@ -676,6 +695,9 @@ describe("recallRequest", () => {
     const historyInsert = insertCalls.find((c) => c.table === "approval_history");
     expect(historyInsert).toBeDefined();
     expect((historyInsert!.data as Record<string, unknown>).event).toBe("RECALLED");
+
+    // The approvers' "Approval Required" is withdrawn with the request.
+    expect(clearNotificationsByRef).toHaveBeenCalledWith({ tenantId: "tenant-1", refId: "req-1" });
   });
 });
 
@@ -889,6 +911,34 @@ describe("startWorkflow — seats per approval mode", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("no members");
     expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(0);
+  });
+
+  /**
+   * A deactivated member kept a seat, and in ALL mode that seat could never
+   * be filled — the request sat PENDING one approval short, for good.
+   */
+  it("gives no seat to a member who has been deactivated", async () => {
+    stepsWithMode("ALL");
+    tableResults["approval_group_members"] = {
+      data: [{ userId: "u1" }, { userId: "u2" }, { userId: "u3" }],
+      error: null,
+    };
+    tableResults["tenant_users"] = activeMembers(["u1", "u3"]);
+
+    await startWorkflow(baseParams);
+
+    expect(insertCalls.filter((c) => c.table === "approval_decisions")).toHaveLength(2);
+  });
+
+  it("treats a group of only deactivated members as empty", async () => {
+    stepsWithMode("ALL");
+    tableResults["approval_group_members"] = { data: [{ userId: "u1" }], error: null };
+    tableResults["tenant_users"] = activeMembers([]);
+
+    const result = await startWorkflow(baseParams);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no members");
   });
 });
 
@@ -1263,6 +1313,16 @@ describe("processDecision — rejection", () => {
     );
   });
 
+  it("clears the other approvers' nag before telling the requester", async () => {
+    givenDecision();
+    await processDecision(reject);
+    expect(clearNotificationsByRef).toHaveBeenCalledWith({ tenantId: "tenant-1", refId: "req-1" });
+    const cleared = (clearNotificationsByRef as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const told = (notify as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(cleared).toBeLessThan(told);
+  });
+
   it("audits the rejection with its comment", async () => {
     givenDecision();
     await processDecision(reject);
@@ -1354,6 +1414,18 @@ describe("processDecision — advancing to the next step", () => {
     givenNextStep();
     await processDecision(approve);
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("clears the finished step's nags before asking the next group", async () => {
+    givenDecision({ allDecisions: twoSteps });
+    givenNextStep();
+    await processDecision(approve);
+    expect(clearNotificationsByRef).toHaveBeenCalledWith({ tenantId: "tenant-1", refId: "req-1" });
+    const cleared = (clearNotificationsByRef as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const asked = (notifyApprovalGroupMembers as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    expect(cleared).toBeLessThan(asked);
   });
 
   /**
@@ -1503,6 +1575,36 @@ describe("processDecision — file transition side effects", () => {
         actorFullName: "Alice",
       })
     );
+  });
+
+  /**
+   * The requester is told "Approval Complete" and then, as the file's creator
+   * or as one of everyone on a release, that the file moved — the same event
+   * twice, in two rows and two emails.
+   */
+  it("does not tell the requester about the transition twice", async () => {
+    givenTransition("WIP", "Released");
+    await processDecision(approve);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ["user-9"], title: "Approval Complete" })
+    );
+    expect(notifyFileTransition).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeUserIds: ["user-9"] })
+    );
+  });
+
+  /**
+   * Whoever else was asked — the rest of an ANY-mode group — had their
+   * "Approval Required" left unread for good once the request completed.
+   */
+  it("clears everyone's nag for the request before announcing the outcome", async () => {
+    givenTransition("WIP", "Released");
+    await processDecision(approve);
+    expect(clearNotificationsByRef).toHaveBeenCalledWith({ tenantId: "tenant-1", refId: "req-1" });
+    const cleared = (clearNotificationsByRef as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const announced = (notify as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(cleared).toBeLessThan(announced);
   });
 
   it("falls back to a generic actor name when the decider cannot be resolved", async () => {
@@ -2017,12 +2119,35 @@ describe("rejectForRework", () => {
   it("marks the decision and the request as REWORK, not REJECTED", async () => {
     givenDecision();
     expect(await rejectForRework(rework)).toEqual({ success: true });
-    expect(lastUpdate("approval_decisions")!.data).toMatchObject({
+    const seat = updateCalls.find(
+      (c) => c.table === "approval_decisions" && c.filters.id === "dec-1"
+    );
+    expect(seat!.data).toMatchObject({
       status: "REWORK",
       deciderId: "user-1",
       comment: rework.comment,
     });
     expect(lastUpdate("approval_requests")!.data).toMatchObject({ status: "REWORK" });
+  });
+
+  /**
+   * The other seats on the step used to stay PENDING while the request sat in
+   * REWORK: shown to nobody, but chased by the reminder cron. Everyone's
+   * "Approval Required" stayed unread too, not just the reviewer's.
+   */
+  it("closes the step's other seats and clears everyone's nag", async () => {
+    givenDecision();
+    await rejectForRework(rework);
+    expect(lastUpdate("approval_decisions")).toMatchObject({
+      data: { status: "NOT_NEEDED" },
+      filters: { requestId: "req-1", status: ["PENDING"] },
+    });
+    expect(clearNotificationsByRef).toHaveBeenCalledWith({ tenantId: "tenant-1", refId: "req-1" });
+    // Cleared before the requester is told, or that row would be cleared too.
+    const clearOrder = (clearNotificationsByRef as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const notifyOrder = (notify as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(clearOrder).toBeLessThan(notifyOrder);
   });
 
   it("tells the requester what to change, naming the reviewer", async () => {
@@ -2038,7 +2163,7 @@ describe("rejectForRework", () => {
     expect((notify as ReturnType<typeof vi.fn>).mock.calls[0][0].message).toContain("Alice");
   });
 
-  it("records the request in history and clears the reviewer's notification", async () => {
+  it("records the request in history", async () => {
     givenDecision();
     await rejectForRework(rework);
     const history = insertCalls.find(
@@ -2047,9 +2172,6 @@ describe("rejectForRework", () => {
         (c.data as Record<string, unknown>).event === "REWORK_REQUESTED"
     );
     expect(history).toBeDefined();
-    expect(markNotificationsReadByRef).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1", refId: "req-1" })
-    );
   });
 });
 

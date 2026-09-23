@@ -12,27 +12,34 @@ interface MentionContext {
   link?: string;
 }
 
+export interface MentionableUser {
+  id: string;
+  fullName: string;
+}
+
 /**
- * Parse @mentions from comment text, persist them, and notify mentioned users.
+ * Find @mentions in comment text, persist them, and notify mentioned users.
  */
 export async function processMentions(ctx: MentionContext): Promise<void> {
-  const mentionedNames = parseMentionNames(ctx.comment);
-  if (mentionedNames.length === 0) return;
+  if (!ctx.comment.includes("@")) return;
 
   const db = getServiceClient();
 
-  // Resolve names to tenant users
+  // The workspace's people, then the comment is read against their actual
+  // names. Guessing names from the text first — "@ followed by two or three
+  // capitalised words" — then looking those up matched nothing for
+  // "@John Smith Please review" (it looked up "John Smith Please"), for
+  // anyone with a hyphen, an apostrophe or one name, and for any mention
+  // not typed in title case.
   const { data: users } = await db
     .from("tenant_users")
     .select("id, fullName")
     .eq("tenantId", ctx.tenantId)
-    .eq("isActive", true)
-    .in("fullName", mentionedNames);
+    .eq("isActive", true);
 
-  if (!users || users.length === 0) return;
-
-  // Filter out self-mentions
-  const mentionedUsers = users.filter((u) => u.id !== ctx.mentionedById);
+  const mentionedUsers = findMentionedUsers(ctx.comment, users ?? []).filter(
+    (u) => u.id !== ctx.mentionedById
+  );
   if (mentionedUsers.length === 0) return;
 
   // Persist mention records
@@ -65,7 +72,7 @@ export async function processMentions(ctx: MentionContext): Promise<void> {
     userIds: mentionedUsers.map((u) => u.id),
     title: `${ctx.mentionedByName} mentioned you in a comment`,
     message: ctx.comment.length > 120 ? ctx.comment.substring(0, 117) + "..." : ctx.comment,
-    type: "system",
+    type: "mention",
     link: ctx.link,
     refId: ctx.entityId,
     actorId: ctx.mentionedById,
@@ -73,16 +80,43 @@ export async function processMentions(ctx: MentionContext): Promise<void> {
 }
 
 /**
- * Extract @Full Name patterns from text.
- * Matches @FirstName LastName (2–3 capitalized words after @).
- * The frontend inserts names from a dropdown, so format is predictable.
+ * The users whose full name follows an `@` in the text, each once, in the
+ * order first mentioned.
+ *
+ * A name matches case-insensitively and only as a whole: "@Jo" is not Jo
+ * Bloggs, and "@Jo Bloggs" is not Jo. Where two names could both start at
+ * the same `@` — "Ann" and "Ann Lee" — the longer wins, so "@Ann Lee" is one
+ * mention, not two. Nothing about the shape of a name is assumed: hyphens,
+ * apostrophes, accents and single names all work, because the names come
+ * from the workspace rather than from a pattern.
  */
-export function parseMentionNames(text: string): string[] {
-  const regex = /@([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+){1,2})/g;
-  const names: string[] = [];
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    names.push(match[1]);
+export function findMentionedUsers<T extends MentionableUser>(text: string, users: T[]): T[] {
+  const candidates = users
+    .filter((u) => u.fullName.trim().length > 0)
+    .map((u) => ({ user: u, name: u.fullName.trim().toLowerCase() }))
+    .sort((a, b) => b.name.length - a.name.length);
+  if (candidates.length === 0) return [];
+
+  const lower = text.toLowerCase();
+  const found: T[] = [];
+  const seen = new Set<string>();
+
+  for (let at = lower.indexOf("@"); at !== -1; at = lower.indexOf("@", at + 1)) {
+    const rest = lower.slice(at + 1);
+    for (const { user, name } of candidates) {
+      if (!rest.startsWith(name)) continue;
+      if (!isNameBoundary(rest.charAt(name.length))) continue;
+      if (!seen.has(user.id)) {
+        seen.add(user.id);
+        found.push(user);
+      }
+      break;
+    }
   }
-  return [...new Set(names)];
+  return found;
+}
+
+/** Whether a name can end here: end of text, whitespace or punctuation. */
+function isNameBoundary(next: string): boolean {
+  return next === "" || !/[\p{L}\p{N}]/u.test(next);
 }

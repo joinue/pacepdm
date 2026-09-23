@@ -1,6 +1,6 @@
 import { withTenant, badRequest, conflict, notFound } from "@/lib/api-route";
 import { PERMISSIONS } from "@/lib/permissions";
-import { notify, notifyFileTransition, sideEffect } from "@/lib/notifications";
+import { notify, sideEffect } from "@/lib/notifications";
 import { createReleaseFromEco } from "@/lib/releases";
 import { checkEcoRelease, describeBlockers, fillPartRevisions } from "@/lib/eco-release-check";
 import { z, uuid } from "@/lib/validation";
@@ -93,41 +93,31 @@ export const POST = withTenant(
       console.error(`[ecos/${ecoId}] release capture failed:`, err);
     }
 
-    // notify() filters the actor, so an author implementing their own ECO
-    // hears nothing.
-    if (eco.createdById) {
-      await sideEffect(
-        notify({
-          tenantId: tenantUser.tenantId,
-          userIds: [eco.createdById],
-          title: `ECO ${eco.ecoNumber} implemented`,
-          message: `${tenantUser.fullName} implemented ${eco.ecoNumber}: ${eco.title}`,
-          type: "eco",
-          link: `/ecos/${ecoId}`,
-          refId: ecoId,
-          actorId: tenantUser.id,
-        }),
-        `notify ECO ${eco.ecoNumber} implementation`
-      );
-    }
-
-    // Only the files that actually moved to Released. This used to announce a
-    // release for every file the ECO touched, including ones already released
-    // and ones implement had skipped.
-    for (const file of plan.filesToRelease) {
-      await sideEffect(
-        notifyFileTransition({
-          tenantId: tenantUser.tenantId,
-          fileId: file.id,
-          fileName: file.name,
-          toStateName: "Released",
-          actorId: tenantUser.id,
-          actorFullName: tenantUser.fullName ?? "",
-          createdById: file.createdById,
-        }),
-        `notify ECO-implement transition of file ${file.id}`
-      );
-    }
+    // One notification per person for the whole implementation. A file
+    // reaching Released is broadcast to the workspace, and this used to go
+    // through that path once per file — an ECO releasing twenty files put
+    // twenty rows and twenty emails in front of everyone, plus one more for
+    // the author. The count says what moved without naming files, so nothing
+    // leaks from a folder the reader cannot open. notify() drops the actor.
+    const { data: members } = await db.from("tenant_users").select("id").eq("isActive", true);
+    const memberIds = (members ?? []).map((m: { id: string }) => m.id);
+    const releasedNote =
+      plan.filesToRelease.length > 0
+        ? ` — ${plan.filesToRelease.length} file${plan.filesToRelease.length === 1 ? "" : "s"} released`
+        : "";
+    await sideEffect(
+      notify({
+        tenantId: tenantUser.tenantId,
+        userIds: memberIds,
+        title: `ECO ${eco.ecoNumber} implemented`,
+        message: `${tenantUser.fullName} implemented ${eco.ecoNumber}: ${eco.title}${releasedNote}`,
+        type: "eco",
+        link: `/ecos/${ecoId}`,
+        refId: ecoId,
+        actorId: tenantUser.id,
+      }),
+      `notify ECO ${eco.ecoNumber} implementation`
+    );
 
     return { ...(result as object), releaseId };
   }

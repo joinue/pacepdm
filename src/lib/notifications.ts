@@ -1,6 +1,8 @@
 import { after } from "next/server";
 import { getServiceClient } from "@/lib/db";
 import { sendNotificationEmail } from "@/lib/email/send";
+import { canViewFolder, getFolderAccessScope } from "@/lib/folder-access";
+import type { NotificationType } from "@/lib/notification-types";
 
 /**
  * Wrap a promise that represents a non-critical side effect
@@ -39,6 +41,38 @@ export function runAfterResponse(task: () => Promise<unknown>, context: string):
   }
 }
 
+/**
+ * The subset of `userIds` who are active members of `tenantId`.
+ *
+ * Every recipient list passes through here, so no caller has to remember.
+ * Approval-group members, ECO approvers and the reminder cron all used to
+ * be read straight off their join tables: a deactivated user kept collecting
+ * unread rows, and nothing checked that an id even belonged to the tenant
+ * whose notification it was about to receive. The email sender skipped
+ * inactive users, but the in-app row was already written.
+ */
+async function activeMembers(tenantId: string, userIds: string[]): Promise<string[]> {
+  const unique = [...new Set(userIds)];
+  if (unique.length === 0) return [];
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from("tenant_users")
+    .select("id")
+    .eq("tenantId", tenantId)
+    .eq("isActive", true)
+    .in("id", unique);
+  if (error) {
+    // Fail open on the membership check rather than drop the notification:
+    // a transient read error should not cost an approver the request that
+    // was just routed to them. The worst case is the old behaviour — an
+    // inactive user gets a row they will never read.
+    console.warn(`[notify] could not check recipients for tenant ${tenantId}:`, error.message);
+    return unique;
+  }
+  const active = new Set((data ?? []).map((u) => u.id));
+  return unique.filter((id) => active.has(id));
+}
+
 // In-app notifications, stored in the database and shown in the UI, with an
 // email per recipient sent after the response.
 
@@ -56,7 +90,7 @@ export async function notify({
   userIds: string[];
   title: string;
   message: string;
-  type: "approval" | "transition" | "checkout" | "eco" | "system" | "leadtime" | "changelog";
+  type: NotificationType;
   link?: string;
   refId?: string;
   /** The user whose action triggered this notification. Omit for system events. */
@@ -68,7 +102,8 @@ export async function notify({
 
   // Don't notify the actor about their own action — saves every caller
   // from having to filter themselves out.
-  const recipients = actorId ? userIds.filter((id) => id !== actorId) : userIds;
+  const requested = actorId ? userIds.filter((id) => id !== actorId) : userIds;
+  const recipients = await activeMembers(tenantId, requested);
 
   const notifications = recipients.map((userId) => ({
     id: uuid(),
@@ -131,34 +166,38 @@ export async function notify({
  * code path that transitions a file (direct, workflow engine, legacy)
  * produces the same notification shape.
  *
- * Caller must already know the file's `createdById` and the acting
- * user's id — we don't re-query them here.
+ * Caller must already know the file's `createdById`, its `folderId` and
+ * the acting user's id — we don't re-query them here.
  */
 export async function notifyFileTransition({
   tenantId,
   fileId,
   fileName,
+  folderId,
   toStateName,
   actorId,
   actorFullName,
   createdById,
+  excludeUserIds = [],
 }: {
   tenantId: string;
   fileId: string;
   fileName: string;
+  /** Where the file lives; the broadcast goes only to people who can see it. */
+  folderId: string | null;
   toStateName: string;
   actorId: string;
   actorFullName: string;
   createdById: string | null;
+  /** People already told by another notification about the same event. */
+  excludeUserIds?: string[];
 }) {
+  const excluded = new Set(excludeUserIds);
   const broadcastStates = ["Released", "Obsolete"];
   if (broadcastStates.includes(toStateName)) {
-    const db = getServiceClient();
-    const { data: tenantUsers } = await db
-      .from("tenant_users")
-      .select("id")
-      .eq("tenantId", tenantId);
-    const userIds = (tenantUsers || []).map((u) => u.id);
+    const userIds = (await usersWhoCanSeeFolder(tenantId, folderId)).filter(
+      (id) => !excluded.has(id)
+    );
     if (userIds.length === 0) return;
     await notify({
       tenantId,
@@ -172,7 +211,7 @@ export async function notifyFileTransition({
     });
     return;
   }
-  if (!createdById) return;
+  if (!createdById || excluded.has(createdById)) return;
   await notify({
     tenantId,
     userIds: [createdById],
@@ -216,6 +255,80 @@ export async function markNotificationsReadByRef({
   if (error) {
     console.warn(`[notify] could not clear notifications for ${refId}:`, error.message);
   }
+}
+
+/**
+ * Mark every unread notification about an entity as read, for everyone in
+ * the tenant. For when the thing being nagged about is over: a request was
+ * decided, recalled or moved past the step, so the people who did not act
+ * should stop being asked to. `markNotificationsReadByRef` clears only the
+ * actor's own row, which left everyone else's "Approval Required" unread
+ * for good.
+ *
+ * Call it before inserting whatever notification announces the outcome, or
+ * that one is cleared too.
+ */
+export async function clearNotificationsByRef({
+  tenantId,
+  refId,
+}: {
+  tenantId: string;
+  refId: string;
+}) {
+  const db = getServiceClient();
+  const { error } = await db
+    .from("notifications")
+    .update({ isRead: true })
+    .eq("tenantId", tenantId)
+    .eq("refId", refId)
+    .eq("isRead", false);
+  if (error) {
+    console.warn(`[notify] could not clear notifications for ${refId}:`, error.message);
+  }
+}
+
+/**
+ * Active members of the tenant who can view `folderId` — the audience for
+ * a "this file was released" broadcast.
+ *
+ * The broadcast used to go to every row in `tenant_users`, deactivated or
+ * not, and regardless of folder access. In a tenant with restricted folders
+ * that told people the name of a file in a folder they cannot open, with a
+ * link that did not work for them.
+ *
+ * Folder scope is resolved per user through the same RPC the vault uses.
+ * One call establishes whether the tenant has any access rules at all; only
+ * when it does is every other member resolved.
+ */
+async function usersWhoCanSeeFolder(tenantId: string, folderId: string | null): Promise<string[]> {
+  const db = getServiceClient();
+  const { data: members, error } = await db
+    .from("tenant_users")
+    .select("id, roleId, role:roles!inner(permissions)")
+    .eq("tenantId", tenantId)
+    .eq("isActive", true);
+  if (error) {
+    console.warn(`[notify] could not list members of tenant ${tenantId}:`, error.message);
+    return [];
+  }
+  const users = (members ?? []).map((m) => ({
+    id: m.id,
+    tenantId,
+    roleId: m.roleId,
+    role: m.role as unknown as { permissions: unknown },
+  }));
+  if (users.length === 0 || !folderId) return users.map((u) => u.id);
+
+  const first = await getFolderAccessScope(users[0]);
+  if (!first.restrictedAny && !first.bypass) return users.map((u) => u.id);
+
+  const allowed: string[] = [];
+  if (canViewFolder(first, folderId)) allowed.push(users[0].id);
+  for (const user of users.slice(1)) {
+    const scope = await getFolderAccessScope(user);
+    if (canViewFolder(scope, folderId)) allowed.push(user.id);
+  }
+  return allowed;
 }
 
 export async function notifyApprovalGroupMembers({
