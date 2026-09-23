@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -16,7 +16,6 @@ export default function ResetPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const supabase = createClient();
   const router = useRouter();
 
   async function handleReset(e: React.FormEvent) {
@@ -34,10 +33,13 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.updateUser({ password });
-
-    if (error) {
-      setError(error.message);
+    // Through the server, not supabase.auth.updateUser in the browser: the
+    // route also marks a pending invitation accepted, for an invitee whose
+    // link expired and who got here through "Forgot password?".
+    try {
+      await fetchJson("/api/auth/set-password", { method: "POST", body: { password } });
+    } catch (err) {
+      setError(errorMessage(err));
       setLoading(false);
       return;
     }

@@ -167,9 +167,6 @@
   "src/app/api/users/[userId]/route.ts": {
     "unwrapped-route": 7
   },
-  "src/app/api/users/invite/route.ts": {
-    "unwrapped-route": 4
-  },
   "src/app/api/workflows/[workflowId]/route.ts": {
     "unwrapped-route": 6
   },
@@ -181,12 +178,6 @@
   },
   "src/app/api/workflows/route.ts": {
     "unwrapped-route": 6
-  },
-  "src/app/auth/confirm/page.tsx": {
-    "raw-fetch": 1
-  },
-  "src/app/onboarding/page.tsx": {
-    "raw-fetch": 2
   },
   "src/app/share/[token]/share-viewer-client.tsx": {
     "raw-fetch": 1

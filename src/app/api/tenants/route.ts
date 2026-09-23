@@ -127,7 +127,8 @@ export async function POST(request: NextRequest) {
         roles[roleName] = roleId;
       }
 
-      // 3. Create the user as Admin
+      // 3. Create the user as Admin. The creator is signed in already, so
+      //    there is no invitation to accept.
       await setupStep(
         "your user account",
         db.from("tenant_users").insert({
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
           fullName,
           roleId: roles["Admin"],
           isActive: true,
+          acceptedAt: now,
           createdAt: now,
           updatedAt: now,
         })

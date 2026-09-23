@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { safeNextPath } from "@/lib/safe-redirect";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -98,17 +99,21 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Unauthenticated users → login (except auth pages, API, shared links).
+  // The page they were after rides along as `next`, so a link from a
+  // notification email still lands on the file after signing in, not on the
+  // dashboard.
   if (!user && !isAuthPath && !pathname.startsWith("/api") && !pathname.startsWith("/share/")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
+    if (pathname !== "/") url.searchParams.set("next", pathname + request.nextUrl.search);
     return NextResponse.redirect(url);
   }
 
-  // Authenticated users on auth pages → dashboard.
+  // Authenticated users on auth pages → dashboard, or wherever they were going.
   if (user && (pathname.startsWith("/login") || pathname.startsWith("/register"))) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+    const next = safeNextPath(request.nextUrl.searchParams.get("next"));
+    return NextResponse.redirect(new URL(next, request.nextUrl.origin));
   }
 
   return supabaseResponse;

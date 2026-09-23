@@ -36,7 +36,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { UserPlus, AlertTriangle, MoreHorizontal, UserMinus } from "lucide-react";
+import { UserPlus, AlertTriangle, MoreHorizontal, UserMinus, MailPlus } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageContainer } from "@/components/ui/page-container";
@@ -47,8 +47,17 @@ interface User {
   email: string;
   isActive: boolean;
   createdAt: string;
+  /**
+   * When the person set their password (or was added with an account that
+   * already worked). Null means invited and not yet in — which used to render
+   * as "Active", "Joined <the day the email went out>".
+   */
+  acceptedAt: string | null;
   role: { id: string; name: string } | null;
 }
+
+/** Still holding an invitation rather than an account they can sign in to. */
+export const isPending = (user: Pick<User, "acceptedAt">) => user.acceptedAt === null;
 
 interface Role {
   id: string;
@@ -79,34 +88,53 @@ export function UsersClient({
   const [removeTarget, setRemoveTarget] = useState<User | null>(null);
   const [removing, setRemoving] = useState(false);
 
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const data = await fetchJson<{ alreadyExisted?: boolean; user: User }>("/api/users/invite", {
-        method: "POST",
-        body: { email, fullName, roleId },
-      });
-
-      toast.success(
-        data.alreadyExisted
-          ? "User added to workspace (they already have an account)"
-          : `Invitation email sent to ${email}`
+      const data = await fetchJson<{ alreadyExisted: boolean; resent: boolean; user: User }>(
+        "/api/users/invite",
+        {
+          method: "POST",
+          body: { email, fullName, roleId },
+        }
       );
 
-      setUsers((prev) => [
-        ...prev,
-        {
-          ...data.user,
-          role: roles.find((r) => r.id === roleId) || null,
-        },
-      ]);
+      const withRole = { ...data.user, role: roles.find((r) => r.id === roleId) || null };
+
+      if (data.resent) {
+        // The address already had a pending invitation, so this was a resend
+        // and the row already exists; it takes the restated name and role.
+        toast.success(`Invitation re-sent to ${email}`);
+        setUsers((prev) => prev.map((u) => (u.id === withRole.id ? withRole : u)));
+      } else {
+        toast.success(
+          data.alreadyExisted
+            ? `Added to workspace. ${fullName} already has an account, so we emailed them how to sign in.`
+            : `Invitation email sent to ${email}`
+        );
+        setUsers((prev) => [...prev, withRole]);
+      }
       resetAndClose();
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function resendInvite(user: User) {
+    setResendingId(user.id);
+    try {
+      await fetchJson(`/api/users/${user.id}/resend-invite`, { method: "POST" });
+      toast.success(`Invitation re-sent to ${user.email}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setResendingId(null);
     }
   }
 
@@ -264,19 +292,33 @@ export function UsersClient({
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto px-2 py-0.5"
-                      onClick={() => handleStatusClick(user)}
-                    >
-                      <Badge variant={user.isActive ? "default" : "destructive"}>
-                        {user.isActive ? "Active" : "Inactive"}
+                    {isPending(user) && user.isActive ? (
+                      // Nothing to toggle yet: revoking a pending invitation
+                      // is "Remove from workspace" in the row's menu.
+                      <Badge variant="outline" title="Invited — has not set a password yet">
+                        Invited
                       </Badge>
-                    </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto px-2 py-0.5"
+                        onClick={() => handleStatusClick(user)}
+                      >
+                        <Badge variant={user.isActive ? "default" : "destructive"}>
+                          {user.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </Button>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    <FormattedDate date={user.createdAt} variant="date" />
+                    {isPending(user) ? (
+                      <span>
+                        Invited <FormattedDate date={user.createdAt} variant="date" />
+                      </span>
+                    ) : (
+                      <FormattedDate date={user.createdAt} variant="date" />
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     {!isSelf && (
@@ -290,12 +332,21 @@ export function UsersClient({
                           }
                         />
                         <DropdownMenuContent align="end">
+                          {isPending(user) && user.isActive && (
+                            <DropdownMenuItem
+                              onClick={() => resendInvite(user)}
+                              disabled={resendingId === user.id}
+                            >
+                              <MailPlus className="h-4 w-4" />
+                              {resendingId === user.id ? "Sending…" : "Resend invitation"}
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem
                             variant="destructive"
                             onClick={() => setRemoveTarget(user)}
                           >
                             <UserMinus className="h-4 w-4" />
-                            Remove from workspace
+                            {isPending(user) ? "Revoke invitation" : "Remove from workspace"}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -318,7 +369,8 @@ export function UsersClient({
           <DialogHeader>
             <DialogTitle>Invite User</DialogTitle>
             <DialogDescription>
-              They&apos;ll receive an email with a link to set their password.
+              They&apos;ll receive an email with a link to set their password. Inviting an address
+              that is already invited sends the link again.
             </DialogDescription>
           </DialogHeader>
 
@@ -346,9 +398,9 @@ export function UsersClient({
                 />
               </div>
               <div className="space-y-2">
-                <Label>Role</Label>
+                <Label htmlFor="invRole">Role</Label>
                 <Select value={roleId} onValueChange={(v) => setRoleId(v ?? "")}>
-                  <SelectTrigger>
+                  <SelectTrigger id="invRole">
                     <SelectValue placeholder="Select role...">
                       {(value) => roles.find((r) => r.id === value)?.name ?? "Select role..."}
                     </SelectValue>
@@ -426,26 +478,42 @@ export function UsersClient({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove user from workspace</DialogTitle>
+            <DialogTitle>
+              {removeTarget && isPending(removeTarget)
+                ? "Revoke invitation"
+                : "Remove user from workspace"}
+            </DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove {removeTarget?.fullName}?
+              {removeTarget && isPending(removeTarget)
+                ? `Withdraw the invitation to ${removeTarget.fullName}?`
+                : `Are you sure you want to remove ${removeTarget?.fullName}?`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-              <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-              <div className="text-sm space-y-1">
-                <p>This permanently removes their access to this workspace and cannot be undone.</p>
-                <p>
-                  Any files they have checked out will be released. To restore access, you&apos;ll
-                  need to invite them again.
+            {removeTarget && isPending(removeTarget) ? (
+              <p className="text-sm text-muted-foreground">
+                Their invitation link will stop working. You can invite them again at any time.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                  <div className="text-sm space-y-1">
+                    <p>
+                      This permanently removes their access to this workspace and cannot be undone.
+                    </p>
+                    <p>
+                      Any files they have checked out will be released. To restore access,
+                      you&apos;ll need to invite them again.
+                    </p>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Their authored data (files, parts, BOMs, ECOs, approval decisions) is preserved,
+                  but the author field will show as unknown.
                 </p>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Their authored data (files, parts, BOMs, ECOs, approval decisions) is preserved, but
-              the author field will show as unknown.
-            </p>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -457,7 +525,11 @@ export function UsersClient({
               Cancel
             </Button>
             <Button type="button" variant="destructive" disabled={removing} onClick={confirmRemove}>
-              {removing ? "Removing..." : "Remove"}
+              {removing
+                ? "Removing..."
+                : removeTarget && isPending(removeTarget)
+                  ? "Revoke"
+                  : "Remove"}
             </Button>
           </DialogFooter>
         </DialogContent>

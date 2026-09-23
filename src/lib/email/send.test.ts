@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/db", () => ({ getServiceClient: vi.fn() }));
 
-import { appBaseUrl, appEmailConfigured, sendInviteEmail } from "./send";
+import {
+  appBaseUrl,
+  appEmailConfigured,
+  sendInviteEmail,
+  sendSignupConfirmationEmail,
+} from "./send";
 
 const invite = {
   to: "pat@example.com",
@@ -60,6 +65,39 @@ describe("sendInviteEmail", () => {
     expect(appEmailConfigured()).toBe(false);
     expect(await sendInviteEmail(invite)).toMatchObject({ ok: false, skipped: true });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("tells someone who already has an account that their password works, and why there is a link", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: "email-2" }), { status: 200 }));
+
+    await sendInviteEmail({ ...invite, existingAccount: true });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.subject).toBe("Alice added you to Acme <Robotics> on PACE PDM");
+    expect(body.text).toContain("sign in with your existing password");
+    expect(body.text).toContain("never set one");
+    expect(body.text).toContain(invite.link);
+  });
+});
+
+describe("sendSignupConfirmationEmail", () => {
+  it("sends the app-built confirmation link, and says it works on any device", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: "email-3" }), { status: 200 }));
+
+    const result = await sendSignupConfirmationEmail({
+      to: "ada@example.com",
+      recipientName: "Ada Lovelace",
+      link: "https://app.example.com/auth/confirm?token_hash=abc&type=signup&next=%2Fonboarding",
+    });
+
+    expect(result).toEqual({ ok: true, providerId: "email-3" });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.to).toEqual(["ada@example.com"]);
+    expect(body.subject).toMatch(/Confirm your email/);
+    expect(body.text).toContain("Hi Ada,");
+    expect(body.text).toContain("any device");
+    expect(body.text).toContain("token_hash=abc");
+    expect(body.tags).toEqual([{ name: "type", value: "signup" }]);
   });
 });
 

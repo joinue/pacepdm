@@ -1,116 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { createFakeSupabase, type FakeSupabase } from "@/lib/__mocks__/fake-supabase";
 
 /**
- * The privilege ceiling on invitation.
- *
- * `users/[userId]` has enforced `permissionsExceedingActor` on role *changes*
- * since it was written. This route assigns a role too — it just does it to a
- * user who does not exist yet — and did not.
- *
- * That gap was reachable on the seeded roles rather than only in theory:
- * ADMIN_USERS gates this route, and Manager holds ADMIN_USERS without holding
- * "*". A Manager could invite an address they control as an Admin and return
- * through the front door with permissions nobody granted them.
+ * Inviting someone: the privilege ceiling, where the link lands, what happens
+ * to an address that already has an account, a second invitation to someone
+ * who has not accepted, and one active membership per account.
  */
 
-const { tableResults, tableRows, insertErrors, inserts, mockFrom } = vi.hoisted(() => {
-  type QueryResult = { data: unknown; error: unknown };
-  type Row = Record<string, unknown>;
-  const tableResults: Record<string, QueryResult> = {};
-  const insertErrors: Record<string, { code: string; message: string }> = {};
-  const inserts: { table: string; row: Record<string, unknown> }[] = [];
-
-  /**
-   * Rows for tables whose queries must actually be filtered. A canned result
-   * answers every query on a table the same way, which cannot tell "this
-   * email in my workspace" from "this account active anywhere" — and a mock
-   * that cannot tell those apart is how the case-sensitive lookup survived.
-   */
-  const tableRows: Record<string, Row[]> = {};
-
-  /** Postgres ILIKE: `%` any run, `_` one character, backslash escapes. */
-  function ilikeMatches(value: unknown, pattern: string) {
-    let re = "";
-    for (let i = 0; i < pattern.length; i++) {
-      const c = pattern[i];
-      if (c === "\\" && i + 1 < pattern.length)
-        re += pattern[++i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      else if (c === "%") re += ".*";
-      else if (c === "_") re += ".";
-      else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-    return typeof value === "string" && new RegExp(`^${re}$`, "i").test(value);
-  }
-
-  function makeChain(table: string) {
-    const chain: Record<string, (...args: unknown[]) => unknown> = {};
-    const filters: ((row: Row) => boolean)[] = [];
-    let limit: number | undefined;
-    const matched = () => {
-      const rows = tableRows[table]!.filter((r) => filters.every((f) => f(r)));
-      return limit === undefined ? rows : rows.slice(0, limit);
-    };
-    const resolvable = () => tableResults[table] ?? { data: null, error: null };
-    const one = () => {
-      if (!tableRows[table]) return resolvable();
-      const rows = matched();
-      return { data: rows[0] ?? null, error: null };
-    };
-    const many = () => (tableRows[table] ? { data: matched(), error: null } : resolvable());
-
-    for (const m of ["select", "in", "is", "order"] as const) {
-      chain[m] = () => chain;
-    }
-    chain.eq = (col: unknown, val: unknown) => {
-      filters.push((r) => r[col as string] === val);
-      return chain;
-    };
-    chain.neq = (col: unknown, val: unknown) => {
-      filters.push((r) => r[col as string] !== val);
-      return chain;
-    };
-    chain.ilike = (col: unknown, pattern: unknown) => {
-      filters.push((r) => ilikeMatches(r[col as string], pattern as string));
-      return chain;
-    };
-    chain.limit = (n: unknown) => {
-      limit = n as number;
-      return chain;
-    };
-    chain.single = () => one();
-    chain.maybeSingle = () => one();
-    chain.insert = (row: unknown) => {
-      const error = insertErrors[table] ?? null;
-      if (!error) inserts.push({ table, row: row as Record<string, unknown> });
-      return {
-        select: () => ({
-          single: () => Promise.resolve(error ? { data: null, error } : { data: row, error: null }),
-        }),
-      };
-    };
-    chain.update = () => {
-      const u: Record<string, (...a: unknown[]) => unknown> = {};
-      for (const m of ["eq", "select"] as const) u[m] = () => u;
-      u.single = () => resolvable();
-      return u;
-    };
-    chain.then = ((resolve: (v: unknown) => void) => resolve(many())) as unknown as (
-      ...args: unknown[]
-    ) => unknown;
-    return chain;
-  }
-  return {
-    tableResults,
-    tableRows,
-    insertErrors,
-    inserts,
-    mockFrom: (table: string) => makeChain(table),
-  };
-});
-
-const mockTenantUser = vi.hoisted(() => ({
-  current: null as {
+const state = vi.hoisted(() => ({
+  fake: null as unknown as FakeSupabase,
+  user: null as {
     id: string;
     tenantId: string;
     fullName: string;
@@ -125,15 +25,21 @@ const authAdmin = vi.hoisted(() => ({
   listUsers: vi.fn(),
 }));
 
+const anonAuth = vi.hoisted(() => ({
+  resetPasswordForEmail: vi.fn(),
+}));
+
 const appEmail = vi.hoisted(() => ({
   configured: true,
   sendInviteEmail: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({ getServiceClient: () => ({ from: mockFrom }) }));
+vi.mock("@/lib/db", () => ({ getServiceClient: () => state.fake.client }));
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@supabase/supabase-js", () => ({
-  createClient: () => ({ auth: { admin: authAdmin } }),
+  createClient: () => ({
+    auth: { admin: authAdmin, resetPasswordForEmail: anonAuth.resetPasswordForEmail },
+  }),
 }));
 vi.mock("@/lib/email/send", () => ({
   appEmailConfigured: () => appEmail.configured,
@@ -142,7 +48,7 @@ vi.mock("@/lib/email/send", () => ({
 vi.mock("@/lib/auth", async () => {
   const perms = await vi.importActual<typeof import("@/lib/permissions")>("@/lib/permissions");
   return {
-    getApiTenantUser: () => Promise.resolve(mockTenantUser.current),
+    getApiTenantUser: () => Promise.resolve(state.user),
     hasPermission: perms.hasPermission,
     permissionsExceedingActor: perms.permissionsExceedingActor,
     PERMISSIONS: perms.PERMISSIONS,
@@ -172,74 +78,109 @@ const admin = {
   tenantId: "tenant-1",
   fullName: "Alice",
   role: { permissions: ["*"] },
+  tenant: { name: "Acme Robotics", settings: {} },
 };
 
+const roleEng = { id: "role-eng", tenantId: "tenant-1", permissions: ["file.edit"] };
+const roleAdmin = { id: "role-admin", tenantId: "tenant-1", permissions: ["*"] };
+
+const alreadyRegistered = {
+  data: { user: null, properties: null },
+  error: {
+    code: "email_exists",
+    message: "A user with this email address has already been registered",
+  },
+};
+
+/** generateLink answers per link type: a fresh invite, or a recovery for a confirmed account. */
+function linksFor(handlers: {
+  invite?: { data: unknown; error: unknown };
+  recovery?: { data: unknown; error: unknown };
+}) {
+  authAdmin.generateLink.mockImplementation(async ({ type }: { type: string }) => {
+    const answer = handlers[type as "invite" | "recovery"];
+    if (!answer) throw new Error(`unexpected generateLink type ${type}`);
+    return answer;
+  });
+}
+
+const freshInvite = {
+  data: { properties: { hashed_token: "hash-invite" }, user: { id: "auth-new" } },
+  error: null,
+};
+
+const recoveryFor = (id: string) => ({
+  data: { properties: { hashed_token: "hash-recovery" }, user: { id } },
+  error: null,
+});
+
+const memberships = () => state.fake.rows("tenant_users");
+const sentEmails = () => appEmail.sendInviteEmail.mock.calls.map((c) => c[0]);
+
+function invite(overrides: Partial<{ email: string; fullName: string; roleId: string }> = {}) {
+  return POST(
+    req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng", ...overrides })
+  );
+}
+
 beforeEach(() => {
-  for (const k of Object.keys(tableResults)) delete tableResults[k];
-  for (const k of Object.keys(tableRows)) delete tableRows[k];
-  for (const k of Object.keys(insertErrors)) delete insertErrors[k];
-  inserts.length = 0;
-  mockTenantUser.current = null;
+  state.fake = createFakeSupabase({ roles: [roleEng, roleAdmin], tenant_users: [] });
+  state.user = admin;
 
   appEmail.configured = true;
   appEmail.sendInviteEmail.mockReset().mockResolvedValue({ ok: true, providerId: "email-1" });
-  authAdmin.generateLink.mockReset().mockResolvedValue({
-    data: { properties: { hashed_token: "hash-abc" }, user: { id: "auth-new" } },
-    error: null,
-  });
+  authAdmin.generateLink.mockReset();
+  linksFor({ invite: freshInvite });
   authAdmin.inviteUserByEmail
     .mockReset()
     .mockResolvedValue({ data: { user: { id: "auth-new" } }, error: null });
   authAdmin.listUsers.mockReset().mockResolvedValue({ data: { users: [] }, error: null });
+  anonAuth.resetPasswordForEmail.mockReset().mockResolvedValue({ data: {}, error: null });
 });
 
+/**
+ * `users/[userId]` has enforced `permissionsExceedingActor` on role *changes*
+ * since it was written. This route assigns a role too — it just does it to a
+ * user who does not exist yet — and did not. ADMIN_USERS gates this route,
+ * and Manager holds ADMIN_USERS without holding "*": a Manager could invite
+ * an address they control as an Admin and return through the front door.
+ */
 describe("invite privilege ceiling", () => {
   it("refuses to invite someone into a more powerful role", async () => {
-    mockTenantUser.current = manager;
-    tableResults.tenant_users = { data: null, error: null }; // no existing user
-    tableResults.roles = { data: { id: "role-admin", permissions: ["*"] }, error: null };
+    state.user = manager;
 
-    const res = await POST(req({ email: "x@y.com", fullName: "X", roleId: "role-admin" }));
+    const res = await invite({ roleId: "role-admin" });
 
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({
       error: expect.stringContaining("permissions you don't hold"),
     });
+    expect(memberships()).toHaveLength(0);
   });
 
   it("allows inviting into a role within the actor's own permissions", async () => {
-    mockTenantUser.current = manager;
-    tableResults.tenant_users = { data: null, error: null };
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
-
-    const res = await POST(req({ email: "x@y.com", fullName: "X", roleId: "role-eng" }));
-
-    expect(res.status).not.toBe(403);
+    state.user = manager;
+    const res = await invite({ roleId: "role-eng" });
+    expect(res.status).toBe(200);
   });
 
   it("lets a full admin invite an admin", async () => {
     // permissionsExceedingActor short-circuits on "*", so the holder of
     // everything is never blocked by their own ceiling.
-    mockTenantUser.current = admin;
-    tableResults.tenant_users = { data: null, error: null };
-    tableResults.roles = { data: { id: "role-admin", permissions: ["*"] }, error: null };
-
-    const res = await POST(req({ email: "x@y.com", fullName: "X", roleId: "role-admin" }));
-
-    expect(res.status).not.toBe(403);
+    const res = await invite({ roleId: "role-admin" });
+    expect(res.status).toBe(200);
   });
 
   it("still refuses a caller without admin.users at all", async () => {
-    mockTenantUser.current = {
-      id: "user-3",
-      tenantId: "tenant-1",
-      fullName: "Carol",
-      role: { permissions: ["file.edit"] },
-    };
-
-    const res = await POST(req({ email: "x@y.com", fullName: "X", roleId: "role-eng" }));
-
+    state.user = { ...manager, id: "user-3", role: { permissions: ["file.edit"] } };
+    const res = await invite();
     expect(res.status).toBe(403);
+  });
+
+  it("refuses a role from another workspace", async () => {
+    state.fake.rows("roles").push({ id: "role-other", tenantId: "tenant-2", permissions: [] });
+    const res = await invite({ roleId: "role-other" });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -251,31 +192,16 @@ describe("invite privilege ceiling", () => {
  * signs the invitee in with tokens in the URL #fragment — invites cannot use
  * PKCE. /auth/callback is a server route that only understands ?code=, never
  * sees a fragment, and redirected every invitee to /login?error=missing_code.
- * It worked only if someone had customised the dashboard template.
  *
  * Now the app generates the token and sends the email itself, linking to
  * /auth/confirm, which verifies token_hash when the invitee clicks.
  */
-describe("invite link", () => {
-  const acme = { ...admin, tenant: { name: "Acme Robotics", settings: {} } };
-
-  function inviteReady() {
-    mockTenantUser.current = acme;
-    tableResults.tenant_users = { data: null, error: null };
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
-  }
-
-  const tenantUserInserts = () => inserts.filter((i) => i.table === "tenant_users");
-
+describe("a new account", () => {
   it("emails a link to the app's confirm page, carrying the token hash", async () => {
-    inviteReady();
-
-    const res = await POST(
-      req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
+    const res = await invite();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ alreadyExisted: false });
+    expect(await res.json()).toMatchObject({ alreadyExisted: false, resent: false });
     expect(authAdmin.generateLink).toHaveBeenCalledWith({
       type: "invite",
       email: "pat@example.com",
@@ -283,52 +209,54 @@ describe("invite link", () => {
     });
     expect(authAdmin.inviteUserByEmail).not.toHaveBeenCalled();
 
-    expect(appEmail.sendInviteEmail).toHaveBeenCalledTimes(1);
-    const sent = appEmail.sendInviteEmail.mock.calls[0][0];
+    expect(sentEmails()).toHaveLength(1);
+    const sent = sentEmails()[0];
     expect(sent).toMatchObject({
       to: "pat@example.com",
       recipientName: "Pat Lee",
       inviterName: "Alice",
       tenantName: "Acme Robotics",
+      existingAccount: false,
     });
     const link = new URL(sent.link);
     expect(link.origin + link.pathname).toBe("http://localhost/auth/confirm");
     expect(Object.fromEntries(link.searchParams)).toEqual({
-      token_hash: "hash-abc",
+      token_hash: "hash-invite",
       type: "invite",
       next: "/accept-invite",
     });
+  });
 
-    expect(tenantUserInserts()).toHaveLength(1);
-    expect(tenantUserInserts()[0].row).toMatchObject({
+  it("records the membership as pending until the password is set", async () => {
+    await invite();
+
+    expect(memberships()).toHaveLength(1);
+    expect(memberships()[0]).toMatchObject({
+      tenantId: "tenant-1",
       authUserId: "auth-new",
       roleId: "role-eng",
+      isActive: true,
+      acceptedAt: null,
     });
   });
 
   it("adds nobody to the workspace when the email cannot be sent", async () => {
-    inviteReady();
     appEmail.sendInviteEmail.mockResolvedValue({
       ok: false,
       reason: "resend 403: domain is not verified",
     });
 
-    const res = await POST(
-      req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
+    const res = await invite();
 
     expect(res.status).toBe(502);
     expect((await res.json()).error).toContain("domain is not verified");
-    expect(tenantUserInserts()).toHaveLength(0);
+    expect(memberships()).toHaveLength(0);
   });
 
   it("falls back to Supabase's mailer, pointed at /auth/confirm, when app email is not configured", async () => {
-    inviteReady();
     appEmail.configured = false;
 
-    const res = await POST(
-      req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
+    const res = await invite();
 
     expect(res.status).toBe(200);
     expect(authAdmin.generateLink).not.toHaveBeenCalled();
@@ -337,85 +265,168 @@ describe("invite link", () => {
       data: { full_name: "Pat Lee" },
       redirectTo: "http://localhost/auth/confirm?next=/accept-invite",
     });
+    expect(memberships()[0]).toMatchObject({ authUserId: "auth-new", acceptedAt: null });
   });
 });
 
 /**
- * Adding someone who already has an account.
+ * An address that already has a confirmed account.
  *
- * listUsers() without arguments returns the first page of the whole Supabase
- * project's users — 50 of them. Past that, an existing account on any later
- * page was never found and the invite failed with "already registered".
+ * The person is added rather than invited: generateLink refuses an invite,
+ * and hands back the account with a recovery token instead. That link lets
+ * them set a password if they have none, and the email tells them their
+ * existing password works too. They used to receive nothing at all.
  */
-describe("inviting an existing account", () => {
-  const alreadyRegistered = {
-    data: { user: null, properties: null },
-    error: {
-      code: "email_exists",
-      message: "A user with this email address has already been registered",
-    },
-  };
+describe("an existing account", () => {
+  beforeEach(() => {
+    linksFor({ invite: alreadyRegistered, recovery: recoveryFor("auth-pat") });
+  });
 
-  function existingAccount() {
-    mockTenantUser.current = admin;
-    tableResults.tenant_users = { data: null, error: null };
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
-    authAdmin.generateLink.mockResolvedValue(alreadyRegistered);
+  it("adds them, stamped accepted, and emails a recovery link with the 'added' wording", async () => {
+    const res = await invite();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ alreadyExisted: true, resent: false });
+    expect(authAdmin.listUsers).not.toHaveBeenCalled();
+
+    expect(memberships()[0]).toMatchObject({ authUserId: "auth-pat", isActive: true });
+    expect(memberships()[0].acceptedAt).toEqual(expect.any(String));
+
+    const sent = sentEmails()[0];
+    expect(sent).toMatchObject({ to: "pat@example.com", existingAccount: true });
+    expect(Object.fromEntries(new URL(sent.link).searchParams)).toEqual({
+      token_hash: "hash-recovery",
+      type: "recovery",
+      next: "/accept-invite",
+    });
+  });
+
+  it("without app email, finds the account in the auth user list and asks Supabase to send a recovery", async () => {
+    appEmail.configured = false;
     authAdmin.inviteUserByEmail.mockResolvedValue(alreadyRegistered);
-  }
-
-  /** A project whose users span several pages of `perPage`. */
-  function authUsers(all: { id: string; email: string }[]) {
+    // listUsers() without arguments returns the first page of the whole
+    // project's users — 50 of them. Past that, an existing account on any
+    // later page was never found and the invite failed as "already registered".
+    const all = [
+      ...Array.from({ length: 1500 }, (_, i) => ({ id: `auth-${i}`, email: `user${i}@other.com` })),
+      { id: "auth-pat", email: "pat@example.com" },
+    ];
     authAdmin.listUsers.mockImplementation(
       async ({ page = 1, perPage = 50 }: { page?: number; perPage?: number } = {}) => ({
         data: { users: all.slice((page - 1) * perPage, page * perPage) },
         error: null,
       })
     );
-  }
 
-  const tenantUserInserts = () => inserts.filter((i) => i.table === "tenant_users");
-
-  it("finds the account when it is not on the first page of auth users", async () => {
-    existingAccount();
-    authUsers([
-      ...Array.from({ length: 1500 }, (_, i) => ({ id: `auth-${i}`, email: `user${i}@other.com` })),
-      { id: "auth-pat", email: "pat@example.com" },
-    ]);
-
-    const res = await POST(
-      req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
+    const res = await invite();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ alreadyExisted: true });
-    expect(tenantUserInserts()[0].row).toMatchObject({ authUserId: "auth-pat" });
-    expect(appEmail.sendInviteEmail).not.toHaveBeenCalled();
+    expect(memberships()[0]).toMatchObject({ authUserId: "auth-pat" });
+    expect(anonAuth.resetPasswordForEmail).toHaveBeenCalledWith("pat@example.com", {
+      redirectTo: "http://localhost/auth/confirm?next=/accept-invite",
+    });
   });
 
-  it("matches the account's email regardless of how the admin capitalised it", async () => {
-    existingAccount();
-    authUsers([{ id: "auth-pat", email: "pat@example.com" }]);
+  it("without app email, reports the error when the auth user list has no match", async () => {
+    appEmail.configured = false;
+    authAdmin.inviteUserByEmail.mockResolvedValue(alreadyRegistered);
+    authAdmin.listUsers.mockImplementation(async ({ page = 1 }: { page?: number } = {}) => ({
+      data: { users: page === 1 ? [{ id: "auth-other", email: "someone@else.com" }] : [] },
+      error: null,
+    }));
 
-    const res = await POST(
-      req({ email: "Pat@Example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
-
-    expect(res.status).toBe(200);
-    expect(tenantUserInserts()[0].row).toMatchObject({ authUserId: "auth-pat" });
-  });
-
-  it("stops at the last page and reports the error when there is no match", async () => {
-    existingAccount();
-    authUsers([{ id: "auth-other", email: "someone@else.com" }]);
-
-    const res = await POST(
-      req({ email: "pat@example.com", fullName: "Pat Lee", roleId: "role-eng" })
-    );
+    const res = await invite();
 
     expect(res.status).toBe(400);
-    expect(tenantUserInserts()).toHaveLength(0);
-    expect(authAdmin.listUsers).toHaveBeenCalledTimes(2);
+    expect(memberships()).toHaveLength(0);
+    expect(anonAuth.resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Inviting someone who has been invited and has not accepted.
+ *
+ * The link expires — Supabase's email OTP expiry, an hour by default — and
+ * the invitation email tells them to ask for a new one. A second invitation
+ * used to be refused as "already exists in this workspace", so the only way
+ * to reissue was Remove → Invite.
+ */
+describe("a pending invitation", () => {
+  const pending = {
+    id: "tu-pat",
+    tenantId: "tenant-1",
+    authUserId: "auth-new",
+    email: "pat@example.com",
+    fullName: "Pat",
+    roleId: "role-eng",
+    isActive: true,
+    acceptedAt: null,
+  };
+
+  it("is sent again, with the name and role restated, instead of being refused", async () => {
+    state.fake.rows("tenant_users").push({ ...pending });
+
+    const res = await invite({ fullName: "Pat Lee", roleId: "role-admin" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ resent: true, alreadyExisted: false });
+    expect(sentEmails()).toHaveLength(1);
+    expect(sentEmails()[0]).toMatchObject({ to: "pat@example.com", existingAccount: false });
+
+    expect(memberships()).toHaveLength(1);
+    expect(memberships()[0]).toMatchObject({
+      id: "tu-pat",
+      fullName: "Pat Lee",
+      roleId: "role-admin",
+      acceptedAt: null,
+    });
+  });
+
+  it("still applies the privilege ceiling to the restated role", async () => {
+    state.user = manager;
+    state.fake.rows("tenant_users").push({ ...pending });
+
+    const res = await invite({ roleId: "role-admin" });
+
+    expect(res.status).toBe(403);
+    expect(sentEmails()).toHaveLength(0);
+  });
+
+  it("uses a recovery link, with invitation wording, when the invitee confirmed but never set a password", async () => {
+    // They clicked Continue on the first email, which confirmed the account
+    // and signed them in, then closed the tab. generateLink will not invite a
+    // confirmed account, but they are still being invited.
+    state.fake.rows("tenant_users").push({ ...pending });
+    linksFor({ invite: alreadyRegistered, recovery: recoveryFor("auth-new") });
+
+    const res = await invite();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ resent: true, alreadyExisted: false });
+    const sent = sentEmails()[0];
+    expect(sent.existingAccount).toBe(false);
+    expect(new URL(sent.link).searchParams.get("type")).toBe("recovery");
+    expect(memberships()[0].acceptedAt).toBeNull();
+  });
+
+  it("refuses to re-invite someone who has already accepted", async () => {
+    state.fake.rows("tenant_users").push({ ...pending, acceptedAt: "2026-09-01T00:00:00Z" });
+
+    const res = await invite();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("already exists in this workspace");
+    expect(sentEmails()).toHaveLength(0);
+  });
+
+  it("asks for a reactivation rather than resending to a deactivated invitee", async () => {
+    state.fake.rows("tenant_users").push({ ...pending, isActive: false });
+
+    const res = await invite();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Reactivate");
+    expect(sentEmails()).toHaveLength(0);
   });
 });
 
@@ -428,21 +439,15 @@ describe("inviting an existing account", () => {
  * stranger could create a workspace, invite `Bob@Acme.com`, and lock Bob out.
  */
 describe("one active membership per account", () => {
-  const alreadyRegistered = {
-    data: { user: null, properties: null },
-    error: {
-      code: "email_exists",
-      message: "A user with this email address has already been registered",
-    },
-  };
-
   // Mallory runs her own workspace — sign-up is open, so she is its Admin.
   const mallory = {
     id: "mal-1",
     tenantId: "tenant-mal",
     fullName: "Mallory",
     role: { permissions: ["*"] },
+    tenant: { name: "Mallory Inc" },
   };
+  const roleMal = { id: "role-mal", tenantId: "tenant-mal", permissions: ["file.edit"] };
 
   const bobAtAcme = {
     id: "bob-acme",
@@ -450,109 +455,95 @@ describe("one active membership per account", () => {
     authUserId: "auth-bob",
     email: "bob@acme.com",
     isActive: true,
+    acceptedAt: "2026-01-01T00:00:00Z",
   };
 
-  function strangerInvites() {
-    mockTenantUser.current = mallory;
-    tableRows.tenant_users = [bobAtAcme];
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
-    authAdmin.generateLink.mockResolvedValue(alreadyRegistered);
-    authAdmin.listUsers.mockResolvedValue({
-      data: { users: [{ id: "auth-bob", email: "bob@acme.com" }] },
-      error: null,
-    });
-  }
+  beforeEach(() => {
+    state.user = mallory;
+    state.fake.rows("roles").push(roleMal);
+    linksFor({ invite: alreadyRegistered, recovery: recoveryFor("auth-bob") });
+  });
 
-  const tenantUserInserts = () => inserts.filter((i) => i.table === "tenant_users");
+  const inviteBob = (email = "bob@acme.com") => invite({ email, fullName: "Bob", roleId: "role-mal" });
 
   it("refuses to invite a differently capitalised address that is active in another workspace", async () => {
-    strangerInvites();
+    state.fake.rows("tenant_users").push({ ...bobAtAcme });
 
-    const res = await POST(req({ email: "Bob@Acme.com", fullName: "Bob", roleId: "role-eng" }));
+    const res = await inviteBob("Bob@Acme.com");
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("active in another workspace");
-    expect(tenantUserInserts()).toHaveLength(0);
+    expect(memberships()).toHaveLength(1);
     expect(authAdmin.generateLink).not.toHaveBeenCalled();
   });
 
-  it("checks the account, not the email, once the account is found", async () => {
+  it("checks the account, not the email, once the account is found — and sends nothing", async () => {
     // The membership row was created under a different address than the one
     // the account now has, so no email lookup can connect them.
-    strangerInvites();
-    tableRows.tenant_users = [{ ...bobAtAcme, email: "robert.smith@acme.com" }];
+    state.fake.rows("tenant_users").push({ ...bobAtAcme, email: "robert.smith@acme.com" });
 
-    const res = await POST(req({ email: "bob@acme.com", fullName: "Bob", roleId: "role-eng" }));
+    const res = await inviteBob();
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("active in another workspace");
-    expect(tenantUserInserts()).toHaveLength(0);
+    expect(memberships()).toHaveLength(1);
+    expect(sentEmails()).toHaveLength(0);
   });
 
   it("adds an existing account that is not active anywhere", async () => {
-    strangerInvites();
-    tableRows.tenant_users = [{ ...bobAtAcme, isActive: false }];
+    state.fake.rows("tenant_users").push({ ...bobAtAcme, isActive: false });
 
-    const res = await POST(req({ email: "bob@acme.com", fullName: "Bob", roleId: "role-eng" }));
+    const res = await inviteBob();
 
     expect(res.status).toBe(200);
-    expect(tenantUserInserts()[0].row).toMatchObject({ authUserId: "auth-bob", isActive: true });
+    const added = memberships().find((m) => m.tenantId === "tenant-mal");
+    expect(added).toMatchObject({ authUserId: "auth-bob", isActive: true });
+    expect(sentEmails()).toHaveLength(1);
   });
 
   it("finds a member of this workspace whatever the capitalisation", async () => {
-    mockTenantUser.current = mallory;
-    tableRows.tenant_users = [
-      {
-        id: "pat-mal",
-        tenantId: "tenant-mal",
-        authUserId: "auth-pat",
-        email: "Pat@Example.com",
-        isActive: true,
-      },
-    ];
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+    state.fake.rows("tenant_users").push({
+      ...bobAtAcme,
+      id: "pat-mal",
+      tenantId: "tenant-mal",
+      authUserId: "auth-pat",
+      email: "Pat@Example.com",
+    });
 
-    const res = await POST(req({ email: "pat@example.com", fullName: "Pat", roleId: "role-eng" }));
+    const res = await invite({ email: "pat@example.com", roleId: "role-mal" });
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("already exists in this workspace");
   });
 
   it("does not treat an underscore in the address as a wildcard", async () => {
-    mockTenantUser.current = mallory;
-    tableRows.tenant_users = [{ ...bobAtAcme, email: "bobxsmith@acme.com" }];
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+    state.fake.rows("tenant_users").push({ ...bobAtAcme, email: "bobxsmith@acme.com" });
+    linksFor({ invite: freshInvite });
 
-    const res = await POST(
-      req({ email: "bob_smith@acme.com", fullName: "Bob", roleId: "role-eng" })
-    );
+    const res = await inviteBob("bob_smith@acme.com");
 
     expect(res.status).toBe(200);
   });
 
   it("stores the address lowercased", async () => {
-    mockTenantUser.current = mallory;
-    tableRows.tenant_users = [];
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
+    linksFor({ invite: freshInvite });
 
-    await POST(req({ email: "  Pat.Lee@Example.COM ", fullName: "Pat", roleId: "role-eng" }));
+    await invite({ email: "  Pat.Lee@Example.COM ", roleId: "role-mal" });
 
-    expect(tenantUserInserts()[0].row).toMatchObject({ email: "pat.lee@example.com" });
+    expect(memberships()[0]).toMatchObject({ email: "pat.lee@example.com" });
   });
 
   it("answers 409, not 500, when the database refuses a second active membership", async () => {
     // Migration 054's partial unique index — the backstop for a race past
     // the checks above.
-    mockTenantUser.current = mallory;
-    tableRows.tenant_users = [];
-    tableResults.roles = { data: { id: "role-eng", permissions: ["file.edit"] }, error: null };
-    insertErrors.tenant_users = {
+    linksFor({ invite: freshInvite });
+    state.fake.failNext.insert.tenant_users = {
       code: "23505",
       message:
         'duplicate key value violates unique constraint "tenant_users_one_active_per_auth_user"',
     };
 
-    const res = await POST(req({ email: "pat@example.com", fullName: "Pat", roleId: "role-eng" }));
+    const res = await invite({ roleId: "role-mal" });
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("active in another workspace");

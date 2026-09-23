@@ -1,16 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServiceClient } from "@/lib/db";
-import {
-  getApiTenantUser,
-  hasPermission,
-  permissionsExceedingActor,
-  PERMISSIONS,
-} from "@/lib/auth";
+import { withTenant, badRequest, forbidden, conflict, ApiFailure } from "@/lib/api-route";
+import { permissionsExceedingActor, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { v4 as uuid } from "uuid";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { z, parseBody, nonEmptyString, ilikeExact } from "@/lib/validation";
-import { appEmailConfigured, sendInviteEmail } from "@/lib/email/send";
+import { z, nonEmptyString, ilikeExact } from "@/lib/validation";
+import { sendInviteEmail } from "@/lib/email/send";
+import { createAuthAdminClient, prepareInvitation, type PreparedInvitation } from "@/lib/invitations";
 
 const InviteSchema = z.object({
   // Lowercased on the way in: Supabase Auth stores emails lowercased, and a
@@ -32,54 +26,33 @@ const ALREADY_MEMBER = "User already exists in this workspace";
  */
 function membershipConflict(error: { code?: string; message?: string }) {
   if (error.code !== "23505") return null;
-  const message = error.message?.includes("tenant_users_one_active_per_auth_user")
-    ? ACTIVE_ELSEWHERE
-    : ALREADY_MEMBER;
-  return NextResponse.json({ error: message }, { status: 409 });
+  return conflict(
+    error.message?.includes("tenant_users_one_active_per_auth_user")
+      ? ACTIVE_ELSEWHERE
+      : ALREADY_MEMBER
+  );
 }
-
-const AUTH_USERS_PAGE_SIZE = 1000;
 
 /**
- * Find an auth user by email across every page of the project's users.
+ * Invite someone to the workspace — or, if they were invited before and have
+ * not accepted, send the invitation again.
  *
- * listUsers() with no arguments returns only the first page — 50 users — so
- * once the Supabase project (every tenant together) outgrew that, re-inviting
- * an existing account found nothing and failed with "already registered".
- * Supabase stores emails lowercased; the admin may not type them that way.
+ * The membership row is written when the invitation is sent, with
+ * `acceptedAt` null until the invitee sets a password on /accept-invite. A
+ * second invitation to a pending address is therefore a resend, with the
+ * name and role restated: it used to be refused as "already exists", which
+ * sent admins to Remove → Invite to reissue a link their invitee's own email
+ * had told them to ask for.
+ *
+ * An address with a confirmed account is added rather than invited: the
+ * membership is stamped accepted, and the email says they can sign in with
+ * the password they have (or set one through the link). That person used to
+ * receive nothing.
  */
-async function findAuthUserByEmail(admin: SupabaseClient, email: string) {
-  const target = email.toLowerCase();
-  // Stops on an empty page rather than a short one, so a server-side cap on
-  // perPage cannot end the search early. The bound is only a backstop.
-  for (let page = 1; page <= 1000; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({
-      page,
-      perPage: AUTH_USERS_PAGE_SIZE,
-    });
-    if (error) throw error;
-    if (data.users.length === 0) return null;
-    const match = data.users.find((u) => u.email?.toLowerCase() === target);
-    if (match) return match;
-  }
-  return null;
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const tenantUser = await getApiTenantUser();
-    if (!tenantUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const permissions = tenantUser.role.permissions as string[];
-
-    if (!hasPermission(permissions, PERMISSIONS.ADMIN_USERS)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const parsed = await parseBody(request, InviteSchema);
-    if (!parsed.ok) return parsed.response;
-    const { email, fullName, roleId } = parsed.data;
-
-    const db = getServiceClient();
+export const POST = withTenant(
+  { permission: PERMISSIONS.ADMIN_USERS, body: InviteSchema },
+  async ({ db, tenantUser, permissions, body, request }) => {
+    const { email, fullName, roleId } = body;
 
     // Both lookups ignore case. They used `.eq("email")`, so inviting
     // `Bob@Acme.com` walked past Bob's `bob@acme.com` row while the auth
@@ -90,21 +63,26 @@ export async function POST(request: NextRequest) {
     // makes its creator an Admin.
     const { data: existing, error: existingError } = await db
       .from("tenant_users")
-      .select("id")
-      .eq("tenantId", tenantUser.tenantId)
+      .select("id, authUserId, isActive, acceptedAt")
       .ilike("email", ilikeExact(email))
       .limit(1)
       .maybeSingle();
     if (existingError) throw existingError;
 
-    if (existing) {
-      return NextResponse.json({ error: ALREADY_MEMBER }, { status: 409 });
+    if (existing && existing.acceptedAt !== null) throw conflict(ALREADY_MEMBER);
+    if (existing && !existing.isActive) {
+      throw conflict(
+        "This person was invited and then deactivated. Reactivate them to send the invitation again."
+      );
     }
 
     // A user can only be active in one workspace at a time. This is the early
     // check, before anything is sent; the authoritative one is by account id,
     // once the account is known, below.
-    const { data: activeElsewhere, error: elsewhereError } = await db
+    const crossTenant = db.unscoped(
+      "one active membership per account is a rule across workspaces, checked by email here and by account id below"
+    );
+    const { data: activeElsewhere, error: elsewhereError } = await crossTenant
       .from("tenant_users")
       .select("id")
       .ilike("email", ilikeExact(email))
@@ -113,22 +91,14 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (elsewhereError) throw elsewhereError;
+    if (activeElsewhere) throw conflict(ACTIVE_ELSEWHERE);
 
-    if (activeElsewhere) {
-      return NextResponse.json({ error: ACTIVE_ELSEWHERE }, { status: 409 });
-    }
-
-    // Verify role belongs to tenant
     const { data: role } = await db
       .from("roles")
       .select("id, permissions")
       .eq("id", roleId)
-      .eq("tenantId", tenantUser.tenantId)
-      .single();
-
-    if (!role) {
-      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
-    }
+      .maybeSingle();
+    if (!role) throw badRequest("Invalid role");
 
     // Privilege ceiling. Inviting someone into a role is assigning them one,
     // so it takes the same guard as changing an existing user's role in
@@ -141,166 +111,95 @@ export async function POST(request: NextRequest) {
     const newRolePerms = Array.isArray(role.permissions) ? (role.permissions as string[]) : [];
     const excess = permissionsExceedingActor(newRolePerms, permissions);
     if (excess.length > 0) {
-      return NextResponse.json(
-        {
-          error: `Cannot invite someone into a role with permissions you don't hold: ${excess.join(", ")}`,
-        },
-        { status: 403 }
+      throw forbidden(
+        `Cannot invite someone into a role with permissions you don't hold: ${excess.join(", ")}`
       );
     }
-
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
 
     const origin = new URL(request.url).origin;
+    const prepared = await prepareInvitation(createAuthAdminClient(), {
+      email,
+      fullName,
+      origin,
+    });
+    if (!prepared.ok) throw badRequest(prepared.message);
+    const invitation = prepared.invitation;
 
-    // Create the auth user and get the invitation to them.
-    //
-    // This used to be inviteUserByEmail with redirectTo /auth/callback, which
-    // only worked if the Supabase dashboard's invite template had been
-    // customised. The default template links to Supabase's /verify endpoint,
-    // which signs the invitee in with tokens in the URL #fragment (invites
-    // cannot use PKCE). A server route never sees a fragment, so /auth/callback
-    // found no ?code= and sent them to /login?error=missing_code.
-    //
-    // So the app builds the link itself: generateLink creates the user and
-    // returns the hashed token without sending anything, and the email points
-    // at /auth/confirm, which verifies token_hash on a click. No template or
-    // redirect allowlist is involved. Only when the app has no email provider
-    // configured does it fall back to Supabase's mailer, and that path still
-    // depends on the template.
-    const useAppEmail = appEmailConfigured();
-    if (!useAppEmail) {
-      console.warn(
-        "[invite] RESEND_API_KEY/EMAIL_FROM not set; sending the invitation through Supabase's mailer, which depends on the dashboard invite template"
-      );
-    }
-    const generated = useAppEmail
-      ? await supabaseAdmin.auth.admin.generateLink({
-          type: "invite",
-          email,
-          options: { data: { full_name: fullName } },
-        })
-      : null;
-    const { data: authData, error: authError } =
-      generated ??
-      (await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: fullName },
-        redirectTo: `${origin}/auth/confirm?next=/accept-invite`,
-      }));
+    if (invitation.existingAccount) {
+      // Check memberships by account, not by email. A membership row's email
+      // is whatever was typed when it was created and can differ from the
+      // account's; the account id cannot.
+      const { data: memberships, error: membershipsError } = await crossTenant
+        .from("tenant_users")
+        .select("id, tenantId, isActive")
+        .eq("authUserId", invitation.authUserId);
+      if (membershipsError) throw membershipsError;
 
-    if (authError) {
-      // User might already exist in auth but not in this tenant
-      if (
-        authError.code === "email_exists" ||
-        authError.message.includes("already been registered") ||
-        authError.message.toLowerCase().includes("already registered") ||
-        authError.message.toLowerCase().includes("already exists")
-      ) {
-        const existingAuthUser = await findAuthUserByEmail(supabaseAdmin, email);
-
-        if (existingAuthUser) {
-          // Check memberships by account, not by email. A membership row's
-          // email is whatever was typed when it was created and can differ
-          // from the account's; the account id cannot.
-          const { data: memberships, error: membershipsError } = await db
-            .from("tenant_users")
-            .select("id, tenantId, isActive")
-            .eq("authUserId", existingAuthUser.id);
-          if (membershipsError) throw membershipsError;
-
-          if (memberships?.some((m) => m.tenantId === tenantUser.tenantId)) {
-            return NextResponse.json({ error: ALREADY_MEMBER }, { status: 409 });
-          }
-          if (memberships?.some((m) => m.isActive)) {
-            return NextResponse.json({ error: ACTIVE_ELSEWHERE }, { status: 409 });
-          }
-
-          const now = new Date().toISOString();
-          const { data: newUser, error: insertError } = await db
-            .from("tenant_users")
-            .insert({
-              id: uuid(),
-              tenantId: tenantUser.tenantId,
-              authUserId: existingAuthUser.id,
-              email,
-              fullName,
-              roleId,
-              isActive: true,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            const conflict = membershipConflict(insertError);
-            if (conflict) return conflict;
-            throw insertError;
-          }
-
-          await logAudit({
-            tenantId: tenantUser.tenantId,
-            userId: tenantUser.id,
-            action: "user.invite",
-            entityType: "user",
-            entityId: newUser.id,
-            details: { email, fullName, role: roleId },
-          });
-
-          return NextResponse.json({ user: newUser, alreadyExisted: true });
-        }
+      const here = memberships?.find((m) => m.tenantId === tenantUser.tenantId);
+      if (here && here.id !== existing?.id) throw conflict(ALREADY_MEMBER);
+      if (memberships?.some((m) => m.isActive && m.tenantId !== tenantUser.tenantId)) {
+        throw conflict(ACTIVE_ELSEWHERE);
       }
-      return NextResponse.json({ error: authError.message }, { status: 400 });
     }
 
-    if (generated) {
-      const hashedToken = generated.data.properties?.hashed_token;
-      if (!hashedToken) throw new Error("Supabase returned no invitation token");
+    // "Added" is for an account that works today. A pending invitee whose
+    // account is confirmed — they clicked Continue once and never set a
+    // password — is still being invited, and gets the invitation wording.
+    const addedExisting = invitation.existingAccount && !existing;
 
-      const link = new URL("/auth/confirm", origin);
-      link.searchParams.set("token_hash", hashedToken);
-      link.searchParams.set("type", "invite");
-      link.searchParams.set("next", "/accept-invite");
+    const tenant = tenantUser.tenant as { name?: string; settings?: Record<string, unknown> };
+    const replyTo = tenant?.settings?.emailReplyTo;
+    await deliver(invitation, {
+      to: email,
+      recipientName: fullName,
+      inviterName: tenantUser.fullName ?? "A teammate",
+      tenantId: tenantUser.tenantId,
+      tenantName: tenant?.name || "PACE PDM",
+      existingAccount: addedExisting,
+      replyTo: typeof replyTo === "string" && replyTo ? replyTo : undefined,
+    });
 
-      const tenant = tenantUser.tenant as { name?: string; settings?: Record<string, unknown> };
-      const replyTo = tenant?.settings?.emailReplyTo;
-      const sent = await sendInviteEmail({
-        to: email,
-        recipientName: fullName,
-        inviterName: tenantUser.fullName,
+    const now = new Date().toISOString();
+
+    // Nothing was added to the workspace when the email did not go out, so the
+    // admin can simply retry: the link is reissued for an invitee who has not
+    // accepted yet.
+
+    if (existing) {
+      // A pending invitation, sent again. The admin has restated the name and
+      // role, so the row takes them.
+      const { data: updated, error: updateError } = await db
+        .from("tenant_users")
+        .update({ fullName, roleId, authUserId: invitation.authUserId, updatedAt: now })
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+
+      await logAudit({
         tenantId: tenantUser.tenantId,
-        tenantName: tenant?.name || "PACE PDM",
-        link: link.toString(),
-        replyTo: typeof replyTo === "string" && replyTo ? replyTo : undefined,
+        userId: tenantUser.id,
+        action: "user.invite_resend",
+        entityType: "user",
+        entityId: existing.id,
+        details: { email, fullName, role: roleId },
       });
 
-      // Nothing is added to the workspace when the email does not go out, so
-      // the admin can simply retry: generateLink reissues the token for an
-      // invitee who has not accepted yet.
-      if (!sent.ok) {
-        return NextResponse.json(
-          { error: `The invitation email could not be sent: ${sent.reason}` },
-          { status: 502 }
-        );
-      }
+      return { user: updated, alreadyExisted: false, resent: true };
     }
 
-    // Create tenant user
-    const now = new Date().toISOString();
     const { data: newUser, error: insertError } = await db
       .from("tenant_users")
       .insert({
         id: uuid(),
-        tenantId: tenantUser.tenantId,
-        authUserId: authData.user.id,
+        authUserId: invitation.authUserId,
         email,
         fullName,
         roleId,
         isActive: true,
+        // An existing account works today; the person was added, not
+        // invited. A new account is pending until its password is set.
+        acceptedAt: addedExisting ? now : null,
         createdAt: now,
         updatedAt: now,
       })
@@ -308,9 +207,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertError) {
-      const conflict = membershipConflict(insertError);
-      if (conflict) return conflict;
-      throw insertError;
+      throw membershipConflict(insertError) ?? insertError;
     }
 
     await logAudit({
@@ -319,13 +216,41 @@ export async function POST(request: NextRequest) {
       action: "user.invite",
       entityType: "user",
       entityId: newUser.id,
-      details: { email, fullName },
+      details: { email, fullName, role: roleId, existingAccount: addedExisting },
     });
 
-    return NextResponse.json({ user: newUser, alreadyExisted: false });
-  } catch (err) {
-    console.error("Invite error:", err);
-    const message = err instanceof Error ? err.message : "Failed to invite user";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return { user: newUser, alreadyExisted: addedExisting, resent: false };
+  }
+);
+
+/**
+ * Email the link. With app email configured the link is the one Supabase
+ * issued to prepareInvitation; otherwise Supabase's mailer sends it, which for
+ * a new account has already happened by now.
+ */
+async function deliver(
+  invitation: PreparedInvitation,
+  email: {
+    to: string;
+    recipientName: string;
+    inviterName: string;
+    tenantId: string;
+    tenantName: string;
+    existingAccount: boolean;
+    replyTo?: string;
+  }
+) {
+  if (invitation.link) {
+    const sent = await sendInviteEmail({ ...email, link: invitation.link });
+    if (!sent.ok) {
+      throw new ApiFailure(`The invitation email could not be sent: ${sent.reason}`, 502);
+    }
+    return;
+  }
+  if (invitation.sendThroughSupabaseMailer) {
+    const sent = await invitation.sendThroughSupabaseMailer();
+    if (!sent.ok) {
+      throw new ApiFailure(`The invitation email could not be sent: ${sent.message}`, 502);
+    }
   }
 }

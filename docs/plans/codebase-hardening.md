@@ -3,14 +3,14 @@
 **Started:** 2026-08-04 · **Last updated:** 2026-08-06 · **Status:** in progress
 
 <!-- plan-metrics
-routes-total: 123
-routes-wrapped: 66
-unwrapped-route: 273
-raw-fetch: 34
+routes-total: 127
+routes-wrapped: 71
+unwrapped-route: 269
+raw-fetch: 31
 generic-error-toast: 4
 swallowed-error: 6
 token-violations: 6
-component-tests: 17-->
+component-tests: 18-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the

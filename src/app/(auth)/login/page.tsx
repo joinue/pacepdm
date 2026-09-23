@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
+import { safeNextPath } from "@/lib/safe-redirect";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 
 // Derive the marketing site URL from the app URL. If NEXT_PUBLIC_APP_URL
 // is https://app.pacepdm.com, the marketing site is https://pacepdm.com.
@@ -19,13 +21,40 @@ const homepageUrl = (() => {
   return "/";
 })();
 
-export default function LoginPage() {
+/**
+ * /auth/callback lands here with `?error=` when a code exchange fails. It
+ * used to be ignored — the page has no reason to read the query string
+ * otherwise — so someone whose confirmation link failed saw a bare sign-in
+ * form with no idea why.
+ */
+function explainCallbackError(raw: string): string {
+  if (raw === "missing_code" || /code verifier|auth code|pkce/i.test(raw)) {
+    return "That link could not be completed in this browser. Sign in below — if your email is not confirmed yet, you will be offered a new link.";
+  }
+  if (/expired|invalid/i.test(raw)) {
+    return "That link has expired or was already used. Sign in below, or request a new one.";
+  }
+  return raw;
+}
+
+function isEmailNotConfirmed(error: { code?: string; message: string }): boolean {
+  return error.code === "email_not_confirmed" || /not confirmed/i.test(error.message);
+}
+
+function LoginForm() {
+  const params = useSearchParams();
+  const next = safeNextPath(params.get("next"));
+  const callbackError = params.get("error");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(callbackError ? explainCallbackError(callbackError) : "");
+  const [notice, setNotice] = useState("");
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -33,6 +62,8 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setNotice("");
+    setUnconfirmed(false);
 
     // SSO probe: if the email domain is registered for SSO in this
     // workspace, skip password auth and hand off to the IdP. Users who
@@ -71,13 +102,39 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setError(error.message);
+      if (isEmailNotConfirmed(error)) {
+        setError("Your email address has not been confirmed yet.");
+        setUnconfirmed(true);
+      } else {
+        setError(error.message);
+      }
       setLoading(false);
       return;
     }
 
-    router.push("/");
+    router.push(next);
     router.refresh();
+  }
+
+  async function handleResendConfirmation() {
+    setResending(true);
+    setError("");
+    try {
+      const result = await fetchJson<{ status: "sent" | "already-confirmed" }>(
+        "/api/auth/resend-confirmation",
+        { method: "POST", body: { email } }
+      );
+      if (result.status === "already-confirmed") {
+        setNotice("Your email is already confirmed. Check your password, or reset it below.");
+      } else {
+        setNotice(`We sent a new confirmation link to ${email}. You can open it on any device.`);
+      }
+      setUnconfirmed(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setResending(false);
+    }
   }
 
   async function handleSsoOnly() {
@@ -136,8 +193,31 @@ export default function LoginPage() {
         >
           <div className="space-y-5 sm:space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
-                {error}
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20 space-y-2"
+              >
+                <p>{error}</p>
+                {unconfirmed && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleResendConfirmation}
+                    disabled={resending}
+                  >
+                    {resending ? "Sending…" : "Send a new confirmation link"}
+                  </Button>
+                )}
+              </div>
+            )}
+            {notice && (
+              <div
+                role="status"
+                className="bg-primary/10 text-foreground text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-primary/20"
+              >
+                {notice}
               </div>
             )}
 
@@ -221,17 +301,33 @@ export default function LoginPage() {
             </Button>
           </div>
 
-          <p className="text-sm sm:text-xs text-muted-foreground text-center mt-6 sm:mt-4">
-            No account?{" "}
-            <Link href="/register" className="text-primary hover:underline font-medium">
-              Create workspace
-            </Link>
-          </p>
+          <div className="text-sm sm:text-xs text-muted-foreground text-center mt-6 sm:mt-4 space-y-2">
+            <p>
+              No account?{" "}
+              <Link href="/register" className="text-primary hover:underline font-medium">
+                Create workspace
+              </Link>
+            </p>
+            {/* The only other thing on this page was "Create workspace", so an
+                invitee whose link had expired created a workspace of their own. */}
+            <p>
+              Invited to a workspace? Use the link in your invitation email. If it has expired,
+              the person who invited you can resend it.
+            </p>
+          </div>
         </form>
       </div>
 
       {/* Bottom spacer — breathing room on mobile, small on desktop */}
       <div className="h-10 sm:h-8 shrink-0" />
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

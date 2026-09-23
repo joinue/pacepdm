@@ -31,6 +31,24 @@ export interface FakeObject {
   contentType?: string;
 }
 
+/**
+ * An ILIKE pattern as a case-insensitive anchored RegExp. `ilikeExact` in
+ * lib/validation escapes `%` and `_` with a backslash, and an address with an
+ * underscore has to match itself and nothing else.
+ */
+function ilikePattern(pattern: string): RegExp {
+  const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let re = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "\\" && i + 1 < pattern.length) re += escapeRe(pattern[++i]);
+    else if (c === "%") re += ".*";
+    else if (c === "_") re += ".";
+    else re += escapeRe(c);
+  }
+  return new RegExp(`^${re}$`, "i");
+}
+
 export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
   const tables: Record<string, Row[]> = {};
   for (const [name, rows] of Object.entries(initial)) tables[name] = rows.map((r) => ({ ...r }));
@@ -190,19 +208,12 @@ export function createFakeSupabase(initial: Record<string, Row[]> = {}) {
         filters.push((r) => (r[column] ?? null) === value);
         return query;
       },
-      /** Case-insensitive match. `%` at either end is the only wildcard callers use here. */
+      /** Postgres ILIKE: `%` any run, `_` one character, backslash escapes either. */
       ilike(column: string, pattern: string) {
-        const needle = pattern.replace(/%/g, "").toLowerCase();
-        const anchoredStart = !pattern.startsWith("%");
-        const anchoredEnd = !pattern.endsWith("%");
+        const re = ilikePattern(pattern);
         filters.push((r) => {
           const value = r[column];
-          if (typeof value !== "string") return false;
-          const haystack = value.toLowerCase();
-          if (anchoredStart && anchoredEnd) return haystack === needle;
-          if (anchoredStart) return haystack.startsWith(needle);
-          if (anchoredEnd) return haystack.endsWith(needle);
-          return haystack.includes(needle);
+          return typeof value === "string" && re.test(value);
         });
         return query;
       },

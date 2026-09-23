@@ -9,12 +9,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff, Mail } from "lucide-react";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 
 const homepageUrl = (() => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
   if (appUrl.includes("://app.")) return appUrl.replace("://app.", "://");
   return "/";
 })();
+
+type RegisterResult = { status: "sent" } | { status: "exists" } | { status: "signed-in" };
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -23,52 +26,82 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState("");
+  const [exists, setExists] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [resent, setResent] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  async function register(): Promise<RegisterResult> {
+    return fetchJson<RegisterResult>("/api/auth/register", {
+      method: "POST",
+      body: { email, password, fullName, companyName },
+    });
+  }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setExists(false);
 
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
-        data: {
-          full_name: fullName,
-          company_name: companyName,
-        },
-      },
-    });
-
-    if (authError) {
-      setError(authError.message);
+    // Through the server, which issues the token and sends the email itself.
+    // supabase.auth.signUp from here produced a link that only worked in this
+    // browser, and a "check your email" screen for addresses that already had
+    // an account. See /api/auth/register.
+    let result: RegisterResult;
+    try {
+      result = await register();
+    } catch (err) {
+      setError(errorMessage(err));
       setLoading(false);
       return;
     }
 
-    if (!authData.user) {
-      setError("Registration failed. Please try again.");
+    if (result.status === "exists") {
+      setExists(true);
       setLoading(false);
       return;
     }
 
-    // If the user has a session, email confirmation is off — they're ready to go.
-    // The dashboard layout will redirect to /onboarding if no tenant exists yet,
-    // and the callback/onboarding flow handles tenant creation.
-    if (authData.session) {
+    if (result.status === "signed-in") {
+      // Confirmations are off in this environment. The server may have set the
+      // session cookies already; signing in here covers the case where it
+      // only created the account. The dashboard layout redirects to
+      // /onboarding until a tenant exists.
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
       router.push("/onboarding");
       router.refresh();
       return;
     }
 
-    // No session means email confirmation is required.
     setEmailSent(true);
     setLoading(false);
+  }
+
+  async function handleResend() {
+    setLoading(true);
+    setError("");
+    try {
+      // The route reissues the token for an account that has not confirmed
+      // yet, so re-registering is the resend.
+      const result = await register();
+      if (result.status === "exists") {
+        setError("This email is already confirmed. Sign in instead.");
+      } else {
+        setResent(true);
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (emailSent) {
@@ -94,10 +127,35 @@ export default function RegisterPage() {
             </p>
             <p className="text-sm sm:text-xs font-medium mb-4">{email}</p>
             <p className="text-sm sm:text-xs text-muted-foreground">
-              Click the link in the email to verify your account and finish setting up your
-              workspace.
+              Click the link in the email to confirm your address and finish setting up your
+              workspace. You can open it on any device.
             </p>
+            {error && (
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20 mt-4 text-left"
+              >
+                {error}
+              </div>
+            )}
             <p className="text-sm sm:text-xs text-muted-foreground mt-6 sm:mt-4">
+              {resent ? (
+                "Sent again. Check your spam folder if it does not arrive."
+              ) : (
+                <>
+                  Didn&apos;t get it?{" "}
+                  <button
+                    type="button"
+                    onClick={handleResend}
+                    disabled={loading}
+                    className="text-primary hover:underline font-medium disabled:opacity-50"
+                  >
+                    {loading ? "Sending…" : "Send it again"}
+                  </button>
+                </>
+              )}
+            </p>
+            <p className="text-sm sm:text-xs text-muted-foreground mt-2">
               Already confirmed?{" "}
               <Link href="/login" className="text-primary hover:underline font-medium">
                 Sign in
@@ -128,8 +186,30 @@ export default function RegisterPage() {
         >
           <div className="space-y-5 sm:space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20"
+              >
                 {error}
+              </div>
+            )}
+            {exists && (
+              <div
+                role="alert"
+                className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20 space-y-1"
+              >
+                <p className="font-medium">An account already uses {email}.</p>
+                <p>
+                  <Link href="/login" className="underline font-medium">
+                    Sign in
+                  </Link>{" "}
+                  instead, or{" "}
+                  <Link href="/forgot-password" className="underline font-medium">
+                    reset your password
+                  </Link>{" "}
+                  if you don&apos;t remember it. If a teammate invited you, use the link in their
+                  email.
+                </p>
               </div>
             )}
 
@@ -220,12 +300,15 @@ export default function RegisterPage() {
             </Button>
           </div>
 
-          <p className="text-sm sm:text-xs text-muted-foreground text-center mt-6 sm:mt-4">
-            Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline font-medium">
-              Sign in
-            </Link>
-          </p>
+          <div className="text-sm sm:text-xs text-muted-foreground text-center mt-6 sm:mt-4 space-y-2">
+            <p>
+              Already have an account?{" "}
+              <Link href="/login" className="text-primary hover:underline font-medium">
+                Sign in
+              </Link>
+            </p>
+            <p>Joining a team that already uses PACE PDM? Ask them to invite you instead.</p>
+          </div>
         </form>
       </div>
 

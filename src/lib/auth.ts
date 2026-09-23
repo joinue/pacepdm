@@ -68,6 +68,12 @@ export async function getCurrentTenantUser() {
   const result = await loadTenantUser();
   if (result.status === "unauthenticated") redirect("/login");
   if (result.status === "no-tenant") redirect("/onboarding");
+  // An invitee whose link signed them in but who left before setting a
+  // password. Verifying an invite token creates a session first, so nothing
+  // else stops them wandering into the dashboard with no way to sign in
+  // again later. Strictly null: a row without the column (migration 064 not
+  // applied) must not send every user to the accept page.
+  if (result.tenantUser.acceptedAt === null) redirect("/accept-invite");
   return result.tenantUser;
 }
 

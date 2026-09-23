@@ -94,6 +94,8 @@ const actionLabels: Record<string, string> = {
   "changelog.withdraw": "Change Log Withdrawn",
   "changelog.attach": "Change Log Attachment",
   "user.invite": "User Invite",
+  "user.invite_resend": "Invitation Resent",
+  "user.invite_accepted": "Invitation Accepted",
   "user.activate": "User Activate",
   "user.deactivate": "User Deactivate",
   "role.create": "Role Create",

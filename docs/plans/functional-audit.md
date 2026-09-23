@@ -628,8 +628,9 @@ roughly this order within an area.
 - JIT adopts a row by email alone, not by provider — _plausible_ takeover if
   Supabase accepts an asserted email outside the provider's domains. Verify.
 - Deactivated members still count as seats and still receive approval requests.
-- No "resend invite". ~~The tenant duplicate-email check is case-sensitive.~~
-  Fixed 2026-09-15, and it was worse than listed: see SEC-1 below.
+- ~~No "resend invite".~~ Done 2026-09-23, see the fourth pass. ~~The tenant
+  duplicate-email check is case-sensitive.~~ Fixed 2026-09-15, and it was
+  worse than listed: see SEC-1 below.
 
 **Approvals and ECOs**
 
@@ -728,7 +729,10 @@ unique index), 1 unreachable (`fileSize` INTEGER behind a 100 MB body limit).
   index — one active membership per account — and refuses to apply while any
   account already breaks the rule, naming them. Still open: an invite to an
   existing account that is _not_ active anywhere is not held for acceptance,
-  so a stranger can pre-claim an address before your admin invites it.
+  so a stranger can pre-claim an address before your admin invites it. Since
+  2026-09-23 that person is at least emailed that they were added, and an
+  _unconfirmed_ pre-claim is simply re-invited (the token is reissued to the
+  mailbox, which the stranger does not hold).
 - **SEC-2:** `next` 16.3.0 → 16.3.5 (critical advisory), plus fflate, vitest
   and transitive updates. `npm audit` reports 0. npm 11.0.0's installer
   crashes on vitest's peer set (`reading 'edgesOut'`); `npx npm@11.6.2`
@@ -1054,10 +1058,77 @@ done 2026-09-15.** No migration.
   reads under tenant-only RLS (ACL-1–3); removing a user nulls them out of the
   audit log and every signature, and the audit viewer shows only 200 rows
   (AUD-1–5); no error monitoring (OPS-2).
-- **Stage 4, first 90 days.** Row caps; onboarding (a teammate who signs up
-  before being invited can never join); MFA, CAPTCHA and rate limits;
-  share-link admin and expiry; storage backups; dead settings and misleading
-  permission copy.
+- **Stage 4, first 90 days.** Row caps; ~~onboarding (a teammate who signs up
+  before being invited can never join)~~ done, see the fourth pass; MFA,
+  CAPTCHA and rate limits; share-link admin and expiry; storage backups; dead
+  settings and misleading permission copy.
+
+## Fourth pass — how people get in (2026-09-23)
+
+Prompted by users saying the invitation and sign-up flows were confusing. Not
+one bug: eleven small gaps whose failure modes all dumped the person on
+`/login` with nothing saying which door they should have used, while the
+admin's Users page said they were already in. Done in code; **migration 064
+must be applied before this deploys**, because every membership insert now
+writes `acceptedAt`.
+
+**Invitations.**
+
+- `tenant_users.acceptedAt` (migration 064) is null from invitation until the
+  invitee sets a password, and is what the Users page, the invite route and the
+  dashboard all read. The migration backfills it from `auth.users.last_sign_in_at`,
+  so accounts that never signed in show as Invited, which is the truth.
+- **Resend exists.** `POST /api/users/[userId]/resend-invite`, and "Resend
+  invitation" in the pending row's menu. Inviting an address that is already
+  pending is also a resend (name and role restated) instead of "already exists".
+  The Users page shows pending rows as **Invited**, with "Invited <date>" where
+  "Joined" used to claim a date the person never joined on; the menu offers
+  "Revoke invitation" rather than "Remove from workspace".
+- **An existing account is emailed.** `alreadyExisted` used to add the row and
+  send nothing. Now the person gets "you've been added — your password works,
+  or set one with this link", and the row is stamped accepted because their
+  account already works. The link is a `recovery` token, which is what
+  `generateLink` hands back for a confirmed account (`lib/invitations.ts`);
+  it also covers an invitee who clicked Continue once and never set a
+  password. The `listUsers` scan is now only on the no-app-email fallback.
+- **No more signed-in-without-a-password limbo.** `getCurrentTenantUser`
+  sends a session whose membership is still pending to `/accept-invite`.
+  Setting a password is what accepts — through `POST /api/auth/set-password`,
+  which both `/accept-invite` and `/reset-password` call, so an invitee who
+  used "Forgot password?" instead is accepted just the same.
+- `/auth/confirm` chooses its copy by where the link lands, not the token
+  type, and an expired link says what to do next for each case. `/login` has
+  an "Invited to a workspace?" line, so an invitee with a dead link no longer
+  creates a workspace of their own.
+
+**Sign-up.** `/register` now posts to `POST /api/auth/register`, which issues
+the token with `generateLink({ type: "signup" })` and sends the email itself
+to `/auth/confirm` — the same treatment invitations and password reset already
+had. That closes three things at once: the link works on any device (no PKCE
+verifier cookie), link scanners cannot consume it (verified on a click), and
+an address that already has an account is told so instead of shown "check
+your email". Re-registering an unconfirmed address reissues the link, which is
+the "Send it again" on the check-your-email screen. From `/login`, "Email not
+confirmed" now offers `POST /api/auth/resend-confirmation` (a recovery token
+landing on onboarding; verifying one confirms the account). Saying "already
+registered" is a deliberate choice over Supabase's enumeration guard, for the
+reason in the route's comment. Supabase's own mailer remains the fallback
+without `RESEND_API_KEY`/`EMAIL_FROM`, with its same-browser limitation.
+
+**Sign-in and after.** `/login` reads the `?error=` that `/auth/callback` had
+been sending it all along. The middleware carries the requested path as
+`?next=`, so a link from a notification email lands on the file after signing
+in. `/onboarding` is a server component that reads the caller's memberships
+first: a deactivated member sees "your access to X is no longer active"
+instead of a Create Workspace form (with a link to create one anyway).
+
+**Not done.** The SSO probe still runs before every password sign-in, and
+"Sign in with SSO" shows for everyone. Neither confused anyone in the reports.
+
+**Verify after deploy:** apply 064, then invite an address you control, wait
+for the link to expire (or just resend), and confirm the row reads Invited
+until the password is set, then Active. Sign up with a second address from a
+laptop and open the email on a phone.
 
 ## Related
 

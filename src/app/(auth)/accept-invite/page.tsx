@@ -3,19 +3,29 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { fetchJson, errorMessage } from "@/lib/api-client";
 
+/**
+ * The last step of an invitation: the link has signed the invitee in, and
+ * this sets their password. Setting it is what marks the invitation accepted
+ * (see /api/auth/set-password), and until then the dashboard sends a signed-in
+ * invitee back here — so leaving early no longer strands someone with a
+ * session and no password.
+ */
 export default function AcceptInvitePage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [noSession, setNoSession] = useState(false);
   const [ready, setReady] = useState(false);
   const supabase = createClient();
   const router = useRouter();
@@ -24,9 +34,7 @@ export default function AcceptInvitePage() {
     let cancelled = false;
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
-      if (!session) {
-        setError("This invitation link is invalid or has expired. Ask your admin to resend.");
-      }
+      if (!session) setNoSession(true);
       setReady(true);
     });
     return () => {
@@ -49,10 +57,10 @@ export default function AcceptInvitePage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.updateUser({ password });
-
-    if (error) {
-      setError(error.message);
+    try {
+      await fetchJson("/api/auth/set-password", { method: "POST", body: { password } });
+    } catch (err) {
+      setError(errorMessage(err));
       setLoading(false);
       return;
     }
@@ -73,73 +81,96 @@ export default function AcceptInvitePage() {
       </div>
 
       <div className="shrink-0 sm:w-full sm:max-w-sm">
-        <form
-          onSubmit={handleAccept}
-          className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5"
-        >
-          <div className="space-y-5 sm:space-y-4">
-            {error && (
-              <div className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20">
-                {error}
-              </div>
-            )}
+        {ready && noSession ? (
+          <div className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5 space-y-4">
+            <div
+              role="alert"
+              className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20 space-y-1"
+            >
+              <p className="font-medium">This invitation link is invalid or has expired.</p>
+              <p>
+                Ask the person who invited you to resend it from their Users page. If you already
+                set a password, sign in instead.
+              </p>
+            </div>
+            <p className="text-sm sm:text-xs text-muted-foreground text-center">
+              <Link href="/login" className="text-primary hover:underline font-medium">
+                Go to sign in
+              </Link>
+            </p>
+          </div>
+        ) : (
+          <form
+            onSubmit={handleAccept}
+            className="w-full px-6 sm:rounded-xl sm:border sm:border-border/50 sm:bg-card sm:p-6 sm:ring-1 sm:ring-foreground/5"
+          >
+            <div className="space-y-5 sm:space-y-4">
+              {error && (
+                <div
+                  role="alert"
+                  className="bg-destructive/10 text-destructive text-sm sm:text-xs p-3 sm:p-2.5 rounded-lg border border-destructive/20"
+                >
+                  {error}
+                </div>
+              )}
 
-            <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="password" className="text-sm sm:text-xs">
-                New Password
-              </Label>
-              <div className="relative">
+              <div className="space-y-2 sm:space-y-1.5">
+                <Label htmlFor="password" className="text-sm sm:text-xs">
+                  New Password
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Min. 6 characters"
+                    className="h-12 sm:h-9 text-base sm:text-sm pr-11 sm:pr-9 rounded-lg"
+                    minLength={6}
+                    required
+                    autoFocus
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    ) : (
+                      <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2 sm:space-y-1.5">
+                <Label htmlFor="confirm" className="text-sm sm:text-xs">
+                  Confirm Password
+                </Label>
                 <Input
-                  id="password"
+                  id="confirm"
                   type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Min. 6 characters"
-                  className="h-12 sm:h-9 text-base sm:text-sm pr-11 sm:pr-9 rounded-lg"
-                  minLength={6}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
                   required
-                  autoFocus
                   autoComplete="new-password"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 sm:right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
-                  tabIndex={-1}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                  ) : (
-                    <Eye className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                  )}
-                </button>
               </div>
-            </div>
 
-            <div className="space-y-2 sm:space-y-1.5">
-              <Label htmlFor="confirm" className="text-sm sm:text-xs">
-                Confirm Password
-              </Label>
-              <Input
-                id="confirm"
-                type={showPassword ? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="h-12 sm:h-9 text-base sm:text-sm rounded-lg"
-                required
-                autoComplete="new-password"
-              />
+              <Button
+                type="submit"
+                className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
+                disabled={loading || !ready}
+              >
+                {loading ? "Setting password..." : "Accept & Continue"}
+              </Button>
             </div>
-
-            <Button
-              type="submit"
-              className="w-full h-12 sm:h-9 text-base sm:text-sm rounded-lg mt-2"
-              disabled={loading || !ready}
-            >
-              {loading ? "Setting password..." : "Accept & Continue"}
-            </Button>
-          </div>
-        </form>
+          </form>
+        )}
       </div>
 
       <div className="h-10 sm:h-8 shrink-0" />

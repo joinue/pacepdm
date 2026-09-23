@@ -96,51 +96,123 @@ interface RenderInviteParams {
   recipientName: string;
   /** Absolute URL of the app page that verifies the invite token. */
   link: string;
+  /**
+   * The recipient already had a PACE PDM account, so they were added rather
+   * than invited: they can sign in with the password they have, and the link
+   * is there in case they do not remember it — or never set one.
+   */
+  existingAccount?: boolean;
 }
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /**
- * The invitation a new teammate receives. Sent by the app rather than by
- * Supabase's mailer, so the link is the one the app built — see
- * src/app/api/users/invite/route.ts for why that matters.
+ * One email around a single call to action. Every account email — the
+ * invitation, the sign-up confirmation — is this layout with different words,
+ * so a change to the chrome lands in all of them.
  */
-export function renderInviteEmail(p: RenderInviteParams): Rendered {
-  const subject = `${p.inviterName} invited you to ${p.tenantName} on PACE PDM`;
-  const firstName = p.recipientName.split(" ")[0] || p.recipientName;
-  const lede = `${p.inviterName} has invited you to join ${p.tenantName} on PACE PDM. Accept the invitation to set your password and sign in.`;
-  const footer =
-    "The link works once. If it has expired, ask the person who invited you to send a new invitation. If you weren't expecting this, you can ignore this email.";
-
+function renderActionEmail(p: {
+  subject: string;
+  kicker: string;
+  heading: string;
+  firstName: string;
+  lede: string;
+  cta: string;
+  link: string;
+  footer: string;
+}): Rendered {
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:32px 0"><tr><td align="center">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;border:1px solid #e5e7eb">
 <tr><td style="padding:28px 32px 8px 32px">
-<p style="margin:0;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(p.tenantName)} &middot; Invitation</p>
-<h1 style="margin:8px 0 0 0;font-size:20px;color:#111827">You're invited to ${escapeHtml(p.tenantName)}</h1>
+<p style="margin:0;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em">${escapeHtml(p.kicker)}</p>
+<h1 style="margin:8px 0 0 0;font-size:20px;color:#111827">${escapeHtml(p.heading)}</h1>
 </td></tr>
 <tr><td style="padding:8px 32px 24px 32px;font-size:14px;color:#374151;line-height:1.55">
-<p style="margin:0 0 12px 0">Hi ${escapeHtml(firstName)},</p>
-<p style="margin:0">${escapeHtml(lede)}</p>
-<p style="margin:24px 0"><a href="${escapeHtml(p.link)}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:500">Accept invitation</a></p>
-<p style="margin:24px 0 0 0;font-size:12px;color:#6b7280">${escapeHtml(footer)}</p>
+<p style="margin:0 0 12px 0">Hi ${escapeHtml(p.firstName)},</p>
+<p style="margin:0">${escapeHtml(p.lede)}</p>
+<p style="margin:24px 0"><a href="${escapeHtml(p.link)}" style="display:inline-block;background:#111827;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:500">${escapeHtml(p.cta)}</a></p>
+<p style="margin:24px 0 0 0;font-size:12px;color:#6b7280">${escapeHtml(p.footer)}</p>
 </td></tr>
 </table>
 </td></tr></table>
 </body></html>`;
 
   const text = [
-    `${p.tenantName} — Invitation`,
+    p.kicker,
     "",
-    `Hi ${firstName},`,
+    `Hi ${p.firstName},`,
     "",
-    lede,
+    p.lede,
     "",
-    `Accept invitation: ${p.link}`,
+    `${p.cta}: ${p.link}`,
     "",
-    footer,
+    p.footer,
   ].join("\n");
 
-  return { subject, html, text };
+  return { subject: p.subject, html, text };
+}
+
+const firstNameOf = (name: string) => name.split(" ")[0] || name;
+
+/**
+ * The invitation a teammate receives. Sent by the app rather than by
+ * Supabase's mailer, so the link is the one the app built — see
+ * src/lib/invitations.ts for why that matters.
+ */
+export function renderInviteEmail(p: RenderInviteParams): Rendered {
+  const firstName = firstNameOf(p.recipientName);
+
+  if (p.existingAccount) {
+    return renderActionEmail({
+      subject: `${p.inviterName} added you to ${p.tenantName} on PACE PDM`,
+      kicker: `${p.tenantName} · Invitation`,
+      heading: `You've been added to ${p.tenantName}`,
+      firstName,
+      lede: `${p.inviterName} has added you to ${p.tenantName} on PACE PDM. You already have a PACE PDM account, so you can sign in with your existing password. If you don't remember it, or never set one, use the link below to choose a password and sign in.`,
+      cta: "Set a password and sign in",
+      link: p.link,
+      footer:
+        "The link works once and expires. If it has expired, sign in with your password, or use “Forgot password?” on the sign-in page. If you weren't expecting this, you can ignore this email.",
+    });
+  }
+
+  return renderActionEmail({
+    subject: `${p.inviterName} invited you to ${p.tenantName} on PACE PDM`,
+    kicker: `${p.tenantName} · Invitation`,
+    heading: `You're invited to ${p.tenantName}`,
+    firstName,
+    lede: `${p.inviterName} has invited you to join ${p.tenantName} on PACE PDM. Accept the invitation to set your password and sign in.`,
+    cta: "Accept invitation",
+    link: p.link,
+    footer:
+      "The link works once and expires. If it has expired, ask the person who invited you to resend the invitation from their Users page. If you weren't expecting this, you can ignore this email.",
+  });
+}
+
+interface RenderSignupConfirmationParams {
+  recipientName: string;
+  /** Absolute URL of the app page that verifies the sign-up token. */
+  link: string;
+}
+
+/**
+ * The email confirmation for a new workspace's creator. Sent by the app for
+ * the same reason as the invitation: Supabase's own confirmation link only
+ * completed in the browser that started the sign-up, and was consumed by
+ * corporate link scanners before the person ever clicked it.
+ */
+export function renderSignupConfirmationEmail(p: RenderSignupConfirmationParams): Rendered {
+  return renderActionEmail({
+    subject: "Confirm your email to set up your PACE PDM workspace",
+    kicker: "PACE PDM · Confirm your email",
+    heading: "Confirm your email address",
+    firstName: firstNameOf(p.recipientName),
+    lede: "Thanks for signing up for PACE PDM. Confirm your email address to finish setting up your workspace. You can open this link on any device.",
+    cta: "Confirm email",
+    link: p.link,
+    footer:
+      "The link works once and expires. If it has expired, sign in and you will be offered a new one. If you didn't sign up for PACE PDM, you can ignore this email.",
+  });
 }

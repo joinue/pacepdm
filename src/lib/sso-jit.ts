@@ -70,7 +70,7 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
   // stay wired up.
   const { data: byEmail } = await db
     .from("tenant_users")
-    .select("id, tenantId")
+    .select("id, tenantId, acceptedAt")
     .eq("tenantId", mapping.tenantId)
     .eq("email", params.email)
     .maybeSingle();
@@ -81,6 +81,9 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
     // does not land, returning success hands back a tenantUserId that is not
     // linked to this auth user, and the next sign-in provisions a second row
     // with none of the history.
+    //
+    // Signing in through the IdP is acceptance: an invitee who never set a
+    // password does not need one now.
     const { error } = await db
       .from("tenant_users")
       .update({
@@ -88,6 +91,7 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
         ssoProvisioned: true,
         lastSsoLoginAt: now,
         updatedAt: now,
+        ...(byEmail.acceptedAt === null ? { acceptedAt: now } : {}),
       })
       .eq("id", byEmail.id);
     if (error) throw new Error(`Could not link the SSO identity to this member: ${error.message}`);
@@ -109,6 +113,8 @@ export async function jitProvisionSsoUser(params: JitParams): Promise<JitResult 
     isActive: true,
     ssoProvisioned: true,
     lastSsoLoginAt: now,
+    // Provisioned on sign-in, so there is nothing left to accept.
+    acceptedAt: now,
     createdAt: now,
     updatedAt: now,
   });

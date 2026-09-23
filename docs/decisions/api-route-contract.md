@@ -84,5 +84,5 @@ Convert whole domains, not individual handlers — the routes within a domain sh
 
 - **A new route starts from the wrapper.** If you find yourself importing `getApiTenantUser` or `getServiceClient` into a route file, stop: you are rebuilding the thing that exists.
 - **`db.unscoped()` requires a comment saying why.** Legitimate uses: resolving a share token before a tenant is known, the SSO domain lookup, cron jobs that sweep across tenants.
-- **Public routes are an explicit list.** `withPublicRoute` exists for login, SSO resolve, health, cron, and the public share viewer. Adding to that list is a review-worthy change.
+- **Public routes are an explicit list.** `withPublicRoute` exists for login, SSO resolve, health, cron, the public share viewer, and the account routes that run before a tenant exists: `auth/register`, `auth/resend-confirmation`, and `auth/set-password` (the last one authorises by the session it finds, and touches only the caller's own membership rows). Adding to that list is a review-worthy change.
 - **Expected failures throw, they do not return.** `throw notFound("File not found")` instead of `return NextResponse.json(...)`. This keeps handler bodies linear and means the error shape is decided in one place.

@@ -19,7 +19,12 @@
  */
 
 import { getServiceClient } from "@/lib/db";
-import { renderInviteEmail, renderNotificationEmail, type EmailType } from "./templates";
+import {
+  renderInviteEmail,
+  renderNotificationEmail,
+  renderSignupConfirmationEmail,
+  type EmailType,
+} from "./templates";
 
 export type EmailPrefs = Record<EmailType, boolean>;
 
@@ -235,6 +240,8 @@ interface SendInviteEmailParams {
   tenantName: string;
   /** Absolute URL of the app page that verifies the invite token. */
   link: string;
+  /** The recipient already had an account; see renderInviteEmail. */
+  existingAccount?: boolean;
   replyTo?: string;
 }
 
@@ -247,17 +254,63 @@ interface SendInviteEmailParams {
  * writes nothing back, so the caller decides what a failed send means.
  */
 export async function sendInviteEmail(params: SendInviteEmailParams): Promise<SendResult> {
+  return sendAccountEmail({
+    to: params.to,
+    rendered: renderInviteEmail({
+      tenantName: params.tenantName,
+      inviterName: params.inviterName,
+      recipientName: params.recipientName,
+      link: params.link,
+      existingAccount: params.existingAccount,
+    }),
+    replyTo: params.replyTo,
+    tags: [
+      { name: "type", value: "invite" },
+      { name: "tenant", value: params.tenantId },
+    ],
+  });
+}
+
+interface SendSignupConfirmationParams {
+  to: string;
+  recipientName: string;
+  /** Absolute URL of the app page that verifies the sign-up token. */
+  link: string;
+}
+
+/**
+ * Send the email confirmation for a new sign-up. There is no tenant yet, so
+ * no preferences, no reply-to, and no tenant tag.
+ */
+export async function sendSignupConfirmationEmail(
+  params: SendSignupConfirmationParams
+): Promise<SendResult> {
+  return sendAccountEmail({
+    to: params.to,
+    rendered: renderSignupConfirmationEmail({
+      recipientName: params.recipientName,
+      link: params.link,
+    }),
+    tags: [{ name: "type", value: "signup" }],
+  });
+}
+
+/**
+ * An email about the recipient's account rather than about something in a
+ * workspace: no preference check, nothing written back.
+ */
+async function sendAccountEmail(params: {
+  to: string;
+  rendered: { subject: string; html: string; text: string };
+  replyTo?: string;
+  tags: { name: string; value: string }[];
+}): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { ok: false, skipped: true, reason: "no-api-key" };
   const from = process.env.EMAIL_FROM;
   if (!from) return { ok: false, skipped: true, reason: "no-from-address" };
 
-  const { subject, html, text } = renderInviteEmail({
-    tenantName: params.tenantName,
-    inviterName: params.inviterName,
-    recipientName: params.recipientName,
-    link: params.link,
-  });
+  const { subject, html, text } = params.rendered;
 
   try {
     const res = await postToResend(apiKey, {
@@ -267,10 +320,7 @@ export async function sendInviteEmail(params: SendInviteEmailParams): Promise<Se
       html,
       text,
       reply_to: params.replyTo,
-      tags: [
-        { name: "type", value: "invite" },
-        { name: "tenant", value: params.tenantId },
-      ],
+      tags: params.tags,
     });
 
     if (!res.ok) {
