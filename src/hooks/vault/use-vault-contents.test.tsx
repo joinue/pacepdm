@@ -12,7 +12,7 @@ vi.mock("@/lib/api-client", () => ({
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-const { useVaultContents } = await import("./use-vault-contents");
+const { useVaultContents, clearPrefetchedListings } = await import("./use-vault-contents");
 
 function file(id: string, overrides: Partial<FileItem> = {}): FileItem {
   return {
@@ -54,6 +54,8 @@ async function mountWithContents(files: FileItem[], folders: FolderItem[] = []) 
 
 beforeEach(() => {
   fetchJson.mockReset();
+  // The prefetch cache is module-level; one test's hover must not feed the next.
+  clearPrefetchedListings();
 });
 
 describe("useVaultContents optimistic edits", () => {
@@ -198,5 +200,106 @@ describe("useVaultContents optimistic edits", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(fetchJson).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Resting the pointer on a folder starts its listing; the click that follows
+ * renders from that request instead of starting another.
+ */
+describe("useVaultContents prefetch", () => {
+  /** Serves each folder its own rows so the test can tell whose listing rendered. */
+  function serveByFolder() {
+    fetchJson.mockImplementation((url: string) => {
+      const id =
+        new URL(url, "http://x").searchParams.get("parentId") ??
+        new URL(url, "http://x").searchParams.get("folderId");
+      return Promise.resolve(
+        url.startsWith("/api/folders") ? [folder(`${id}-sub`)] : [file(`${id}-file`)]
+      );
+    });
+  }
+
+  function mountAt(folderId: string) {
+    return renderHook(({ id }: { id: string }) => useVaultContents("folder", id), {
+      initialProps: { id: folderId },
+    });
+  }
+
+  it("renders a prefetched folder without fetching it again", async () => {
+    serveByFolder();
+    const { result, rerender } = mountAt("root");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+
+    act(() => result.current.prefetchFolder("d1"));
+    expect(fetchJson).toHaveBeenCalledTimes(4);
+
+    rerender({ id: "d1" });
+    await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(["d1-file"]));
+    expect(result.current.folders.map((f) => f.id)).toEqual(["d1-sub"]);
+    // The navigation used the prefetched listing: no fifth or sixth request.
+    expect(fetchJson).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not start a second prefetch for a folder already on its way", async () => {
+    serveByFolder();
+    const { result } = mountAt("root");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.prefetchFolder("d1");
+      result.current.prefetchFolder("d1");
+    });
+    expect(fetchJson).toHaveBeenCalledTimes(4);
+  });
+
+  it("uses a prefetched listing once", async () => {
+    serveByFolder();
+    const { result, rerender } = mountAt("root");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.prefetchFolder("d1"));
+    rerender({ id: "d1" });
+    await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(["d1-file"]));
+    rerender({ id: "root" });
+    await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(["root-file"]));
+
+    // Back into d1: the entry was consumed, so this is a real fetch again.
+    rerender({ id: "d1" });
+    await waitFor(() => expect(fetchJson).toHaveBeenCalledTimes(8));
+  });
+
+  it("drops prefetched listings on refresh, since something changed", async () => {
+    serveByFolder();
+    const { result, rerender } = mountAt("root");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.prefetchFolder("d1"));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(fetchJson).toHaveBeenCalledTimes(6);
+
+    rerender({ id: "d1" });
+    await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(["d1-file"]));
+    // Fetched afresh after the refresh, not served from before it.
+    expect(fetchJson).toHaveBeenCalledTimes(8);
+  });
+
+  it("reports nothing for a prefetch that fails; the navigation reports its own", async () => {
+    serveByFolder();
+    const { result, rerender } = mountAt("root");
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    fetchJson.mockRejectedValueOnce(new Error("boom"));
+    act(() => result.current.prefetchFolder("d1"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    serveByFolder();
+    rerender({ id: "d1" });
+    await waitFor(() => expect(result.current.files.map((f) => f.id)).toEqual(["d1-file"]));
   });
 });

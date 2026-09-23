@@ -22,7 +22,7 @@ import { VaultToolbar } from "./vault-toolbar";
 import { VaultFileList } from "./vault-file-list";
 import { TrashList } from "./trash-list";
 import { VaultDialogs } from "./vault-dialogs";
-import type { MetadataFieldDef } from "./vault-types";
+import type { BreadcrumbEntry, MetadataFieldDef } from "./vault-types";
 
 const UNSAVED_PROPERTIES_PROMPT =
   "This file has property changes that have not been saved. Leave and discard them?";
@@ -30,9 +30,15 @@ const UNSAVED_PROPERTIES_PROMPT =
 export function VaultBrowser({
   rootFolderId,
   metadataFields,
+  initialBreadcrumbs = null,
 }: {
   rootFolderId: string;
   metadataFields: MetadataFieldDef[];
+  /**
+   * The trail for the folder the URL opened on, resolved by the page. Without
+   * it a deep link renders "Vault" and then the real path a round trip later.
+   */
+  initialBreadcrumbs?: BreadcrumbEntry[] | null;
 }) {
   const user = useTenantUser();
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -40,6 +46,7 @@ export function VaultBrowser({
     rootFolderId,
     userId: user.id,
     userFullName: user.fullName,
+    initialBreadcrumbs,
   });
   const { can } = usePermissions();
   const { clearRef } = useNotifications();

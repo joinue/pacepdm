@@ -10,7 +10,7 @@ raw-fetch: 31
 generic-error-toast: 4
 swallowed-error: 6
 token-violations: 6
-component-tests: 19-->
+component-tests: 20-->
 
 > These numbers are verified by `npm run lint:plans`, which recomputes them from
 > the codebase and fails the build if this plan has drifted. If it fails, fix the
@@ -98,7 +98,7 @@ npm run probe:rls                                      # live RLS posture
 | `raw-fetch` in client components      | 112              | **34**                                | 0                                                     |
 | `generic-error-toast`                 | 14               | **4**                                 | 0                                                     |
 | `swallowed-error`                     | 11               | **6**                                 | 0                                                     |
-| Component tests                       | 0                | **17** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
+| Component tests                       | 0                | **18** files (57 stateful components) | the ones with real logic — the 5 named ones are done  |
 | Route segments with `error.tsx`       | 0                | **4** + `global-error`                | every segment that fetches                            |
 
 ### How the ratchet works
@@ -264,6 +264,8 @@ The jsdom project is configured and working. Two reference files now: `src/compo
 - **Writing these found two defects**, both fixed in the same commit: `verifyPassword` accepted any password against a malformed stored hash, and `mention-input` let a queued search re-open a dropdown the user had just dismissed. Neither was reachable through the paths the old tests covered.
 
 Remaining stateful components are lower-value; take them opportunistically when touching one. Skip presentational primitives.
+
+`vault-toolbar.test.tsx` was taken that way, when the breadcrumb trail was redesigned (2026-09-15). It pins the trail's shape (vault icon, folded levels in a menu, parent, current folder as the heading) and that ancestor crumbs are real links: a plain click navigates in place, a modified click is left to the browser. One gotcha from it: a click on an `<a href>` that nothing `preventDefault`s makes jsdom log "Not implemented: navigation to another Document". It is a message, not a failure, but the test that deliberately declines the click adds its own `preventDefault` listener to keep the run quiet.
 
 `item-source-cell.test.tsx` is a useful third pattern alongside the other two: the component is trivial to render but encodes a precedence rule (sub-assembly before part before file) whose breakage is invisible — it sent every sub-assembly line to the parts list for a day. Small pure-decision components inside big files are worth exporting purely so the decision can be pinned. → [`../decisions/testing-strategy.md`](../decisions/testing-strategy.md)
 

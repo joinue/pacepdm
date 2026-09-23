@@ -9,7 +9,7 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Logo } from "./logo";
 import {
-  FolderOpen,
+  Vault,
   FileText,
   ClipboardList,
   Settings,
@@ -54,7 +54,9 @@ const navGroups: NavGroup[] = [
   {
     label: "Library",
     items: [
-      { name: "Vault", href: "/vault", icon: FolderOpen, badge: "vault" },
+      // The vault's own mark, and the root crumb of the vault page. Folders
+      // inside it use the folder icon; the vault as a whole is not one of them.
+      { name: "Vault", href: "/vault", icon: Vault, badge: "vault" },
       { name: "Parts", href: "/parts", icon: Cpu },
       { name: "Vendors", href: "/vendors", icon: Building2 },
       { name: "BOMs", href: "/boms", icon: Package, badge: "boms" },

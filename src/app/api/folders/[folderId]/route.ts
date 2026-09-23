@@ -4,6 +4,7 @@ import { getApiTenantUser, hasPermission, PERMISSIONS } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { z, parseBody, nonEmptyString } from "@/lib/validation";
 import { requireFolderAccess } from "@/lib/folder-access-guards";
+import { getFolderAncestors } from "@/lib/folder-ancestors";
 
 const RenameFolderSchema = z.object({ name: nonEmptyString });
 
@@ -18,35 +19,18 @@ export async function GET(
     const { folderId } = await params;
     const db = getServiceClient();
 
-    const { data: folder } = await db
-      .from("folders")
-      .select("id, name, parentId, path, tenantId")
-      .eq("id", folderId)
-      .single();
-
-    if (!folder || folder.tenantId !== tenantUser.tenantId) {
+    // Tenant-filtered at every step of the walk; a folder outside the tenant
+    // is simply not found. The vault page uses the same walk to render a deep
+    // link's trail with the page.
+    const trail = await getFolderAncestors(db, tenantUser.tenantId, folderId);
+    if (!trail) {
       return NextResponse.json({ error: "Folder not found" }, { status: 404 });
     }
 
     const access = await requireFolderAccess(tenantUser, folderId, "view");
     if (!access.ok) return access.response;
 
-    // Walk up the tree to build ancestor chain
-    const ancestors: { id: string; name: string }[] = [];
-    let current = folder;
-    while (current.parentId) {
-      const { data: parent } = await db
-        .from("folders")
-        .select("id, name, parentId, path, tenantId")
-        .eq("id", current.parentId)
-        .single();
-      if (!parent) break;
-      ancestors.unshift({ id: parent.id, name: parent.parentId ? parent.name : "Vault" });
-      current = parent;
-    }
-    ancestors.push({ id: folder.id, name: folder.name });
-
-    return NextResponse.json({ ...folder, ancestors });
+    return NextResponse.json({ ...trail.folder, ancestors: trail.ancestors });
   } catch (err) {
     console.error("Failed to fetch folder:", err);
     const message = err instanceof Error ? err.message : "Failed to fetch folder";

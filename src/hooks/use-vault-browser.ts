@@ -9,12 +9,15 @@ import { useFileActions } from "@/hooks/vault/use-file-actions";
 import { useBulkActions } from "@/hooks/vault/use-bulk-actions";
 import { useDragAndDrop } from "@/hooks/vault/use-drag-and-drop";
 import { useRealtimeEchoGuard } from "@/hooks/use-realtime-echo-guard";
+import type { BreadcrumbEntry } from "@/components/vault/vault-types";
 
 interface UseVaultBrowserOptions {
   rootFolderId: string;
   userId: string;
   /** Display name for the optimistic "checked out by" label. */
   userFullName: string | null;
+  /** The trail for the folder the URL opened on, when the page resolved it. */
+  initialBreadcrumbs?: BreadcrumbEntry[] | null;
 }
 
 /**
@@ -29,7 +32,12 @@ interface UseVaultBrowserOptions {
  * properties. Each concern now lives in its own file under `src/hooks/vault/`
  * and can be tested in isolation.
  */
-export function useVaultBrowser({ rootFolderId, userId, userFullName }: UseVaultBrowserOptions) {
+export function useVaultBrowser({
+  rootFolderId,
+  userId,
+  userFullName,
+  initialBreadcrumbs,
+}: UseVaultBrowserOptions) {
   // Top-level dialog visibility — these belong to the page, not to any
   // single sub-hook, so they live here.
   const [showCreateFolder, setShowCreateFolder] = useState(false);
@@ -37,7 +45,7 @@ export function useVaultBrowser({ rootFolderId, userId, userFullName }: UseVault
   const [checkInFileId, setCheckInFileId] = useState<string | null>(null);
 
   // Navigation: current folder, breadcrumbs, selected file, view mode, URL sync
-  const navigation = useVaultNavigation(rootFolderId);
+  const navigation = useVaultNavigation(rootFolderId, { initialBreadcrumbs });
 
   // Contents: load folders + files for the current view (folder or flat).
   // The hook owns the "reload on source change" effect internally, so the
@@ -133,6 +141,7 @@ export function useVaultBrowser({ rootFolderId, userId, userFullName }: UseVault
     loading: contents.loading,
     refresh,
     refreshFromRemote,
+    prefetchFolder: contents.prefetchFolder,
 
     // Filter
     searchQuery: filter.searchQuery,

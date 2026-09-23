@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { VaultFileList } from "./vault-file-list";
 import type { FileItem } from "./vault-types";
@@ -80,6 +80,7 @@ function makeVault(overrides: VaultOverrides = {}) {
     toggleSelectAll: vi.fn(),
     navigateToFolder: vi.fn(),
     navigateToBreadcrumb: vi.fn(),
+    prefetchFolder: vi.fn(),
     refresh: vi.fn(),
     handleDownload: vi.fn(),
     handleCheckout: vi.fn(),
@@ -421,6 +422,39 @@ describe("VaultFileList — navigation", () => {
     const vault = renderList({ folders: [folder] });
     await user.click(table().getByText("Drawings"));
     expect(vault.navigateToFolder).toHaveBeenCalledWith(folder);
+  });
+
+  /**
+   * A folder's listing starts while the pointer rests on its row, so the click
+   * renders from a request already in flight. Passing over a row is not resting
+   * on it.
+   */
+  it("starts a folder's listing when the pointer rests on its row", async () => {
+    const user = userEvent.setup();
+    const folder = { id: "d9", name: "Drawings", _count: { files: 4, children: 1 } };
+    const vault = renderList({ folders: [folder] });
+
+    await user.hover(table().getByText("Drawings"));
+    await waitFor(() => expect(vault.prefetchFolder).toHaveBeenCalledWith("d9"));
+  });
+
+  it("does not start a listing for a row the pointer only passed over", async () => {
+    const user = userEvent.setup();
+    const folder = { id: "d9", name: "Drawings", _count: { files: 4, children: 1 } };
+    const vault = renderList({ folders: [folder] });
+
+    const cell = table().getByText("Drawings");
+    await user.hover(cell);
+    await user.unhover(cell);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(vault.prefetchFolder).not.toHaveBeenCalled();
+  });
+
+  it("starts the parent's listing when the pointer rests on the parent row", async () => {
+    const user = userEvent.setup();
+    const vault = renderList({ breadcrumbs, filteredFiles: [makeFile()] });
+    await user.hover(within(dataRows()[0]).getByText(".."));
+    await waitFor(() => expect(vault.prefetchFolder).toHaveBeenCalledWith("d1"));
   });
 
   it("summarises a folder's contents", () => {

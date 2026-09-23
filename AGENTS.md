@@ -80,6 +80,9 @@ The app's slowness was never query time. Full rationale in [`docs/decisions/perc
 - **Background tabs do not poll.** Guard any `setInterval` refresh on `document.visibilityState === "visible"`.
 - **Every fetching segment gets a `loading.tsx` shaped like the page it replaces.** Compose from [`src/components/ui/page-skeleton.tsx`](src/components/ui/page-skeleton.tsx); do not fall back to the generic dashboard skeleton.
 - **Heavy viewers load through `next/dynamic`.** Import `cad-viewer-lazy`, never `cad-viewer` — a static import from an eagerly-rendered component ships to everyone.
+- **Query-string state a client component owns is written with `window.history.replaceState`, not `router.replace`.** Every dashboard page is dynamic, so a router navigation to the same page re-renders it on the server for props that did not change. The vault is the reference.
+- **If the page knows what its client components fetch on mount, it preloads it.** `preload(url, { as: "fetch", crossOrigin: "anonymous" })` with the exact URL the hook fetches; `crossOrigin` is required or the browser will not pair the two. See `src/app/(dashboard)/vault/page.tsx`.
+- **Prefetch on hover intent, never on `mouseenter`.** `useHoverIntent` waits for the pointer to rest; invalidate the cache on every mutation, not just the ones that touch the current view.
 
 ## Permissions
 

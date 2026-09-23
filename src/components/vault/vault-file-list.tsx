@@ -43,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
+import { useHoverIntent } from "@/hooks/use-hover-intent";
 import type { FileItem } from "./vault-types";
 import { formatFileSize } from "./vault-types";
 import { FolderAccessDialog } from "./folder-access-dialog";
@@ -362,6 +363,15 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
     vault;
   const [accessFolder, setAccessFolder] = useState<{ id: string; name: string } | null>(null);
 
+  // A folder's listing starts when the pointer rests on its row, so the click
+  // that opens it renders from a request already in flight.
+  const hover = useHoverIntent(vault.prefetchFolder);
+  const prefetchOn = (folderId: string) => ({
+    onPointerEnter: () => hover.begin(folderId),
+    onPointerLeave: hover.cancel,
+    onPointerDown: () => hover.now(folderId),
+  });
+
   const isFlat = vault.viewMode !== "folder";
   // When inside a subfolder, expose the parent as a ".." row so users can
   // navigate up and drag files out by dropping onto it.
@@ -410,6 +420,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                 <div
                   className={`flex items-center p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-info/10 dark:hover:bg-info/20 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
                   onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
+                  {...prefetchOn(parentFolder.id)}
                   onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
                   onDragLeave={vault.handleDragLeave}
                   onDrop={(e) => vault.handleDrop(e, parentFolder.id)}
@@ -434,6 +445,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                   key={folder.id}
                   className={`flex items-center justify-between p-3 rounded-lg cursor-pointer bg-muted/30 hover:bg-info/10 dark:hover:bg-info/20 ${dropTargetId === folder.id ? "ring-2 ring-primary bg-primary/10" : ""}`}
                   onClick={() => vault.navigateToFolder(folder)}
+                  {...prefetchOn(folder.id)}
                   onDragOver={(e) => vault.handleDragOver(e, folder.id)}
                   onDragLeave={vault.handleDragLeave}
                   onDrop={(e) => vault.handleDrop(e, folder.id)}
@@ -560,6 +572,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                     <TableRow
                       className={`cursor-pointer hover:bg-info/10 dark:hover:bg-info/20 bg-muted/30 ${dropTargetId === parentFolder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
                       onClick={() => vault.navigateToBreadcrumb(vault.breadcrumbs.length - 2)}
+                      {...prefetchOn(parentFolder.id)}
                       onDragOver={(e) => vault.handleDragOver(e, parentFolder.id)}
                       onDragLeave={vault.handleDragLeave}
                       onDrop={(e) => vault.handleDrop(e, parentFolder.id)}
@@ -594,6 +607,7 @@ export function VaultFileList({ vault, userId }: VaultFileListProps) {
                       key={folder.id}
                       className={`cursor-pointer hover:bg-info/10 dark:hover:bg-info/20 bg-muted/30 ${dropTargetId === folder.id ? "ring-2 ring-primary ring-inset bg-primary/10" : ""}`}
                       onClick={() => vault.navigateToFolder(folder)}
+                      {...prefetchOn(folder.id)}
                       onDragOver={(e) => vault.handleDragOver(e, folder.id)}
                       onDragLeave={vault.handleDragLeave}
                       onDrop={(e) => vault.handleDrop(e, folder.id)}

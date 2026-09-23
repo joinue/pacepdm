@@ -3,7 +3,6 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 
 const nav = vi.hoisted(() => ({
   params: new URLSearchParams(),
-  replace: vi.fn(),
 }));
 
 /** The address bar changing, as the router would report it. */
@@ -12,9 +11,12 @@ function urlBecomes(query: string) {
 }
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: nav.replace, push: vi.fn() }),
   useSearchParams: () => nav.params,
 }));
+
+// The vault writes the URL with `history.replaceState`, not `router.replace`:
+// a router navigation re-renders the dynamic page on the server for nothing.
+let replaceState: ReturnType<typeof vi.spyOn>;
 
 const fetchJson = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api-client", () => ({
@@ -23,18 +25,19 @@ vi.mock("@/lib/api-client", () => ({
   errorMessage: (e: unknown) => String(e),
 }));
 
-import { useVaultNavigation } from "./use-vault-navigation";
+import { useVaultNavigation, type VaultNavigationOptions } from "./use-vault-navigation";
 
 const ROOT = "root";
 
-function mount(query = "") {
+function mount(query = "", options?: VaultNavigationOptions) {
   nav.params = new URLSearchParams(query);
-  return renderHook(() => useVaultNavigation(ROOT));
+  return renderHook(() => useVaultNavigation(ROOT, options));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   fetchJson.mockResolvedValue({ ancestors: [] });
+  replaceState = vi.spyOn(window.history, "replaceState");
 });
 
 /**
@@ -54,7 +57,7 @@ describe("useVaultNavigation — leaving a file with unsaved edits", () => {
     expect(result.current.selectedFile).toBe("f1");
     expect(result.current.viewMode).toBe("folder");
     expect(result.current.currentFolderId).toBe(ROOT);
-    expect(nav.replace).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
   });
 
   it("leaves when the guard agrees", () => {
@@ -158,7 +161,7 @@ describe("useVaultNavigation — following the URL", () => {
 
     act(() => result.current.navigateToFolder({ id: "A", name: "A" }));
     act(() => result.current.navigateToFolder({ id: "B", name: "B" }));
-    expect(nav.replace).toHaveBeenLastCalledWith("/vault?folderId=B", { scroll: false });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/vault?folderId=B");
 
     // The router reports the first write after the second was made.
     urlBecomes("folderId=A");
@@ -186,7 +189,7 @@ describe("useVaultNavigation — following the URL", () => {
 
     expect(guard).toHaveBeenCalledTimes(1);
     expect(result.current.selectedFile).toBe("f1");
-    expect(nav.replace).toHaveBeenLastCalledWith("/vault?fileId=f1", { scroll: false });
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/vault?fileId=f1");
 
     // The restored URL coming back is recognised, not treated as a new navigation.
     urlBecomes("fileId=f1");
@@ -202,5 +205,51 @@ describe("useVaultNavigation — following the URL", () => {
     urlBecomes("fileId=f2");
     rerender();
     await waitFor(() => expect(result.current.selectedFile).toBe("f2"));
+  });
+});
+
+/**
+ * The page resolves a deep link's trail on the server, so the heading renders
+ * with the page rather than as "Vault" and then the real path a round trip
+ * later. The trail is only trusted when it is for the folder the URL names.
+ */
+describe("useVaultNavigation — the trail the page resolved", () => {
+  const trailToB = [
+    { id: ROOT, name: "Vault" },
+    { id: "A", name: "Assemblies" },
+    { id: "B", name: "Brackets" },
+  ];
+
+  it("starts from it and does not fetch it again", () => {
+    const { result } = mount("folderId=B", { initialBreadcrumbs: trailToB });
+    expect(result.current.breadcrumbs).toEqual(trailToB);
+
+    act(() => {
+      result.current.hydrateBreadcrumbsFromDeepLink();
+    });
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("ignores a trail for a different folder and fetches the right one", () => {
+    const { result } = mount("folderId=C", { initialBreadcrumbs: trailToB });
+    expect(result.current.breadcrumbs).toEqual([{ id: ROOT, name: "Vault" }]);
+
+    act(() => {
+      result.current.hydrateBreadcrumbsFromDeepLink();
+    });
+    expect(fetchJson).toHaveBeenCalledWith("/api/folders/C", expect.anything());
+  });
+
+  it("ignores a trail behind a flat view", () => {
+    const { result } = mount("view=checkouts", { initialBreadcrumbs: trailToB });
+    expect(result.current.breadcrumbs).toEqual([{ id: ROOT, name: "Vault" }]);
+  });
+
+  it("navigates up it like any other trail", () => {
+    const { result } = mount("folderId=B", { initialBreadcrumbs: trailToB });
+    act(() => result.current.navigateToBreadcrumb(1));
+    expect(result.current.currentFolderId).toBe("A");
+    expect(result.current.breadcrumbs.map((b) => b.id)).toEqual([ROOT, "A"]);
+    expect(replaceState).toHaveBeenLastCalledWith(null, "", "/vault?folderId=A");
   });
 });

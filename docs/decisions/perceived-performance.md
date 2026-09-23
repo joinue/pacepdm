@@ -167,6 +167,72 @@ never `cad-viewer` directly.
 through `next/dynamic`. Check what a route actually ships before assuming it is
 tree-shaken — a static import from an eagerly-rendered component is not.
 
+## 6. A query-string change inside a page is a history write, not a navigation
+
+The vault keeps its location (folder, open file, flat view) in the query
+string and wrote it with `router.replace`. Every dashboard route is dynamic,
+so the router treated each of those as a navigation to a new URL and asked the
+server for the page again: the session resolved again (§1), the page's own
+queries run again, an RSC payload streamed back, all to produce props that had
+not changed. Opening a folder cost that round trip on top of the listing it
+actually needed.
+
+[`use-vault-navigation.ts`](../../src/hooks/vault/use-vault-navigation.ts)
+now writes the URL with `window.history.replaceState`. Next's router patches
+that method, so `useSearchParams` still follows the change and the vault's
+"follow the URL" effect still sees it; the page simply is not re-rendered.
+
+**Rule:** state that lives in the query string and is owned by a client
+component on the page is written with `history.replaceState` (or `pushState`
+when the user should be able to go back to it). `router.push` and
+`router.replace` are for going somewhere else.
+
+## 7. The first requests start from the document
+
+A client component that fetches on mount asks for its data only after the
+bundle has loaded, hydrated and run its mount effect. On a hard load of the
+vault (a bookmark, a notification link, a refresh) that was the longest silent
+stretch on the page.
+
+The vault page now emits `preload(url, { as: "fetch", crossOrigin: "anonymous" })`
+for every request the browser will make on mount, using the same
+[`initialVaultRequests`](../../src/components/vault/vault-location.ts) the
+page derives from the URL. The browser starts them when the document arrives,
+and the mount effect's identical `fetch` is paired with the response already
+on its way. Two details matter: the URL has to match the fetched one character
+for character, and `crossOrigin` has to be set, because `fetch()` runs in CORS
+mode and a preload without it is a different request the browser will not
+reuse.
+
+Alongside this, the page resolves a deep link's breadcrumb trail on the server
+([`folder-ancestors.ts`](../../src/lib/folder-ancestors.ts), shared with
+`GET /api/folders/[id]`) and hands it to the client as its initial trail, so
+the heading no longer renders as "Vault" and then snaps to the real path a
+round trip later.
+
+**Rule:** if a page knows from the URL what its client components will fetch
+on mount, preload it. Keep the list of URLs in one place the tests can pin.
+
+## 8. Fetch the next folder while the pointer is still on the row
+
+A folder's listing costs two requests, each of which resolves the session
+before doing anything (§1). [`use-vault-contents.ts`](../../src/hooks/vault/use-vault-contents.ts)
+starts them when the pointer rests on a folder row, the parent row or a
+breadcrumb for `HOVER_INTENT_MS`, or the moment it presses down (touch has no
+hover). The navigation that follows finds the listing already on its way and
+renders without the dimmed in-between state.
+
+The cache is deliberately conservative: an entry is used once, expires after
+`PREFETCH_TTL_MS`, and every `refresh` (this tab's mutations and realtime
+changes from others alike) drops all of them, because a move or a delete can
+change a folder that is not the one on screen. A failed prefetch shows
+nothing; the navigation fetches again and reports its own failure.
+
+**Rule:** use [`useHoverIntent`](../../src/hooks/use-hover-intent.ts) rather
+than firing on `mouseenter`, so sweeping the pointer down a list does not
+request every row. Invalidate on every mutation, not just the ones that touch
+the current view.
+
 ## Not done, and the honest reason
 
 `cacheComponents: true` + `partialPrefetching: true` (Next 16.3) is the real

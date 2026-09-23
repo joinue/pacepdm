@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { fetchJson, errorMessage, isAbortError } from "@/lib/api-client";
 import type { FolderItem, FileItem } from "@/components/vault/vault-types";
-import type { VaultViewMode } from "./use-vault-navigation";
+import type { VaultViewMode } from "@/components/vault/vault-location";
 
 /**
  * Identifies the source the contents hook should fetch from. `folder` is
@@ -22,6 +22,64 @@ function sourceFromViewMode(viewMode: VaultViewMode, folderId: string): VaultCon
   // firing a pointless folder listing behind the trash view.
   if (viewMode === "trash") return { kind: "external" };
   return { kind: "folder", folderId };
+}
+
+type FolderListing = { folders: FolderItem[]; files: FileItem[] };
+
+function fetchFolderListing(folderId: string, signal?: AbortSignal): Promise<FolderListing> {
+  return Promise.all([
+    fetchJson<FolderItem[]>(`/api/folders?parentId=${folderId}`, { signal }),
+    fetchJson<FileItem[]>(`/api/files?folderId=${folderId}`, { signal }),
+  ]).then(([foldersData, filesData]) => ({
+    folders: Array.isArray(foldersData) ? foldersData : [],
+    files: Array.isArray(filesData) ? filesData : [],
+  }));
+}
+
+// ─── Listings fetched ahead of a navigation ─────────────────────────────────
+//
+// Resting the pointer on a folder row, the parent row or a breadcrumb starts
+// that folder's listing; the click that follows finds it here and renders
+// without waiting on a round trip.
+//
+// Entries are taken once and expire quickly, so a listing is never shown long
+// after it was fetched. Every `refresh` (this tab's own mutations and realtime
+// changes from others alike) drops them all: a move or a delete changes a
+// folder that is not the one on screen.
+//
+// Module-level rather than per hook instance because the vault renders one
+// browser and both the list rows and the toolbar need to reach it.
+
+/** How long a prefetched listing may wait for its click. */
+export const PREFETCH_TTL_MS = 15_000;
+const PREFETCH_LIMIT = 24;
+const prefetched = new Map<string, { at: number; listing: Promise<FolderListing> }>();
+
+/** Start a folder's listing ahead of the navigation into it. Idempotent while fresh. */
+export function prefetchFolderListing(folderId: string): void {
+  const existing = prefetched.get(folderId);
+  if (existing && Date.now() - existing.at < PREFETCH_TTL_MS) return;
+  if (prefetched.size >= PREFETCH_LIMIT) {
+    const oldest = prefetched.keys().next().value;
+    if (oldest !== undefined) prefetched.delete(oldest);
+  }
+  const listing = fetchFolderListing(folderId);
+  prefetched.set(folderId, { at: Date.now(), listing });
+  // A failed prefetch is not something the user did, so nothing is shown for
+  // it. The navigation that follows fetches again and reports its own failure.
+  listing.catch(() => prefetched.delete(folderId));
+}
+
+/** Take a fresh prefetched listing for `folderId`, if there is one. One use per entry. */
+function takePrefetchedListing(folderId: string): Promise<FolderListing> | null {
+  const entry = prefetched.get(folderId);
+  if (!entry) return null;
+  prefetched.delete(folderId);
+  return Date.now() - entry.at < PREFETCH_TTL_MS ? entry.listing : null;
+}
+
+export function clearPrefetchedListings(): void {
+  prefetched.clear();
 }
 
 /**
@@ -62,14 +120,7 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
       return { folders: [] as FolderItem[], files: [] as FileItem[] };
     }
     if (source.kind === "folder") {
-      const [foldersData, filesData] = await Promise.all([
-        fetchJson<FolderItem[]>(`/api/folders?parentId=${source.folderId}`, { signal }),
-        fetchJson<FileItem[]>(`/api/files?folderId=${source.folderId}`, { signal }),
-      ]);
-      return {
-        folders: Array.isArray(foldersData) ? foldersData : [],
-        files: Array.isArray(filesData) ? filesData : [],
-      };
+      return fetchFolderListing(source.folderId, signal);
     }
     // Flat mode — no folder tree, only the filtered file list.
     const filesData = await fetchJson<FileItem[]>("/api/files?checkedOutByMe=1", { signal });
@@ -80,21 +131,28 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
   }, []);
 
   const load = useCallback(
-    async (source: VaultContentSource) => {
+    async (source: VaultContentSource, options: { bypassPrefetch?: boolean } = {}) => {
       loadAbortRef.current?.abort();
       const controller = new AbortController();
       loadAbortRef.current = controller;
 
-      setLoading(true);
+      // A listing already on its way (or here) skips the dimmed in-between
+      // state; the rows simply change.
+      const ahead =
+        source.kind === "folder" && !options.bypassPrefetch
+          ? takePrefetchedListing(source.folderId)
+          : null;
+      if (!ahead) setLoading(true);
       try {
-        const { folders: nextFolders, files: nextFiles } = await fetchForSource(
-          source,
-          controller.signal
-        );
+        const { folders: nextFolders, files: nextFiles } = await (ahead ??
+          fetchForSource(source, controller.signal));
+        // A prefetched listing is not tied to the abort signal, so a
+        // navigation that has already moved on is checked for by hand.
+        if (controller.signal.aborted) return;
         commitFolders(nextFolders);
         commitFiles(nextFiles);
       } catch (err) {
-        if (isAbortError(err)) return;
+        if (isAbortError(err) || controller.signal.aborted) return;
         toast.error(errorMessage(err) || "Failed to load vault contents");
       } finally {
         // Only clear loading if this is still the current request — guards
@@ -105,13 +163,14 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
     [fetchForSource, commitFiles, commitFolders]
   );
 
-  // `refresh` always re-loads the current source — callers after mutations
-  // (upload, rename, check-in, …) use this and don't need to know whether
-  // we're in folder mode or a flat view.
-  const refresh = useCallback(
-    () => load(sourceFromViewMode(viewMode, currentFolderId)),
-    [load, viewMode, currentFolderId]
-  );
+  // `refresh` always re-loads the current source. Callers after mutations
+  // (upload, rename, check-in, ...) use this and don't need to know whether
+  // we're in folder mode or a flat view. Something changed, so anything
+  // fetched ahead of time may be wrong now and is dropped.
+  const refresh = useCallback(() => {
+    clearPrefetchedListings();
+    return load(sourceFromViewMode(viewMode, currentFolderId), { bypassPrefetch: true });
+  }, [load, viewMode, currentFolderId]);
 
   // ─── Optimistic edits ────────────────────────────────────────────────────
   //
@@ -199,6 +258,7 @@ export function useVaultContents(viewMode: VaultViewMode, currentFolderId: strin
     files,
     loading,
     refresh,
+    prefetchFolder: prefetchFolderListing,
     patchFile,
     removeFile,
     patchFolder,

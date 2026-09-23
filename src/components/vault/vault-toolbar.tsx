@@ -5,11 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Breadcrumb,
+  BreadcrumbEllipsis,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -27,10 +34,15 @@ import {
   Search,
   LogOut,
   ArrowLeft,
+  Vault as VaultIcon,
 } from "lucide-react";
 import type { VaultBrowserState } from "@/hooks/use-vault-browser";
+import { useHoverIntent } from "@/hooks/use-hover-intent";
 import { usePermissions } from "@/hooks/use-permissions";
 import { PERMISSIONS } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
+import { VAULT_ROOT_NAME, vaultHref } from "./vault-location";
+import type { BreadcrumbEntry } from "./vault-types";
 
 interface VaultToolbarProps {
   vault: VaultBrowserState;
@@ -210,75 +222,150 @@ export function VaultToolbar({ vault }: VaultToolbarProps) {
 /**
  * The vault's page heading *is* its breadcrumb trail.
  *
- * The last crumb — the folder you're actually in — renders as the `<h1>`,
- * prefixed with the same folder icon the listing rows use, and the ancestors
- * lead into it as muted links at the same type size. At the vault root there
- * is a single crumb, so the heading is just "Vault". A separate static title
- * above the trail would only repeat what the last crumb already says.
+ * The trail always has the same shape: the vault, then whatever is collapsed,
+ * then the folder above the current one, then the current folder as the
+ * `<h1>`. At the root there is a single crumb, "Vault", with the vault's own
+ * mark (the icon the sidebar uses). Below the root the word goes and the icon
+ * carries it, so the folder names get the width. Everything between the vault
+ * and the parent folds into a "…" menu, one click from any level. A separate
+ * static title above the trail would only repeat what the last crumb says.
+ *
+ * Ancestor crumbs are real links to the folder's URL, so they open in a new
+ * tab and take keyboard focus; a plain click navigates in place, through the
+ * unsaved-edits check. Resting the pointer on one starts that folder's
+ * listing ahead of the click.
  */
 function VaultBreadcrumbs({ vault }: VaultToolbarProps) {
-  // On narrow screens with deep nesting, collapse middle entries to "…" so the
-  // trail stays on one line. Always show root + last 2 levels at minimum. The
-  // threshold is one tighter than a body-copy breadcrumb's would be: these
-  // crumbs are heading-sized, so they run out of width sooner.
   const items = vault.breadcrumbs;
-  const collapsed = items.length > 3;
-  const visible = collapsed
-    ? [
-        { ...items[0], _index: 0 },
-        { id: "ellipsis", name: "…", _index: -1 },
-        { ...items[items.length - 2], _index: items.length - 2 },
-        { ...items[items.length - 1], _index: items.length - 1 },
-      ]
-    : items.map((e, i) => ({ ...e, _index: i }));
+  const root = items[0];
+  const current = items[items.length - 1];
+  const parent = items.length > 2 ? items[items.length - 2] : null;
+  // Everything between the root and the parent. Empty until the trail is four
+  // deep; then the levels in between fold into the menu.
+  const collapsed = items.slice(1, -2);
+  const hover = useHoverIntent(vault.prefetchFolder);
+
+  const hrefFor = (entry: BreadcrumbEntry) =>
+    vaultHref({ viewMode: "folder", folderId: entry.id, fileId: null }, root.id);
+
+  // A plain click navigates in place. A modified or middle click is the
+  // browser's (new tab, new window), and the link's real href takes it there.
+  const navigateOnClick = (index: number) => (e: React.MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    vault.navigateToBreadcrumb(index);
+  };
+
+  const dropTarget = (entry: BreadcrumbEntry) => ({
+    onDragOver: (e: React.DragEvent) => vault.handleDragOver(e, entry.id),
+    onDragLeave: vault.handleDragLeave,
+    onDrop: (e: React.DragEvent) => vault.handleDrop(e, entry.id),
+    className: cn("min-w-0", vault.dropTargetId === entry.id && "rounded px-1 ring-2 ring-primary"),
+  });
+  const prefetchOn = (entry: BreadcrumbEntry) => ({
+    onPointerEnter: () => hover.begin(entry.id),
+    onPointerLeave: hover.cancel,
+  });
+  const separator = <BreadcrumbSeparator className="shrink-0 [&>svg]:size-5" />;
+
+  if (items.length <= 1) {
+    return (
+      <Breadcrumb className="min-w-0">
+        <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xl sm:text-2xl">
+          <BreadcrumbItem className="min-w-0">
+            <h1
+              aria-current="page"
+              className="flex min-w-0 items-center gap-2 font-bold text-foreground"
+            >
+              <VaultIcon className="size-5 shrink-0 sm:size-6" aria-hidden="true" />
+              <span className="truncate">{current.name}</span>
+            </h1>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+    );
+  }
 
   return (
     <Breadcrumb className="min-w-0">
       <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xl sm:text-2xl">
-        {visible.map((entry, i) => {
-          const isEllipsis = entry.id === "ellipsis";
-          const isCurrent = i === visible.length - 1;
-          return (
-            <React.Fragment key={`${entry.id}-${i}`}>
-              {i > 0 && <BreadcrumbSeparator className="shrink-0 [&>svg]:size-5" />}
-              <BreadcrumbItem
-                onDragOver={(e) => {
-                  if (!isEllipsis && entry.id !== vault.currentFolderId)
-                    vault.handleDragOver(e, entry.id);
-                }}
-                onDragLeave={vault.handleDragLeave}
-                onDrop={(e) => {
-                  if (!isEllipsis && entry.id !== vault.currentFolderId)
-                    vault.handleDrop(e, entry.id);
-                }}
-                className={`${vault.dropTargetId === entry.id ? "ring-2 ring-primary rounded px-1" : ""} min-w-0`}
+        {/* The vault itself, as its icon alone; named for the tooltip and
+            assistive tech. */}
+        <BreadcrumbItem {...dropTarget(root)}>
+          <BreadcrumbLink
+            href={hrefFor(root)}
+            onClick={navigateOnClick(0)}
+            aria-label={VAULT_ROOT_NAME}
+            title={VAULT_ROOT_NAME}
+            className="flex items-center text-muted-foreground"
+            {...prefetchOn(root)}
+          >
+            <VaultIcon className="size-5 sm:size-6" aria-hidden="true" />
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+
+        {collapsed.length > 0 && (
+          <>
+            {separator}
+            <BreadcrumbItem className="shrink-0">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={`${collapsed.length} more ${collapsed.length === 1 ? "folder" : "folders"}`}
+                      title="Folders in between"
+                      className="flex items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <BreadcrumbEllipsis className="size-6 [&>svg]:size-5" />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent align="start">
+                  {collapsed.map((entry, i) => (
+                    <DropdownMenuItem
+                      key={entry.id}
+                      onClick={() => vault.navigateToBreadcrumb(i + 1)}
+                      {...prefetchOn(entry)}
+                    >
+                      <FolderOpen className="text-info" aria-hidden="true" />
+                      <span className="truncate">{entry.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </BreadcrumbItem>
+          </>
+        )}
+
+        {parent && (
+          <>
+            {separator}
+            <BreadcrumbItem {...dropTarget(parent)}>
+              <BreadcrumbLink
+                href={hrefFor(parent)}
+                onClick={navigateOnClick(items.length - 2)}
+                className="block max-w-24 truncate font-normal text-muted-foreground sm:max-w-40"
+                title={parent.name}
+                {...prefetchOn(parent)}
               >
-                {isEllipsis ? (
-                  <span className="px-1 text-muted-foreground">…</span>
-                ) : isCurrent ? (
-                  <h1
-                    aria-current="page"
-                    className="flex min-w-0 items-center gap-2 font-bold text-foreground"
-                    title={entry.name}
-                  >
-                    {/* No icon at the root: "Vault" is the whole vault, not a
-                        folder inside it. */}
-                    {i > 0 && <FolderOpen className="w-5 h-5 shrink-0 text-info" />}
-                    <span className="truncate">{entry.name}</span>
-                  </h1>
-                ) : (
-                  <BreadcrumbLink
-                    onClick={() => vault.navigateToBreadcrumb(entry._index)}
-                    className="block max-w-24 truncate cursor-pointer font-normal text-muted-foreground sm:max-w-40"
-                    title={entry.name}
-                  >
-                    {entry.name}
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-            </React.Fragment>
-          );
-        })}
+                {parent.name}
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+          </>
+        )}
+
+        {separator}
+        <BreadcrumbItem className="min-w-0">
+          <h1
+            aria-current="page"
+            className="flex min-w-0 items-center gap-2 font-bold text-foreground"
+            title={current.name}
+          >
+            <FolderOpen className="size-5 shrink-0 text-info" aria-hidden="true" />
+            <span className="truncate">{current.name}</span>
+          </h1>
+        </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
   );
